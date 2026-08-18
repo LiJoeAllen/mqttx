@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import type { MqttMessage } from '../../types/mqtt'
+import { prettyJson, isJson, truncate } from '../../utils/format'
 
 const props = defineProps<{
   messages: MqttMessage[]
@@ -50,11 +51,6 @@ function onScroll() {
 
 // ─── Payload Format Helpers ────────────────────────────────────
 
-function isJson(str: string): boolean {
-  try { JSON.parse(str); return true }
-  catch { return false }
-}
-
 function getEffectiveFormat(msg: MqttMessage): string {
   const fmt = messageFormats.value[msg.id] || 'auto'
   if (fmt === 'auto') return isJson(msg.payload) ? 'json' : 'plain'
@@ -64,18 +60,11 @@ function getEffectiveFormat(msg: MqttMessage): string {
 function formatPayload(msg: MqttMessage): string {
   const fmt = getEffectiveFormat(msg)
   switch (fmt) {
-    case 'json':
-      try {
-        const parsed = JSON.parse(msg.payload)
-        return JSON.stringify(parsed, null, 2)
-      } catch { return msg.payload }
-    case 'hex':
-      return bytesToHex(new TextEncoder().encode(msg.payload))
-    case 'base64':
-      return btoa(msg.payload)
+    case 'json': return prettyJson(msg.payload)
+    case 'hex': return bytesToHex(new TextEncoder().encode(msg.payload))
+    case 'base64': return btoa(msg.payload)
     case 'plain':
-    default:
-      return msg.payload
+    default: return msg.payload
   }
 }
 
@@ -180,7 +169,7 @@ function formatTime(ts: number): string {
           v-if="expandedPayloads.has(msg.id)"
           :class="['payload-full', { 'is-json': getEffectiveFormat(msg) === 'json' }]"
         >{{ formatPayload(msg) }}</pre>
-        <pre v-else class="payload-truncated">{{ msg.payload.substring(0, 200) }}{{ msg.payload.length > 200 ? '...' : '' }}</pre>
+        <pre v-else class="payload-truncated">{{ truncate(prettyJson(msg.payload), 200) }}</pre>
       </div>
     </div>
   </div>

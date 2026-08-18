@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Preset } from '../../types/mqtt'
 import { usePresets } from '../../stores/usePresets'
+import { prettyJson, truncate } from '../../utils/format'
 import PresetForm from './PresetForm.vue'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -76,7 +77,7 @@ const qosLabel = (qos: number) => `QoS ${qos}`
       </el-table-column>
       <el-table-column label="Payload 预览" min-width="200">
         <template #default="{ row }">
-          <span class="payload-preview">{{ row.payloadTemplate.substring(0, 50) }}{{ row.payloadTemplate.length > 50 ? '...' : '' }}</span>
+          <span class="payload-preview">{{ truncate(prettyJson(row.payloadTemplate), 50) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
