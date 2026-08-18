@@ -14,6 +14,7 @@ import type { MqttMessage } from '../types/mqtt'
 import { useConnections } from './useConnections'
 import { useMessages } from './useMessages'
 import { useLogs } from './useLogs'
+import { useSubscriptions } from './useSubscriptions'
 import type { LogEntry } from './useLogs'
 
 /**
@@ -61,9 +62,18 @@ export function useMqttBridge() {
         case 'connecting':
           updateStatus(e.connection_id, 'connecting')
           break
-        case 'connected':
+        case 'connected': {
           updateStatus(e.connection_id, 'connected')
+          // Auto-resubscribe all persisted subscriptions for this connection
+          const { getSubscriptionsByConnection } = useSubscriptions()
+          const subs = getSubscriptionsByConnection(e.connection_id)
+          for (const sub of subs) {
+            mqttSubscribe({ connection_id: e.connection_id, topic: sub.topic, qos: sub.qos }).catch(() => {
+              // Silently ignore resubscribe errors — the user will see them in the log
+            })
+          }
           break
+        }
         case 'disconnected':
           updateStatus(e.connection_id, 'disconnected')
           break
