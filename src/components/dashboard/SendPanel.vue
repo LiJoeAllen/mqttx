@@ -4,7 +4,9 @@ import type { MqttConnection, Preset, PublishDto } from '../../types/mqtt'
 import { extractVariables, resolveTemplate, resolveUserProperties } from '../../utils/envVarResolver'
 import { mqttPublish } from '../../stores/useMqttBridge'
 import { useGlobalVariables } from '../../stores/useGlobalVariables'
+import { prettyJson } from '../../utils/format'
 import { ElMessage } from 'element-plus'
+import HoverPreview from '../common/HoverPreview.vue'
 import VariableEditor from './VariableEditor.vue'
 import UserPropertiesEditor from './UserPropertiesEditor.vue'
 import GlobalVariableManager from './GlobalVariableManager.vue'
@@ -209,12 +211,14 @@ function onBindingChange(name: string, value: string) {
       <div class="form-row">
         <div class="field" style="flex: 1">
           <label>Payload</label>
-          <el-input
-            v-model="payload"
-            type="textarea"
-            :rows="2"
-            placeholder='{"temp":{{temp}},"device":"{{deviceId}}"}'
-          />
+          <HoverPreview :text="prettyJson(payload)" :delay="600">
+            <el-input
+              v-model="payload"
+              type="textarea"
+              :rows="2"
+              placeholder='{"temp":{{temp}},"device":"{{deviceId}}"}'
+            />
+          </HoverPreview>
         </div>
       </div>
 
