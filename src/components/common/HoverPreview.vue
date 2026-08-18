@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 
 const props = withDefaults(defineProps<{
   /** Full text to show in the preview */
@@ -20,7 +20,6 @@ const visible = ref(false)
 const x = ref(0)
 const y = ref(0)
 let timer: ReturnType<typeof setTimeout> | null = null
-const wrapper = ref<HTMLElement | null>(null)
 
 function onMouseEnter(ev: MouseEvent) {
   timer = setTimeout(() => {
@@ -44,20 +43,24 @@ function onMouseLeave() {
 }
 
 function updatePosition(ev: MouseEvent) {
-  const pad = 12
+  const pad = 14
+  const popupW = Math.min(props.maxWidth, 480)
+  const popupH = Math.min(props.maxHeight, 360)
+
   let left = ev.clientX + pad
   let top = ev.clientY + pad
 
-  // Keep within viewport
-  const预估Width = Math.min(props.maxWidth, 480)
-  if (left + 预估Width > window.innerWidth - 16) {
-    left = ev.clientX - 预估Width - pad
+  // Flip to left side if too close to right edge
+  if (left + popupW + 16 > window.innerWidth) {
+    left = ev.clientX - popupW - pad
   }
-  if (top + 360 > window.innerHeight - 16) {
-    top = window.innerHeight - 360 - 16
+  // Flip to top side if too close to bottom edge
+  if (top + popupH + 16 > window.innerHeight) {
+    top = ev.clientY - popupH - pad
   }
-  if (left < 8) left = 8
-  if (top < 8) top = 8
+  // Clamp to safe bounds
+  left = Math.max(8, Math.min(left, window.innerWidth - popupW - 8))
+  top = Math.max(8, Math.min(top, window.innerHeight - popupH - 8))
 
   x.value = left
   y.value = top
@@ -66,7 +69,6 @@ function updatePosition(ev: MouseEvent) {
 
 <template>
   <span
-    ref="wrapper"
     class="hover-preview-wrap"
     @mouseenter="onMouseEnter"
     @mousemove="onMouseMove"
@@ -94,7 +96,6 @@ function updatePosition(ev: MouseEvent) {
 .hover-preview-wrap {
   display: inline;
   cursor: pointer;
-  position: relative;
 }
 .hover-preview-popup {
   position: fixed;
