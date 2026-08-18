@@ -14,7 +14,7 @@ const emit = defineEmits<{
 
 const scrollRef = ref<HTMLDivElement | null>(null)
 const autoScroll = ref(true)
-const expandedPayloads = ref(new Set<string>())
+const collapsedPayloads = ref(new Set<string>())
 const messageFormats = ref<Record<string, 'auto' | 'json' | 'hex' | 'base64' | 'plain'>>({})
 
 const formatOptions: { value: string; label: string }[] = [
@@ -83,10 +83,10 @@ function setFormat(msgId: string, fmt: 'auto' | 'json' | 'hex' | 'base64' | 'pla
 }
 
 function togglePayload(msgId: string) {
-  const s = new Set(expandedPayloads.value)
+  const s = new Set(collapsedPayloads.value)
   if (s.has(msgId)) s.delete(msgId)
   else s.add(msgId)
-  expandedPayloads.value = s
+  collapsedPayloads.value = s
 }
 
 // ─── Display helpers ───────────────────────────────────────────
@@ -156,17 +156,17 @@ function formatTime(ts: number): string {
           @click="togglePayload(msg.id)"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline v-if="expandedPayloads.has(msg.id)" points="18 15 12 9 6 15"/>
+            <polyline v-if="!collapsedPayloads.has(msg.id)" points="18 15 12 9 6 15"/>
             <polyline v-else points="6 9 12 15 18 9"/>
           </svg>
-          {{ expandedPayloads.has(msg.id) ? '收起' : '展开' }}
+          {{ !collapsedPayloads.has(msg.id) ? '收起' : '展开' }}
         </span>
       </div>
 
       <!-- Payload Content -->
-      <div class="msg-payload" :class="{ expanded: expandedPayloads.has(msg.id) }">
+      <div class="msg-payload" :class="{ expanded: !collapsedPayloads.has(msg.id) }">
         <pre
-          v-if="expandedPayloads.has(msg.id)"
+          v-if="!collapsedPayloads.has(msg.id)"
           :class="['payload-full', { 'is-json': getEffectiveFormat(msg) === 'json' }]"
         >{{ formatPayload(msg) }}</pre>
         <pre v-else class="payload-truncated">{{ truncate(prettyJson(msg.payload), 200) }}</pre>
