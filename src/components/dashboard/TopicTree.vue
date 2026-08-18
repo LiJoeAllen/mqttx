@@ -5,6 +5,8 @@ import type { MqttMessage } from '../../types/mqtt'
 import type { Subscription } from '../../types/mqtt'
 import { useSubscriptions } from '../../stores/useSubscriptions'
 import { mqttSubscribe, mqttUnsubscribe } from '../../stores/useMqttBridge'
+import ContextMenu from '../common/ContextMenu.vue'
+import type { ContextMenuItem } from '../common/ContextMenu.vue'
 
 interface TopicNode {
   id: string
@@ -29,6 +31,74 @@ const emit = defineEmits<{
 }>()
 
 const { addSubscription, removeSubscription, getSubscriptionsByConnection } = useSubscriptions()
+
+const ctxMenu = ref<InstanceType<typeof ContextMenu>>()
+const ctxTopic = ref('')
+const ctxNode = ref<TopicNode | null>(null)
+const ctxMenuItems = ref<ContextMenuItem[]>([])
+
+function handleContextMenu(ev: MouseEvent, node: TopicNode) {
+  ev.preventDefault()
+  ctxTopic.value = node.fullPath
+  ctxNode.value = node
+  const items: ContextMenuItem[] = []
+
+  // Copy topic
+  items.push({
+    label: '复制主题',
+    icon: '📋',
+    action: () => navigator.clipboard.writeText(node.fullPath),
+  })
+
+  // Subscribe / Unsubscribe
+  if (node.isSubscribed) {
+    items.push({
+      label: `取消订阅 (QoS ${node.subscriptionQos})`,
+      icon: '❌',
+      danger: true,
+      action: () => handleUnsubscribe(node.fullPath),
+    })
+  } else if (props.connected) {
+    items.push({
+      label: '订阅 (QoS 0)',
+      icon: '➕',
+      action: () => handleSubscribeTopic(node.fullPath, 0),
+    })
+    items.push({
+      label: '订阅 (QoS 1)',
+      icon: '➕',
+      action: () => handleSubscribeTopic(node.fullPath, 1),
+    })
+    items.push({
+      label: '订阅 (QoS 2)',
+      icon: '➕',
+      action: () => handleSubscribeTopic(node.fullPath, 2),
+    })
+  }
+
+  items.push({ label: '', icon: '', divider: true, action: () => {} })
+
+  // Select topic (filter messages)
+  items.push({
+    label: '筛选此主题',
+    icon: '🔍',
+    action: () => emit('select', node.fullPath),
+  })
+
+  ctxMenuItems.value = items
+  ctxMenu.value?.show(ev, ev.target as HTMLElement)
+}
+
+async function handleSubscribeTopic(topic: string, qos: number) {
+  if (!props.connectionId) return
+  try {
+    await mqttSubscribe({ connection_id: props.connectionId, topic, qos })
+    addSubscription(props.connectionId, topic, qos)
+    ElMessage.success(`已订阅: ${topic} (QoS ${qos})`)
+  } catch (e: unknown) {
+    ElMessage.error(`订阅失败: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 
 const subscribeInput = ref('')
 const subscribeQos = ref<0 | 1 | 2>(0)
@@ -194,7 +264,7 @@ function getNodeClass(node: TopicNode): string {
 
     <div class="tree-list">
       <template v-for="node in treeData" :key="node.id">
-        <div :class="['tree-node', getNodeClass(node)]" @click="handleNodeClick(node)">
+        <div :class="['tree-node', getNodeClass(node)]" @click="handleNodeClick(node)" @contextmenu.prevent="handleContextMenu($event, node)">
           <span class="node-icon">{{ getNodeIcon(node) }}</span>
           <span class="node-label">{{ node.label }}</span>
           <span class="node-count">{{ node.count }}</span>
@@ -202,7 +272,7 @@ function getNodeClass(node: TopicNode): string {
         </div>
         <div v-if="node.children.length > 0" class="children-group">
           <template v-for="child in node.children" :key="child.id">
-            <div :class="['tree-node child', getNodeClass(child)]" @click="handleNodeClick(child)">
+            <div :class="['tree-node child', getNodeClass(child)]" @click="handleNodeClick(child)" @contextmenu.prevent="handleContextMenu($event, child)">
               <span class="node-icon">{{ getNodeIcon(child) }}</span>
               <span class="node-label">{{ child.label }}</span>
               <span class="node-count">{{ child.count }}</span>
@@ -214,6 +284,7 @@ function getNodeClass(node: TopicNode): string {
                 :key="gc.id"
                 :class="['tree-node child', { selected: gc.fullPath === selectedTopic, subscribed: gc.isSubscribed }]"
                 @click="handleNodeClick(gc)"
+                @contextmenu.prevent="handleContextMenu($event, gc)"
               >
                 <span class="node-icon">{{ getNodeIcon(gc) }}</span>
                 <span class="node-label">{{ gc.label }}</span>
@@ -225,6 +296,8 @@ function getNodeClass(node: TopicNode): string {
         </div>
       </template>
     </div>
+
+    <ContextMenu ref="ctxMenu" :items="ctxMenuItems" />
   </div>
 </template>
 
