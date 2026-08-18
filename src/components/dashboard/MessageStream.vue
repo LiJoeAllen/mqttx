@@ -2,6 +2,7 @@
 import { ref, watch, nextTick } from 'vue'
 import type { MqttMessage } from '../../types/mqtt'
 import { prettyJson, isJson, truncate } from '../../utils/format'
+import HoverPreview from '../common/HoverPreview.vue'
 
 const props = defineProps<{
   messages: MqttMessage[]
@@ -168,8 +169,10 @@ function formatTime(ts: number): string {
         <pre
           v-if="!collapsedPayloads.has(msg.id)"
           :class="['payload-full', { 'is-json': getEffectiveFormat(msg) === 'json' }]"
-        >{{ formatPayload(msg) }}</pre>
-        <pre v-else class="payload-truncated">{{ truncate(prettyJson(msg.payload), 200) }}</pre>
+        ><HoverPreview :text="formatPayload(msg)">{{ formatPayload(msg) }}</HoverPreview></pre>
+        <pre v-else class="payload-truncated">
+              <HoverPreview :text="prettyJson(msg.payload)">{{ truncate(prettyJson(msg.payload), 200) }}</HoverPreview>
+            </pre>
       </div>
     </div>
   </div>

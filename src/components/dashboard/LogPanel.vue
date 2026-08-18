@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useLogs } from '../../stores/useLogs'
 import { mqttGetLogDir } from '../../stores/useMqttBridge'
 import { prettyJson } from '../../utils/format'
+import HoverPreview from '../common/HoverPreview.vue'
 import { ElMessage } from 'element-plus'
 
 const { logs, clear } = useLogs()
@@ -122,7 +123,7 @@ function eventIcon(event: string): string {
           <span v-if="log.details" class="log-dtl-btn" @click="toggleDetails(log.id)">{{ expandedDetails.has(log.id) ? '收起' : '详情' }}</span>
         </div>
         <div v-if="log.details && expandedDetails.has(log.id)" class="log-dtl-content">
-          {{ prettyJson(log.details) }}
+          <HoverPreview :text="prettyJson(log.details)">{{ prettyJson(log.details) }}</HoverPreview>
         </div>
       </div>
     </div>
