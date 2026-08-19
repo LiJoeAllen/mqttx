@@ -25,7 +25,7 @@ const { variables: globalVars, setVariable: setGlobalVar, importFromBindings } =
 // ─── State ─────────────────────────────────────────────────────
 
 const selectedConnectionId = ref('')
-const selectedPresetId = ref('')
+const selectedPresetIds = ref<string[]>([])
 const topic = ref('')
 const payload = ref('')
 const qos = ref<0 | 1 | 2>(0)
@@ -40,6 +40,8 @@ const responseTopic = ref('')
 const correlationData = ref('')
 const sending = ref(false)
 const showGlobalVarMgr = ref(false)
+const batchMode = ref(false)
+const batchProgress = ref<{ presetName: string; status: 'pending' | 'sending' | 'success' | 'error'; message?: string }[]>([])
 
 // ─── Computed ──────────────────────────────────────────────────
 
@@ -47,8 +49,12 @@ const connectedConnections = computed(() =>
   props.connections.filter((c) => c.status === 'connected'),
 )
 
+const selectedPresets = computed(() =>
+  props.presets.filter((p) => selectedPresetIds.value.includes(p.id)),
+)
+
 const selectedPreset = computed(() =>
-  props.presets.find((p) => p.id === selectedPresetId.value),
+  props.presets.find((p) => p.id === selectedPresetIds.value[selectedPresetIds.value.length - 1]),
 )
 
 const presetVariables = computed(() => {
@@ -67,7 +73,7 @@ const presetVariables = computed(() => {
 // ─── Watch preset ──────────────────────────────────────────────
 
 watch(selectedPreset, (preset) => {
-  if (preset) {
+  if (preset && !batchMode.value) {
     topic.value = preset.topic
     payload.value = preset.payloadTemplate
     qos.value = preset.qos
@@ -78,7 +84,6 @@ watch(selectedPreset, (preset) => {
     const topicVars = extractVariables(preset.topic)
     const allVars = [...new Set([...presetVars, ...topicVars])]
     for (const v of allVars) {
-      // Auto-fill from global variables first, then keep existing
       newBindings[v] = globalVars.value[v] ?? variableBindings.value[v] ?? ''
     }
     variableBindings.value = newBindings
@@ -86,61 +91,109 @@ watch(selectedPreset, (preset) => {
   }
 })
 
-// ─── Send ──────────────────────────────────────────────────────
+// ─── Send Single ───────────────────────────────────────────────
 
-async function send() {
-  if (!selectedConnectionId.value) {
-    ElMessage.warning('请先选择一个连接')
-    return
-  }
-  if (!topic.value.trim()) {
-    ElMessage.warning('请输入主题')
-    return
-  }
-  if (!payload.value.trim()) {
-    ElMessage.warning('请输入消息内容')
-    return
-  }
+function getPublishDto(preset?: Preset): PublishDto {
+  const t = preset?.topic ?? topic.value
+  const p = preset?.payloadTemplate ?? payload.value
+  const q = preset?.qos ?? qos.value
+  const r = preset?.retain ?? retain.value
+  const up = preset ? JSON.parse(JSON.stringify(preset.userProperties)) : userProperties.value
 
-  const resolvedTopic = resolveTemplate(topic.value, variableBindings.value)
-  const resolvedPayload = resolveTemplate(payload.value, variableBindings.value)
-  const resolvedProps = resolveUserProperties(userProperties.value, variableBindings.value)
+  const resolvedTopic = resolveTemplate(t, variableBindings.value)
+  const resolvedPayload = resolveTemplate(p, variableBindings.value)
+  const resolvedProps = resolveUserProperties(up, variableBindings.value)
 
-  // Save current bindings to global variables
-  importFromBindings(variableBindings.value)
-
-  const publishDto: PublishDto = {
+  return {
     connection_id: selectedConnectionId.value,
     topic: resolvedTopic,
     payload: resolvedPayload,
-    qos: qos.value,
-    retain: retain.value,
+    qos: q,
+    retain: r,
     user_properties: resolvedProps,
     content_type: contentType.value || null,
     message_expiry_interval: messageExpiryInterval.value,
     response_topic: responseTopic.value || null,
     correlation_data: correlationData.value || null,
   }
+}
 
-  sending.value = true
+async function sendSingle(preset?: Preset) {
+  if (!selectedConnectionId.value) {
+    ElMessage.warning('请先选择一个连接')
+    return false
+  }
+  const dto = getPublishDto(preset)
+  if (!dto.topic.trim()) { ElMessage.warning('请输入主题'); return false }
+  if (!dto.payload.trim()) { ElMessage.warning('请输入消息内容'); return false }
+
   try {
-    await mqttPublish(publishDto)
-    ElMessage.success('消息已发送')
-    emit('sent', publishDto)
+    await mqttPublish(dto)
+    emit('sent', dto)
+    return true
   } catch (e: any) {
     ElMessage.error(`发送失败: ${e}`)
-  } finally {
-    sending.value = false
+    return false
   }
+}
+
+async function send() {
+  importFromBindings(variableBindings.value)
+  sending.value = true
+  if (batchMode.value && selectedPresets.value.length > 0) {
+    // Batch send all selected presets
+    batchProgress.value = selectedPresets.value.map((p) => ({
+      presetName: p.name,
+      status: 'pending' as const,
+    }))
+    for (let i = 0; i < selectedPresets.value.length; i++) {
+      const preset = selectedPresets.value[i]
+      batchProgress.value[i].status = 'sending'
+      try {
+        const dto = getPublishDto(preset)
+        if (!dto.topic.trim()) {
+          batchProgress.value[i].status = 'error'
+          batchProgress.value[i].message = '主题为空'
+          continue
+        }
+        if (!dto.payload.trim()) {
+          batchProgress.value[i].status = 'error'
+          batchProgress.value[i].message = 'Payload 为空'
+          continue
+        }
+        await mqttPublish(dto)
+        emit('sent', dto)
+        batchProgress.value[i].status = 'success'
+      } catch (e: any) {
+        batchProgress.value[i].status = 'error'
+        batchProgress.value[i].message = String(e)
+      }
+    }
+    const successCount = batchProgress.value.filter((p) => p.status === 'success').length
+    const errorCount = batchProgress.value.filter((p) => p.status === 'error').length
+    ElMessage.success(`批量发送完成: ${successCount} 成功, ${errorCount} 失败`)
+  } else {
+    // Single send
+    const ok = await sendSingle()
+    if (ok) ElMessage.success('消息已发送')
+  }
+  sending.value = false
 }
 
 // ─── Save as global variable when a binding value changes ──────
 
 function onBindingChange(name: string, value: string) {
   variableBindings.value = { ...variableBindings.value, [name]: value }
-  // Auto-save to global if value is non-empty
   if (value.trim()) {
     setGlobalVar(name, value)
+  }
+}
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) {
+    selectedPresetIds.value = []
+    batchProgress.value = []
   }
 }
 </script>
@@ -150,27 +203,21 @@ function onBindingChange(name: string, value: string) {
     <div class="panel-header">
       <span class="panel-title">发送消息</span>
       <div class="panel-actions">
-        <el-select
-          v-model="selectedPresetId"
-          placeholder="选择预设..."
+        <el-button
           size="small"
-          style="width: 160px"
-          clearable
+          :class="['batch-toggle', { active: batchMode }]"
+          @click="toggleBatchMode"
         >
-          <el-option
-            v-for="p in presets"
-            :key="p.id"
-            :label="p.name"
-            :value="p.id"
-          />
-        </el-select>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          {{ batchMode ? '批量模式' : '单条模式' }}
+        </el-button>
       </div>
     </div>
 
     <div class="panel-body">
-      <!-- Row 1: Connection + Topic -->
+      <!-- Row 1: Connection + Preset -->
       <div class="form-row">
-        <div class="field" style="flex: 0 0 160px">
+        <div class="field" style="flex: 0 0 150px">
           <label>连接</label>
           <el-select
             v-model="selectedConnectionId"
@@ -187,12 +234,51 @@ function onBindingChange(name: string, value: string) {
           </el-select>
         </div>
         <div class="field" style="flex: 1">
-          <label>主题</label>
-          <el-input
-            v-model="topic"
+          <label>预设</label>
+          <el-select
+            v-model="selectedPresetIds"
+            :multiple="batchMode"
+            :collapse-tags="batchMode"
+            :collapse-tags-tooltip="batchMode"
+            placeholder="选择预设..."
             size="small"
-            placeholder="sensor/temp"
-          />
+            style="width: 100%"
+            :max-collapse-tags="3"
+          >
+            <el-option
+              v-for="p in presets"
+              :key="p.id"
+              :label="p.name"
+              :value="p.id"
+            />
+          </el-select>
+        </div>
+      </div>
+
+      <!-- Batch mode: show selected preset list -->
+      <div v-if="batchMode && selectedPresets.length > 0" class="batch-preset-list">
+        <div
+          v-for="(p, idx) in selectedPresets"
+          :key="p.id"
+          class="batch-preset-item"
+        >
+          <span class="bp-name">{{ p.name }}</span>
+          <span class="bp-topic">{{ p.topic }}</span>
+          <span class="bp-qos">Q{{ p.qos }}</span>
+          <span v-if="p.retain" class="bp-retain">R</span>
+          <span class="bp-status-icon">
+            <svg v-if="batchProgress[idx]?.status === 'success'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--comfort-success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <svg v-else-if="batchProgress[idx]?.status === 'error'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--comfort-danger)" stroke-width="2" :title="batchProgress[idx]?.message"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <svg v-else-if="batchProgress[idx]?.status === 'sending'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--comfort-text-secondary)" stroke-width="2" class="spinner"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+      </div>
+
+      <!-- Row 2: Topic (single mode) -->
+      <div v-if="!batchMode" class="form-row">
+        <div class="field" style="flex: 1">
+          <label>主题</label>
+          <el-input v-model="topic" size="small" placeholder="sensor/temp" />
         </div>
         <div class="field" style="flex: 0 0 90px">
           <label>QoS</label>
@@ -207,8 +293,8 @@ function onBindingChange(name: string, value: string) {
         </div>
       </div>
 
-      <!-- Row 2: Payload -->
-      <div class="form-row">
+      <!-- Row 3: Payload (single mode) -->
+      <div v-if="!batchMode" class="form-row">
         <div class="field" style="flex: 1">
           <label>Payload</label>
           <HoverPreview :text="prettyJson(payload)" :delay="600">
@@ -254,16 +340,16 @@ function onBindingChange(name: string, value: string) {
           type="primary"
           size="small"
           :loading="sending"
-          :disabled="!selectedConnectionId || !topic.trim()"
+          :disabled="!selectedConnectionId || (batchMode ? selectedPresets.length === 0 : !topic.trim())"
           @click="send"
           class="send-btn"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          发送
+          {{ batchMode ? `发送 ${selectedPresets.length} 个预设` : '发送' }}
         </el-button>
       </div>
 
-      <!-- Variable editor (now uses onBindingChange to auto-save) -->
+      <!-- Variable editor -->
       <transition name="slide">
         <div v-if="showVariables" class="expand-section">
           <div class="var-editor-header">
@@ -326,9 +412,9 @@ function onBindingChange(name: string, value: string) {
 
 <style scoped>
 .send-panel {
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--comfort-border, var(--el-border-color));
   border-radius: 8px;
-  background: var(--el-bg-color);
+  background: var(--comfort-bg-card, var(--el-bg-color));
   flex-shrink: 0;
 }
 .panel-header {
@@ -336,17 +422,35 @@ function onBindingChange(name: string, value: string) {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--comfort-border-light, var(--el-border-color-light));
 }
 .panel-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--comfort-text, var(--el-text-color-primary));
 }
 .panel-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.batch-toggle {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: var(--comfort-border, var(--el-border-color));
+  --el-button-hover-bg-color: var(--el-fill-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--comfort-text-secondary, var(--el-text-color-secondary));
+  padding: 0 8px !important;
+  height: 24px;
+  border-radius: 6px;
+}
+.batch-toggle.active {
+  --el-button-bg-color: var(--el-color-primary-light-9);
+  --el-button-border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
 }
 .panel-body {
   padding: 8px 12px 10px;
@@ -368,8 +472,70 @@ function onBindingChange(name: string, value: string) {
 }
 .field label {
   font-size: 11px;
-  color: var(--el-text-color-secondary);
+  color: var(--comfort-text-secondary, var(--el-text-color-secondary));
   font-weight: 500;
+}
+
+/* ─── Batch preset list ──────────────────────────────────────── */
+.batch-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  background: var(--comfort-bg-soft, var(--el-fill-color-light));
+  border-radius: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.batch-preset-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  background: var(--comfort-bg-card, var(--el-bg-color));
+  border-radius: 4px;
+  font-size: 12px;
+}
+.bp-name {
+  font-weight: 600;
+  color: var(--comfort-text, var(--el-text-color-primary));
+  min-width: 60px;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-topic {
+  flex: 1;
+  font-family: var(--comfort-font-mono, monospace);
+  font-size: 11px;
+  color: var(--comfort-text-secondary, var(--el-text-color-secondary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-qos {
+  font-size: 10px;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+  flex-shrink: 0;
+}
+.bp-retain {
+  font-size: 10px;
+  color: var(--comfort-warning, var(--el-color-warning));
+  flex-shrink: 0;
+}
+.bp-status-icon {
+  flex-shrink: 0;
+  width: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  animation: spin 1s linear infinite;
 }
 
 /* ─── Toggle Row ─────────────────────────────────────────────── */
@@ -380,13 +546,13 @@ function onBindingChange(name: string, value: string) {
 }
 .toggle-btn {
   --el-button-bg-color: transparent;
-  --el-button-border-color: var(--el-border-color);
+  --el-button-border-color: var(--comfort-border, var(--el-border-color));
   --el-button-hover-bg-color: var(--el-fill-color);
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--comfort-text-secondary, var(--el-text-color-secondary));
   padding: 0 8px !important;
   height: 26px;
   border-radius: 6px;
@@ -427,9 +593,9 @@ function onBindingChange(name: string, value: string) {
 /* ─── Variable Editor (inline) ───────────────────────────────── */
 .expand-section {
   padding: 8px;
-  background: var(--el-fill-color-light);
+  background: var(--comfort-bg-soft, var(--el-fill-color-light));
   border-radius: 6px;
-  border: 1px solid var(--el-border-color-extra-light);
+  border: 1px solid var(--comfort-border-light, var(--el-border-color-extra-light));
 }
 .var-editor-header {
   display: flex;
@@ -440,11 +606,11 @@ function onBindingChange(name: string, value: string) {
 .var-editor-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--comfort-text, var(--el-text-color-primary));
 }
 .var-editor-hint {
   font-size: 11px;
-  color: var(--el-text-color-placeholder);
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
 }
 .var-grid {
   display: flex;
@@ -458,7 +624,7 @@ function onBindingChange(name: string, value: string) {
 }
 .var-label {
   min-width: 80px;
-  font-family: monospace;
+  font-family: var(--comfort-font-mono, monospace);
   font-size: 13px;
   font-weight: 600;
   color: var(--el-color-primary);
