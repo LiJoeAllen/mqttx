@@ -25,23 +25,25 @@ const { variables: globalVars, setVariable: setGlobalVar, importFromBindings } =
 // ─── State ─────────────────────────────────────────────────────
 
 const selectedConnectionId = ref('')
-const selectedPresetIds = ref<string[]>([])
-const topic = ref('')
-const payload = ref('')
-const qos = ref<0 | 1 | 2>(0)
-const retain = ref(false)
+const activePresetId = ref<string | null>(null)
 const showVariables = ref(false)
 const showV5Props = ref(false)
-const variableBindings = ref<Record<string, string>>({})
-const userProperties = ref<{ key: string; value: string }[]>([])
-const contentType = ref('')
-const messageExpiryInterval = ref<number | null>(null)
-const responseTopic = ref('')
-const correlationData = ref('')
-const sending = ref(false)
 const showGlobalVarMgr = ref(false)
-const batchMode = ref(false)
-const batchProgress = ref<{ presetName: string; status: 'pending' | 'sending' | 'success' | 'error'; message?: string }[]>([])
+const sending = ref(false)
+
+// Per-preset editor state (keyed by preset id)
+const editorStates = ref<Record<string, {
+  topic: string
+  payload: string
+  qos: 0 | 1 | 2
+  retain: boolean
+  variableBindings: Record<string, string>
+  userProperties: { key: string; value: string }[]
+  contentType: string
+  messageExpiryInterval: number | null
+  responseTopic: string
+  correlationData: string
+}>>({})
 
 // ─── Computed ──────────────────────────────────────────────────
 
@@ -49,257 +51,224 @@ const connectedConnections = computed(() =>
   props.connections.filter((c) => c.status === 'connected'),
 )
 
-const selectedPresets = computed(() =>
-  props.presets.filter((p) => selectedPresetIds.value.includes(p.id)),
+const activePreset = computed(() =>
+  props.presets.find((p) => p.id === activePresetId.value),
 )
 
-const selectedPreset = computed(() =>
-  props.presets.find((p) => p.id === selectedPresetIds.value[selectedPresetIds.value.length - 1]),
+const activeState = computed(() =>
+  activePresetId.value ? editorStates.value[activePresetId.value] : null,
 )
 
 const presetVariables = computed(() => {
-  if (!selectedPreset.value) return []
-  const vars = extractVariables(selectedPreset.value.payloadTemplate)
-  for (const v of extractVariables(selectedPreset.value.topic)) {
+  if (!activePreset.value) return []
+  const vars = extractVariables(activePreset.value.payloadTemplate)
+  for (const v of extractVariables(activePreset.value.topic)) {
     if (!vars.includes(v)) vars.push(v)
   }
-  for (const up of selectedPreset.value.userProperties) {
+  for (const up of activePreset.value.userProperties) {
     for (const v of extractVariables(up.key)) if (!vars.includes(v)) vars.push(v)
     for (const v of extractVariables(up.value)) if (!vars.includes(v)) vars.push(v)
   }
   return vars
 })
 
-// ─── Watch preset ──────────────────────────────────────────────
+// ─── Init editor state for a preset ────────────────────────────
 
-watch(selectedPreset, (preset) => {
-  if (preset && !batchMode.value) {
-    topic.value = preset.topic
-    payload.value = preset.payloadTemplate
-    qos.value = preset.qos
-    retain.value = preset.retain
-    userProperties.value = JSON.parse(JSON.stringify(preset.userProperties))
-    const newBindings: Record<string, string> = {}
-    const presetVars = extractVariables(preset.payloadTemplate)
-    const topicVars = extractVariables(preset.topic)
-    const allVars = [...new Set([...presetVars, ...topicVars])]
-    for (const v of allVars) {
-      newBindings[v] = globalVars.value[v] ?? variableBindings.value[v] ?? ''
-    }
-    variableBindings.value = newBindings
-    showVariables.value = allVars.length > 0
+function initEditorState(preset: Preset) {
+  if (editorStates.value[preset.id]) return
+
+  const allVars = [...new Set([
+    ...extractVariables(preset.payloadTemplate),
+    ...extractVariables(preset.topic),
+    ...preset.userProperties.flatMap(up => [
+      ...extractVariables(up.key),
+      ...extractVariables(up.value),
+    ]),
+  ])]
+
+  const bindings: Record<string, string> = {}
+  for (const v of allVars) {
+    bindings[v] = globalVars.value[v] ?? ''
   }
-})
 
-// ─── Send Single ───────────────────────────────────────────────
+  editorStates.value[preset.id] = {
+    topic: preset.topic,
+    payload: preset.payloadTemplate,
+    qos: preset.qos,
+    retain: preset.retain,
+    variableBindings: bindings,
+    userProperties: JSON.parse(JSON.stringify(preset.userProperties)),
+    contentType: '',
+    messageExpiryInterval: null,
+    responseTopic: '',
+    correlationData: '',
+  }
+}
 
-function getPublishDto(preset?: Preset): PublishDto {
-  const t = preset?.topic ?? topic.value
-  const p = preset?.payloadTemplate ?? payload.value
-  const q = preset?.qos ?? qos.value
-  const r = preset?.retain ?? retain.value
-  const up = preset ? JSON.parse(JSON.stringify(preset.userProperties)) : userProperties.value
+// ─── Switch active preset ──────────────────────────────────────
 
-  const resolvedTopic = resolveTemplate(t, variableBindings.value)
-  const resolvedPayload = resolveTemplate(p, variableBindings.value)
-  const resolvedProps = resolveUserProperties(up, variableBindings.value)
+function selectPreset(presetId: string) {
+  const preset = props.presets.find((p) => p.id === presetId)
+  if (!preset) return
+  initEditorState(preset)
+  activePresetId.value = presetId
+  showVariables.value = presetVariables.value.length > 0
+}
+
+// Auto-select first preset when presets change
+watch(() => props.presets, (ps) => {
+  if (ps.length > 0) {
+    // Init all presets
+    for (const p of ps) initEditorState(p)
+    // Select first if none selected
+    if (!activePresetId.value || !ps.find((p) => p.id === activePresetId.value)) {
+      selectPreset(ps[0].id)
+    }
+  } else {
+    activePresetId.value = null
+  }
+}, { immediate: true, deep: true })
+
+// ─── Send ──────────────────────────────────────────────────────
+
+function getPublishDto(): PublishDto | null {
+  if (!activePreset.value || !activeState.value) return null
+  const st = activeState.value
+  const resolvedTopic = resolveTemplate(st.topic, st.variableBindings)
+  const resolvedPayload = resolveTemplate(st.payload, st.variableBindings)
+  const resolvedProps = resolveUserProperties(st.userProperties, st.variableBindings)
 
   return {
     connection_id: selectedConnectionId.value,
     topic: resolvedTopic,
     payload: resolvedPayload,
-    qos: q,
-    retain: r,
+    qos: st.qos,
+    retain: st.retain,
     user_properties: resolvedProps,
-    content_type: contentType.value || null,
-    message_expiry_interval: messageExpiryInterval.value,
-    response_topic: responseTopic.value || null,
-    correlation_data: correlationData.value || null,
-  }
-}
-
-async function sendSingle(preset?: Preset) {
-  if (!selectedConnectionId.value) {
-    ElMessage.warning('请先选择一个连接')
-    return false
-  }
-  const dto = getPublishDto(preset)
-  if (!dto.topic.trim()) { ElMessage.warning('请输入主题'); return false }
-  if (!dto.payload.trim()) { ElMessage.warning('请输入消息内容'); return false }
-
-  try {
-    await mqttPublish(dto)
-    emit('sent', dto)
-    return true
-  } catch (e: any) {
-    ElMessage.error(`发送失败: ${e}`)
-    return false
+    content_type: st.contentType || null,
+    message_expiry_interval: st.messageExpiryInterval,
+    response_topic: st.responseTopic || null,
+    correlation_data: st.correlationData || null,
   }
 }
 
 async function send() {
-  importFromBindings(variableBindings.value)
-  sending.value = true
-  if (batchMode.value && selectedPresets.value.length > 0) {
-    // Batch send all selected presets
-    batchProgress.value = selectedPresets.value.map((p) => ({
-      presetName: p.name,
-      status: 'pending' as const,
-    }))
-    for (let i = 0; i < selectedPresets.value.length; i++) {
-      const preset = selectedPresets.value[i]
-      batchProgress.value[i].status = 'sending'
-      try {
-        const dto = getPublishDto(preset)
-        if (!dto.topic.trim()) {
-          batchProgress.value[i].status = 'error'
-          batchProgress.value[i].message = '主题为空'
-          continue
-        }
-        if (!dto.payload.trim()) {
-          batchProgress.value[i].status = 'error'
-          batchProgress.value[i].message = 'Payload 为空'
-          continue
-        }
-        await mqttPublish(dto)
-        emit('sent', dto)
-        batchProgress.value[i].status = 'success'
-      } catch (e: any) {
-        batchProgress.value[i].status = 'error'
-        batchProgress.value[i].message = String(e)
-      }
-    }
-    const successCount = batchProgress.value.filter((p) => p.status === 'success').length
-    const errorCount = batchProgress.value.filter((p) => p.status === 'error').length
-    ElMessage.success(`批量发送完成: ${successCount} 成功, ${errorCount} 失败`)
-  } else {
-    // Single send
-    const ok = await sendSingle()
-    if (ok) ElMessage.success('消息已发送')
+  if (!selectedConnectionId.value) {
+    ElMessage.warning('请先选择一个连接')
+    return
   }
-  sending.value = false
+  if (!activePreset.value || !activeState.value) {
+    ElMessage.warning('请选择一个预设')
+    return
+  }
+  importFromBindings(activeState.value.variableBindings)
+  sending.value = true
+  try {
+    const dto = getPublishDto()
+    if (!dto) { ElMessage.warning('预设数据异常'); return }
+    if (!dto.topic.trim()) { ElMessage.warning('主题为空'); return }
+    if (!dto.payload.trim()) { ElMessage.warning('Payload 为空'); return }
+    await mqttPublish(dto)
+    emit('sent', dto)
+    ElMessage.success(`"${activePreset.value.name}" 已发送`)
+  } catch (e: any) {
+    ElMessage.error(`发送失败: ${e}`)
+  } finally {
+    sending.value = false
+  }
 }
 
-// ─── Save as global variable when a binding value changes ──────
+// ─── Variable binding changed ──────────────────────────────────
 
 function onBindingChange(name: string, value: string) {
-  variableBindings.value = { ...variableBindings.value, [name]: value }
+  if (!activePresetId.value || !activeState.value) return
+  activeState.value.variableBindings = { ...activeState.value.variableBindings, [name]: value }
   if (value.trim()) {
     setGlobalVar(name, value)
   }
 }
 
-function toggleBatchMode() {
-  batchMode.value = !batchMode.value
-  if (!batchMode.value) {
-    selectedPresetIds.value = []
-    batchProgress.value = []
+// ─── Close tab ─────────────────────────────────────────────────
+
+function closePreset(id: string) {
+  // Keep the editor state but deselect
+  if (activePresetId.value === id) {
+    const idx = props.presets.findIndex((p) => p.id === id)
+    const next = props.presets[idx + 1] ?? props.presets[idx - 1] ?? null
+    activePresetId.value = next?.id ?? null
   }
 }
 </script>
 
 <template>
   <div class="send-panel">
-    <div class="panel-header">
-      <span class="panel-title">发送消息</span>
-      <div class="panel-actions">
-        <el-button
-          size="small"
-          :class="['batch-toggle', { active: batchMode }]"
-          @click="toggleBatchMode"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          {{ batchMode ? '批量模式' : '单条模式' }}
-        </el-button>
-      </div>
+    <!-- Connection selector -->
+    <div class="conn-bar">
+      <el-select
+        v-model="selectedConnectionId"
+        placeholder="选择连接"
+        size="small"
+        style="width: 100%"
+      >
+        <el-option
+          v-for="c in connectedConnections"
+          :key="c.id"
+          :label="c.name"
+          :value="c.id"
+        />
+      </el-select>
     </div>
 
-    <div class="panel-body">
-      <!-- Row 1: Connection + Preset -->
+    <!-- Preset tabs -->
+    <div v-if="presets.length > 0" class="preset-tabs">
+      <button
+        v-for="p in presets"
+        :key="p.id"
+        :class="['preset-tab', { active: activePresetId === p.id }]"
+        @click="selectPreset(p.id)"
+      >
+        <span class="pt-name">{{ p.name }}</span>
+        <span class="pt-topic">{{ p.topic }}</span>
+        <span class="pt-qos">Q{{ p.qos }}</span>
+        <span
+          v-if="activePresetId === p.id && presets.length > 1"
+          class="pt-close"
+          @click.stop="closePreset(p.id)"
+        >×</span>
+      </button>
+    </div>
+    <div v-else class="no-presets">
+      暂无预设，请先在「预设」页面创建
+    </div>
+
+    <!-- Editor area for active preset -->
+    <div v-if="activePreset && activeState" class="editor-area">
+      <!-- Row: Topic + QoS + Retain -->
       <div class="form-row">
-        <div class="field" style="flex: 0 0 150px">
-          <label>连接</label>
-          <el-select
-            v-model="selectedConnectionId"
-            placeholder="选择连接"
-            size="small"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="c in connectedConnections"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
-            />
-          </el-select>
-        </div>
-        <div class="field" style="flex: 1">
-          <label>预设</label>
-          <el-select
-            v-model="selectedPresetIds"
-            :multiple="batchMode"
-            :collapse-tags="batchMode"
-            :collapse-tags-tooltip="batchMode"
-            placeholder="选择预设..."
-            size="small"
-            style="width: 100%"
-            :max-collapse-tags="3"
-          >
-            <el-option
-              v-for="p in presets"
-              :key="p.id"
-              :label="p.name"
-              :value="p.id"
-            />
-          </el-select>
-        </div>
-      </div>
-
-      <!-- Batch mode: show selected preset list -->
-      <div v-if="batchMode && selectedPresets.length > 0" class="batch-preset-list">
-        <div
-          v-for="(p, idx) in selectedPresets"
-          :key="p.id"
-          class="batch-preset-item"
-        >
-          <span class="bp-name">{{ p.name }}</span>
-          <span class="bp-topic">{{ p.topic }}</span>
-          <span class="bp-qos">Q{{ p.qos }}</span>
-          <span v-if="p.retain" class="bp-retain">R</span>
-          <span class="bp-status-icon">
-            <svg v-if="batchProgress[idx]?.status === 'success'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--comfort-success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-            <svg v-else-if="batchProgress[idx]?.status === 'error'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--comfort-danger)" stroke-width="2" :title="batchProgress[idx]?.message"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-            <svg v-else-if="batchProgress[idx]?.status === 'sending'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--comfort-text-secondary)" stroke-width="2" class="spinner"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          </span>
-        </div>
-      </div>
-
-      <!-- Row 2: Topic (single mode) -->
-      <div v-if="!batchMode" class="form-row">
         <div class="field" style="flex: 1">
           <label>主题</label>
-          <el-input v-model="topic" size="small" placeholder="sensor/temp" />
+          <el-input v-model="activeState.topic" size="small" placeholder="sensor/temp" />
         </div>
         <div class="field" style="flex: 0 0 90px">
           <label>QoS</label>
-          <el-select v-model="qos" size="small">
+          <el-select v-model="activeState.qos" size="small">
             <el-option :value="0" label="QoS 0" />
             <el-option :value="1" label="QoS 1" />
             <el-option :value="2" label="QoS 2" />
           </el-select>
         </div>
         <div class="field" style="flex: 0 0 70px; align-items: center; justify-content: flex-end; padding-bottom: 0;">
-          <el-checkbox v-model="retain" size="small" label="Retain" />
+          <el-checkbox v-model="activeState.retain" size="small" label="Retain" />
         </div>
       </div>
 
-      <!-- Row 3: Payload (single mode) -->
-      <div v-if="!batchMode" class="form-row">
+      <!-- Row: Payload -->
+      <div class="form-row">
         <div class="field" style="flex: 1">
           <label>Payload</label>
-          <HoverPreview :text="prettyJson(payload)" :delay="600">
+          <HoverPreview :text="prettyJson(activeState.payload)" :delay="600">
             <el-input
-              v-model="payload"
+              v-model="activeState.payload"
               type="textarea"
               :rows="2"
               placeholder='{"temp":{{temp}},"device":"{{deviceId}}"}'
@@ -340,12 +309,12 @@ function toggleBatchMode() {
           type="primary"
           size="small"
           :loading="sending"
-          :disabled="!selectedConnectionId || (batchMode ? selectedPresets.length === 0 : !topic.trim())"
+          :disabled="!selectedConnectionId || !activeState"
           @click="send"
           class="send-btn"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          {{ batchMode ? `发送 ${selectedPresets.length} 个预设` : '发送' }}
+          发送 {{ activePreset?.name }}
         </el-button>
       </div>
 
@@ -354,7 +323,7 @@ function toggleBatchMode() {
         <div v-if="showVariables" class="expand-section">
           <div class="var-editor-header">
             <span class="var-editor-title">变量值</span>
-            <span class="var-editor-hint">输入后自动保存为全局变量</span>
+            <span class="var-editor-hint">输入后自动保存为全局变量，每个预设独立维护</span>
           </div>
           <div class="var-grid">
             <div
@@ -364,7 +333,7 @@ function toggleBatchMode() {
             >
               <span class="var-label">{{ v }}</span>
               <el-input
-                :model-value="variableBindings[v] ?? ''"
+                :model-value="activeState.variableBindings[v] ?? ''"
                 size="small"
                 placeholder="输入值..."
                 @input="(val: string) => onBindingChange(v, val)"
@@ -380,12 +349,12 @@ function toggleBatchMode() {
           <div class="v5-grid">
             <div class="field">
               <label>Content Type</label>
-              <el-input v-model="contentType" size="small" placeholder="json" />
+              <el-input v-model="activeState.contentType" size="small" placeholder="json" />
             </div>
             <div class="field">
               <label>消息过期(秒)</label>
               <el-input-number
-                v-model="messageExpiryInterval"
+                v-model="activeState.messageExpiryInterval"
                 :min="0"
                 size="small"
                 style="width: 100%"
@@ -393,21 +362,27 @@ function toggleBatchMode() {
             </div>
             <div class="field">
               <label>Response Topic</label>
-              <el-input v-model="responseTopic" size="small" placeholder="sensor/response" />
+              <el-input v-model="activeState.responseTopic" size="small" placeholder="sensor/response" />
             </div>
             <div class="field">
               <label>Correlation Data</label>
-              <el-input v-model="correlationData" size="small" placeholder="hex string" />
+              <el-input v-model="activeState.correlationData" size="small" placeholder="hex string" />
             </div>
           </div>
-          <UserPropertiesEditor v-model="userProperties" />
+          <UserPropertiesEditor v-model="activeState.userProperties" />
         </div>
       </transition>
     </div>
 
-    <!-- Global Variable Manager Dialog -->
-    <GlobalVariableManager v-model:show="showGlobalVarMgr" />
+    <!-- Empty state -->
+    <div v-else-if="presets.length > 0" class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--comfort-text-muted)"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span class="empty-text">点击上方标签页开始编辑</span>
+    </div>
   </div>
+
+  <!-- Global Variable Manager Dialog -->
+  <GlobalVariableManager v-model:show="showGlobalVarMgr" />
 </template>
 
 <style scoped>
@@ -416,50 +391,103 @@ function toggleBatchMode() {
   border-radius: 8px;
   background: var(--comfort-bg-card, var(--el-bg-color));
   flex-shrink: 0;
+  overflow: hidden;
 }
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+
+/* ─── Connection bar ─────────────────────────────────────────── */
+.conn-bar {
   padding: 8px 12px;
   border-bottom: 1px solid var(--comfort-border-light, var(--el-border-color-light));
 }
-.panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--comfort-text, var(--el-text-color-primary));
+
+/* ─── Preset Tabs ────────────────────────────────────────────── */
+.preset-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  overflow-x: auto;
+  background: var(--comfort-bg-soft, var(--el-fill-color-light));
+  border-bottom: 1px solid var(--comfort-border-light, var(--el-border-color-light));
+  scrollbar-width: thin;
 }
-.panel-actions {
+.preset-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-.batch-toggle {
-  --el-button-bg-color: transparent;
-  --el-button-border-color: var(--comfort-border, var(--el-border-color));
-  --el-button-hover-bg-color: var(--el-fill-color);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
   color: var(--comfort-text-secondary, var(--el-text-color-secondary));
-  padding: 0 8px !important;
-  height: 24px;
-  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  position: relative;
+  margin-bottom: -1px;
 }
-.batch-toggle.active {
-  --el-button-bg-color: var(--el-color-primary-light-9);
-  --el-button-border-color: var(--el-color-primary-light-5);
-  color: var(--el-color-primary);
+.preset-tab:hover {
+  color: var(--comfort-text, var(--el-text-color-primary));
+  background: var(--comfort-bg-card, var(--el-bg-color));
 }
-.panel-body {
+.preset-tab.active {
+  color: var(--comfort-primary, var(--el-color-primary));
+  background: var(--comfort-bg-card, var(--el-bg-color));
+  border-color: var(--comfort-border-light, var(--el-border-color-light));
+  font-weight: 600;
+}
+.pt-name {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pt-topic {
+  font-family: var(--comfort-font-mono, monospace);
+  font-size: 10px;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pt-qos {
+  font-size: 10px;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+  flex-shrink: 0;
+}
+.pt-close {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+  margin-left: 2px;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+.pt-close:hover {
+  color: var(--comfort-danger, var(--el-color-danger));
+  background: var(--el-color-danger-light-9);
+}
+.no-presets {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+}
+
+/* ─── Editor area ────────────────────────────────────────────── */
+.editor-area {
   padding: 8px 12px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-
-/* ─── Form Row ───────────────────────────────────────────────── */
 .form-row {
   display: flex;
   gap: 8px;
@@ -476,66 +504,17 @@ function toggleBatchMode() {
   font-weight: 500;
 }
 
-/* ─── Batch preset list ──────────────────────────────────────── */
-.batch-preset-list {
+/* ─── Empty state ────────────────────────────────────────────── */
+.empty-state {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 6px 8px;
-  background: var(--comfort-bg-soft, var(--el-fill-color-light));
-  border-radius: 6px;
-  max-height: 120px;
-  overflow-y: auto;
-}
-.batch-preset-item {
-  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
-  background: var(--comfort-bg-card, var(--el-bg-color));
-  border-radius: 4px;
+  gap: 8px;
+  padding: 24px;
+}
+.empty-text {
   font-size: 12px;
-}
-.bp-name {
-  font-weight: 600;
-  color: var(--comfort-text, var(--el-text-color-primary));
-  min-width: 60px;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bp-topic {
-  flex: 1;
-  font-family: var(--comfort-font-mono, monospace);
-  font-size: 11px;
-  color: var(--comfort-text-secondary, var(--el-text-color-secondary));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bp-qos {
-  font-size: 10px;
   color: var(--comfort-text-muted, var(--el-text-color-placeholder));
-  flex-shrink: 0;
-}
-.bp-retain {
-  font-size: 10px;
-  color: var(--comfort-warning, var(--el-color-warning));
-  flex-shrink: 0;
-}
-.bp-status-icon {
-  flex-shrink: 0;
-  width: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-.spinner {
-  animation: spin 1s linear infinite;
 }
 
 /* ─── Toggle Row ─────────────────────────────────────────────── */
@@ -590,7 +569,7 @@ function toggleBatchMode() {
   flex-shrink: 0;
 }
 
-/* ─── Variable Editor (inline) ───────────────────────────────── */
+/* ─── Variable Editor ────────────────────────────────────────── */
 .expand-section {
   padding: 8px;
   background: var(--comfort-bg-soft, var(--el-fill-color-light));
