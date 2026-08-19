@@ -402,7 +402,7 @@ function onBindingChange(name: string, value: string) {
 .toggle-badge {
   font-size: 10px;
   background: var(--el-color-primary);
-  color: #fff;
+  color: var(--comfort-text, var(--el-color-white));
   padding: 0 4px;
   border-radius: 6px;
   line-height: 14px;

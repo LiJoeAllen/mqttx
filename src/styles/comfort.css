@@ -74,18 +74,30 @@
   --comfort-danger: #c46a5a;
   --comfort-info: #6b8a9a;
 
+  /* Element Plus core */
+  --el-color-white: #1a1a1e;
+  --el-color-black: #e0e0e0;
   --el-bg-color: var(--comfort-bg);
   --el-bg-color-overlay: var(--comfort-bg-card);
+  --el-bg-color-page: var(--comfort-bg);
   --el-text-color-primary: var(--comfort-text);
   --el-text-color-regular: var(--comfort-text);
   --el-text-color-secondary: var(--comfort-text-secondary);
   --el-text-color-placeholder: var(--comfort-text-muted);
+  --el-text-color-disabled: #505050;
   --el-border-color: var(--comfort-border);
   --el-border-color-light: var(--comfort-border-light);
+  --el-border-color-lighter: #2e2e32;
+  --el-border-color-extra-light: #2a2a2e;
+  --el-border-color-dark: #4a4a4e;
   --el-fill-color: #2e2e32;
   --el-fill-color-light: #36363a;
   --el-fill-color-lighter: #323236;
   --el-fill-color-extra-light: #2a2a2e;
+  --el-fill-color-dark: #3a3a3e;
+  --el-fill-color-blank: var(--comfort-bg-card);
+
+  /* Element Plus component colors */
   --el-color-primary: var(--comfort-primary);
   --el-color-primary-light-3: var(--comfort-primary-light);
   --el-color-primary-light-5: #bdd5bc;
@@ -93,6 +105,69 @@
   --el-color-primary-light-8: #324032;
   --el-color-primary-light-9: var(--comfort-primary-bg);
   --el-color-primary-dark-2: #5b8c5a;
+  --el-color-success: var(--comfort-success);
+  --el-color-success-light-3: #9dc09c;
+  --el-color-success-light-5: #7dab7c;
+  --el-color-success-light-7: #3a4a3a;
+  --el-color-success-light-8: #324032;
+  --el-color-success-light-9: #2a3a2a;
+  --el-color-success-dark-2: #5b8c5a;
+  --el-color-warning: var(--comfort-warning);
+  --el-color-warning-light-3: #d4b86a;
+  --el-color-warning-light-5: #c4a35a;
+  --el-color-warning-light-7: #4a3a2a;
+  --el-color-warning-light-8: #3a3020;
+  --el-color-warning-light-9: #2a2a1a;
+  --el-color-warning-dark-2: #a08040;
+  --el-color-danger: var(--comfort-danger);
+  --el-color-danger-light-3: #d47a6a;
+  --el-color-danger-light-5: #c46a5a;
+  --el-color-danger-light-7: #4a2a2a;
+  --el-color-danger-light-8: #3a2020;
+  --el-color-danger-light-9: #2a1a1a;
+  --el-color-danger-dark-2: #a05040;
+  --el-color-info: var(--comfort-info);
+  --el-color-info-light-3: #8baab0;
+  --el-color-info-light-5: #6b8a9a;
+  --el-color-info-light-7: #2a3a3a;
+  --el-color-info-light-8: #202a2a;
+  --el-color-info-light-9: #1a2a2a;
+  --el-color-info-dark-2: #4a6a7a;
+
+  /* Element Plus specific */
+  --el-mask-color: rgba(0, 0, 0, 0.5);
+  --el-overlay-color: rgba(0, 0, 0, 0.6);
+  --el-overlay-color-lighter: rgba(0, 0, 0, 0.4);
+  --el-popper-bg-color: var(--comfort-bg-card);
+  --el-input-bg-color: var(--comfort-bg-soft);
+  --el-input-text-color: var(--comfort-text);
+  --el-input-border-color: var(--comfort-border);
+  --el-input-hover-border-color: var(--comfort-primary-light);
+  --el-input-focus-border-color: var(--comfort-primary);
+  --el-input-placeholder-color: var(--comfort-text-muted);
+  --el-table-bg-color: var(--comfort-bg-card);
+  --el-table-tr-bg-color: var(--comfort-bg-card);
+  --el-table-header-bg-color: var(--comfort-bg-soft);
+  --el-table-header-text-color: var(--comfort-text-secondary);
+  --el-table-text-color: var(--comfort-text);
+  --el-table-row-hover-bg-color: var(--comfort-primary-bg);
+  --el-table-border-color: var(--comfort-border-light);
+  --el-tag-bg-color: var(--comfort-primary-bg);
+  --el-tag-text-color: var(--comfort-primary);
+  --el-tag-border-color: transparent;
+  --el-dialog-bg-color: var(--comfort-bg-card);
+  --el-select-bg-color: var(--comfort-bg-soft);
+  --el-select-input-focus-border-color: var(--comfort-primary);
+  --el-select-dropdown-bg: var(--comfort-bg-card);
+  --el-select-dropdown-border: var(--comfort-border);
+  --el-message-bg-color: var(--comfort-bg-card);
+  --el-message-shadow: var(--comfort-shadow-hover);
+  --el-checkbox-bg-color: var(--comfort-bg-soft);
+  --el-checkbox-checked-bg-color: var(--comfort-primary);
+  --el-checkbox-input-border-color: var(--comfort-border);
+  --el-checkbox-input-border-color-hover: var(--comfort-primary-light);
+  --el-switch-on-color: var(--comfort-primary);
+  --el-switch-off-color: #3a3a3e;
 }
 
 /* ─── Global comfort styles ─────────────────────────────────────── */
