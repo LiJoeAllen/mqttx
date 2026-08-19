@@ -7,7 +7,6 @@ import { useGlobalVariables } from '../../stores/useGlobalVariables'
 import { prettyJson } from '../../utils/format'
 import { ElMessage } from 'element-plus'
 import HoverPreview from '../common/HoverPreview.vue'
-import VariableEditor from './VariableEditor.vue'
 import UserPropertiesEditor from './UserPropertiesEditor.vue'
 import GlobalVariableManager from './GlobalVariableManager.vue'
 
@@ -29,10 +28,16 @@ const activePresetId = ref<string | null>(null)
 const showVariables = ref(false)
 const showV5Props = ref(false)
 const showGlobalVarMgr = ref(false)
+const showAddPopover = ref(false)
 const sending = ref(false)
+const dragIndex = ref<number | null>(null)
+const dragOverIndex = ref<number | null>(null)
+
+/** Ordered list of pinned preset IDs (the tab bar) */
+const pinnedIds = ref<string[]>([])
 
 // Per-preset editor state (keyed by preset id)
-const editorStates = ref<Record<string, {
+interface EditorState {
   topic: string
   payload: string
   qos: 0 | 1 | 2
@@ -43,7 +48,8 @@ const editorStates = ref<Record<string, {
   messageExpiryInterval: number | null
   responseTopic: string
   correlationData: string
-}>>({})
+}
+const editorStates = ref<Record<string, EditorState>>({})
 
 // ─── Computed ──────────────────────────────────────────────────
 
@@ -57,6 +63,17 @@ const activePreset = computed(() =>
 
 const activeState = computed(() =>
   activePresetId.value ? editorStates.value[activePresetId.value] : null,
+)
+
+/** Presets that are pinned (in tab order) */
+const pinnedPresets = computed(() => {
+  const map = new Map(props.presets.map((p) => [p.id, p]))
+  return pinnedIds.value.map((id) => map.get(id)).filter(Boolean) as Preset[]
+})
+
+/** Presets not yet pinned, available to add */
+const unpinnedPresets = computed(() =>
+  props.presets.filter((p) => !pinnedIds.value.includes(p.id)),
 )
 
 const presetVariables = computed(() => {
@@ -105,7 +122,26 @@ function initEditorState(preset: Preset) {
   }
 }
 
-// ─── Switch active preset ──────────────────────────────────────
+// ─── Pin / Unpin / Select ──────────────────────────────────────
+
+function pinPreset(presetId: string) {
+  if (pinnedIds.value.includes(presetId)) return
+  const preset = props.presets.find((p) => p.id === presetId)
+  if (!preset) return
+  initEditorState(preset)
+  pinnedIds.value.push(presetId)
+  activePresetId.value = presetId
+  showVariables.value = presetVariables.value.length > 0
+  showAddPopover.value = false
+}
+
+function unpinPreset(id: string) {
+  pinnedIds.value = pinnedIds.value.filter((pid) => pid !== id)
+  if (activePresetId.value === id) {
+    const remaining = pinnedIds.value
+    activePresetId.value = remaining.length > 0 ? remaining[0] : null
+  }
+}
 
 function selectPreset(presetId: string) {
   const preset = props.presets.find((p) => p.id === presetId)
@@ -115,19 +151,39 @@ function selectPreset(presetId: string) {
   showVariables.value = presetVariables.value.length > 0
 }
 
-// Auto-select first preset when presets change
-watch(() => props.presets, (ps) => {
-  if (ps.length > 0) {
-    // Init all presets
-    for (const p of ps) initEditorState(p)
-    // Select first if none selected
-    if (!activePresetId.value || !ps.find((p) => p.id === activePresetId.value)) {
-      selectPreset(ps[0].id)
-    }
-  } else {
-    activePresetId.value = null
+// ─── Drag and drop ─────────────────────────────────────────────
+
+function onDragStart(index: number) {
+  dragIndex.value = index
+}
+
+function onDragOver(e: DragEvent, index: number) {
+  e.preventDefault()
+  dragOverIndex.value = index
+}
+
+function onDragLeave() {
+  dragOverIndex.value = null
+}
+
+function onDrop(index: number) {
+  if (dragIndex.value === null || dragIndex.value === index) {
+    dragIndex.value = null
+    dragOverIndex.value = null
+    return
   }
-}, { immediate: true, deep: true })
+  const arr = [...pinnedIds.value]
+  const [removed] = arr.splice(dragIndex.value, 1)
+  arr.splice(index, 0, removed)
+  pinnedIds.value = arr
+  dragIndex.value = null
+  dragOverIndex.value = null
+}
+
+function onDragEnd() {
+  dragIndex.value = null
+  dragOverIndex.value = null
+}
 
 // ─── Send ──────────────────────────────────────────────────────
 
@@ -187,17 +243,6 @@ function onBindingChange(name: string, value: string) {
     setGlobalVar(name, value)
   }
 }
-
-// ─── Close tab ─────────────────────────────────────────────────
-
-function closePreset(id: string) {
-  // Keep the editor state but deselect
-  if (activePresetId.value === id) {
-    const idx = props.presets.findIndex((p) => p.id === id)
-    const next = props.presets[idx + 1] ?? props.presets[idx - 1] ?? null
-    activePresetId.value = next?.id ?? null
-  }
-}
 </script>
 
 <template>
@@ -219,26 +264,68 @@ function closePreset(id: string) {
       </el-select>
     </div>
 
-    <!-- Preset tabs -->
-    <div v-if="presets.length > 0" class="preset-tabs">
-      <button
-        v-for="p in presets"
-        :key="p.id"
-        :class="['preset-tab', { active: activePresetId === p.id }]"
-        @click="selectPreset(p.id)"
-      >
-        <span class="pt-name">{{ p.name }}</span>
-        <span class="pt-topic">{{ p.topic }}</span>
-        <span class="pt-qos">Q{{ p.qos }}</span>
-        <span
-          v-if="activePresetId === p.id && presets.length > 1"
-          class="pt-close"
-          @click.stop="closePreset(p.id)"
-        >×</span>
-      </button>
-    </div>
-    <div v-else class="no-presets">
-      暂无预设，请先在「预设」页面创建
+    <!-- Preset tabs bar -->
+    <div class="preset-tabs">
+      <div class="pt-scroll">
+        <!-- Pinned tabs -->
+        <div
+          v-for="(p, idx) in pinnedPresets"
+          :key="p.id"
+          draggable="true"
+          :class="[
+            'preset-tab',
+            {
+              active: activePresetId === p.id,
+              'drag-over': dragOverIndex === idx && dragIndex !== idx,
+              'dragging': dragIndex === idx,
+            }
+          ]"
+          @click="selectPreset(p.id)"
+          @dragstart="onDragStart(idx)"
+          @dragover="(e) => onDragOver(e, idx)"
+          @dragleave="onDragLeave"
+          @drop="onDrop(idx)"
+          @dragend="onDragEnd"
+        >
+          <svg class="pt-grip" width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="3" cy="2" r="1"/><circle cx="7" cy="2" r="1"/><circle cx="3" cy="5" r="1"/><circle cx="7" cy="5" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="7" cy="8" r="1"/></svg>
+          <span class="pt-name">{{ p.name }}</span>
+          <span class="pt-topic">{{ p.topic }}</span>
+          <span
+            class="pt-close"
+            @click.stop="unpinPreset(p.id)"
+            title="移除标签"
+          >×</span>
+        </div>
+
+        <!-- Add button -->
+        <el-dropdown
+          v-if="unpinnedPresets.length > 0"
+          trigger="click"
+          placement="bottom-start"
+          @command="pinPreset"
+        >
+          <button class="pt-add-btn" @click.stop>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="p in unpinnedPresets"
+                :key="p.id"
+                :command="p.id"
+              >
+                <span class="add-item-name">{{ p.name }}</span>
+                <span class="add-item-topic">{{ p.topic }}</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+
+      <div v-if="pinnedIds.length === 0" class="pt-empty">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>点击 + 添加预设标签</span>
+      </div>
     </div>
 
     <!-- Editor area for active preset -->
@@ -323,7 +410,7 @@ function closePreset(id: string) {
         <div v-if="showVariables" class="expand-section">
           <div class="var-editor-header">
             <span class="var-editor-title">变量值</span>
-            <span class="var-editor-hint">输入后自动保存为全局变量，每个预设独立维护</span>
+            <span class="var-editor-hint">自动保存为全局变量，每个预设独立维护</span>
           </div>
           <div class="var-grid">
             <div
@@ -375,8 +462,8 @@ function closePreset(id: string) {
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="presets.length > 0" class="empty-state">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--comfort-text-muted)"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <div v-else-if="pinnedIds.length > 0" class="empty-state">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--comfort-text-muted)"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
       <span class="empty-text">点击上方标签页开始编辑</span>
     </div>
   </div>
@@ -400,21 +487,24 @@ function closePreset(id: string) {
   border-bottom: 1px solid var(--comfort-border-light, var(--el-border-color-light));
 }
 
-/* ─── Preset Tabs ────────────────────────────────────────────── */
+/* ─── Preset Tabs Bar ────────────────────────────────────────── */
 .preset-tabs {
-  display: flex;
-  gap: 2px;
   padding: 6px 8px 0;
-  overflow-x: auto;
   background: var(--comfort-bg-soft, var(--el-fill-color-light));
   border-bottom: 1px solid var(--comfort-border-light, var(--el-border-color-light));
+}
+.pt-scroll {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
   scrollbar-width: thin;
+  align-items: stretch;
 }
 .preset-tab {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 4px 8px;
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: 6px 6px 0 0;
@@ -426,8 +516,8 @@ function closePreset(id: string) {
   white-space: nowrap;
   flex-shrink: 0;
   transition: all 0.15s;
-  position: relative;
   margin-bottom: -1px;
+  user-select: none;
 }
 .preset-tab:hover {
   color: var(--comfort-text, var(--el-text-color-primary));
@@ -439,8 +529,28 @@ function closePreset(id: string) {
   border-color: var(--comfort-border-light, var(--el-border-color-light));
   font-weight: 600;
 }
+.preset-tab.dragging {
+  opacity: 0.4;
+}
+.preset-tab.drag-over {
+  border-left-color: var(--comfort-primary, var(--el-color-primary));
+  border-left-width: 2px;
+}
+.pt-grip {
+  flex-shrink: 0;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: grab;
+}
+.preset-tab:hover .pt-grip {
+  opacity: 0.6;
+}
+.pt-grip:active {
+  cursor: grabbing;
+}
 .pt-name {
-  max-width: 100px;
+  max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -448,20 +558,14 @@ function closePreset(id: string) {
   font-family: var(--comfort-font-mono, monospace);
   font-size: 10px;
   color: var(--comfort-text-muted, var(--el-text-color-placeholder));
-  max-width: 120px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.pt-qos {
-  font-size: 10px;
-  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
-  flex-shrink: 0;
 }
 .pt-close {
   font-size: 14px;
   line-height: 1;
   color: var(--comfort-text-muted, var(--el-text-color-placeholder));
-  margin-left: 2px;
   flex-shrink: 0;
   width: 14px;
   height: 14px;
@@ -469,15 +573,57 @@ function closePreset(id: string) {
   align-items: center;
   justify-content: center;
   border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.preset-tab:hover .pt-close {
+  opacity: 0.7;
 }
 .pt-close:hover {
   color: var(--comfort-danger, var(--el-color-danger));
   background: var(--el-color-danger-light-9);
+  opacity: 1 !important;
 }
-.no-presets {
-  padding: 12px;
-  text-align: center;
+.pt-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px dashed var(--comfort-border, var(--el-border-color));
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+  flex-shrink: 0;
+  margin-top: 2px;
+  transition: all 0.15s;
+}
+.pt-add-btn:hover {
+  color: var(--comfort-primary, var(--el-color-primary));
+  border-color: var(--comfort-primary-light, var(--el-color-primary-light-5));
+  background: var(--comfort-primary-bg, var(--el-color-primary-light-9));
+}
+.pt-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
   font-size: 12px;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
+}
+.pt-empty svg {
+  flex-shrink: 0;
+}
+
+/* Add dropdown items */
+.add-item-name {
+  font-weight: 500;
+  margin-right: 8px;
+}
+.add-item-topic {
+  font-family: var(--comfort-font-mono, monospace);
+  font-size: 11px;
   color: var(--comfort-text-muted, var(--el-text-color-placeholder));
 }
 
