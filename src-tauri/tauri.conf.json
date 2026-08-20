@@ -23,6 +23,16 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://releases.mqttx.app/update/{{target}}-{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "请替换为你的公钥——使用 `tauri signer generate` 生成签名密钥对后，将公钥粘贴至此"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
@@ -35,7 +45,8 @@
     ],
     "windows": {
       "nsis": {
-        "language": ["SimpChinese", "English"]
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true
       },
       "wix": {
         "language": ["zh-CN", "en-US"]
