@@ -33,7 +33,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Type check
-        run: npx vue-tsc --noEmit
+        run: pnpm exec vue-tsc --noEmit
 
       - name: Build
         run: pnpm build
@@ -102,7 +102,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        run: pnpm tauri build --target ${{ matrix.target }}
+        run: pnpm tauri build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

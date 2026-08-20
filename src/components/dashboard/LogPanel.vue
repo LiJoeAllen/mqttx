@@ -57,8 +57,8 @@ async function handleOpenLogDir() {
       logDirPath.value = await mqttGetLogDir()
     }
     // Try to open the directory using the opener plugin
-    const { open } = await import('@tauri-apps/plugin-opener')
-    await open(logDirPath.value)
+    const { openPath } = await import('@tauri-apps/plugin-opener')
+    await openPath(logDirPath.value)
   } catch (e: any) {
     ElMessage.warning(`日志目录: ${logDirPath.value || '未知'}`)
   }

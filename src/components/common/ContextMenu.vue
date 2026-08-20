@@ -18,7 +18,6 @@ const visible = ref(false)
 const x = ref(0)
 const y = ref(0)
 let targetEl: HTMLElement | null = null
-let cleanup: (() => void) | null = null
 
 function show(ev: MouseEvent, el: HTMLElement) {
   x.value = ev.clientX
@@ -51,7 +50,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', onClickOutside)
-  if (cleanup) cleanup()
 })
 
 defineExpose({ show, hide })

@@ -50,7 +50,7 @@ function refreshEntries() {
     :model-value="showPanel"
     title="全局变量管理"
     width="500px"
-    @update:model-value="(val) => showPanel = val"
+    @update:model-value="(val: boolean) => showPanel = val"
     @open="refreshEntries"
     @closed="newVarName = ''; newVarValue = ''"
   >
