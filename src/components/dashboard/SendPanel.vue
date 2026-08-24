@@ -5,6 +5,8 @@ import { extractVariables, resolveTemplate, resolveUserProperties } from '../../
 import { mqttPublish } from '../../stores/useMqttBridge'
 import { useGlobalVariables } from '../../stores/useGlobalVariables'
 import { prettyJson } from '../../utils/format'
+import { JsonEditor } from '@visual-json/vue'
+import type { JsonValue } from '@visual-json/core'
 import { ElMessage } from 'element-plus'
 import HoverPreview from '../common/HoverPreview.vue'
 import UserPropertiesEditor from './UserPropertiesEditor.vue'
@@ -32,6 +34,7 @@ const showAddPopover = ref(false)
 const sending = ref(false)
 const dragIndex = ref<number | null>(null)
 const dragOverIndex = ref<number | null>(null)
+const payloadMode = ref<'text' | 'json'>('text')
 
 /** Ordered list of pinned preset IDs (the tab bar) */
 const pinnedIds = ref<string[]>([])
@@ -64,6 +67,24 @@ const activePreset = computed(() =>
 const activeState = computed(() =>
   activePresetId.value ? editorStates.value[activePresetId.value] : null,
 )
+
+const payloadJsonValid = computed(() => {
+  if (!activeState.value) return false
+  try {
+    JSON.parse(activeState.value.payload)
+    return true
+  } catch {
+    return false
+  }
+})
+
+const payloadJsonValue = computed<JsonValue>(() => {
+  try {
+    return JSON.parse(activeState.value?.payload ?? '') as JsonValue
+  } catch {
+    return {}
+  }
+})
 
 /** Presets that are pinned (in tab order) */
 const pinnedPresets = computed(() => {
@@ -150,6 +171,10 @@ function selectPreset(presetId: string) {
   activePresetId.value = presetId
   showVariables.value = presetVariables.value.length > 0
 }
+
+watch(activePresetId, () => {
+  payloadMode.value = 'text'
+})
 
 // ─── Drag and drop ─────────────────────────────────────────────
 
@@ -242,6 +267,22 @@ function onBindingChange(name: string, value: string) {
   if (value.trim()) {
     setGlobalVar(name, value)
   }
+}
+
+// ─── JSON 可视化模式 ───────────────────────────────────────────
+
+function tryEnableJsonMode() {
+  if (!activeState.value) return
+  if (!payloadJsonValid.value) {
+    ElMessage.warning('当前 Payload 不是合法 JSON，请先在文本模式编辑或解析 {{变量}}')
+    return
+  }
+  payloadMode.value = 'json'
+}
+
+function onJsonPayloadChange(value: JsonValue) {
+  if (!activeState.value) return
+  activeState.value.payload = JSON.stringify(value, null, 2)
 }
 </script>
 
@@ -352,8 +393,20 @@ function onBindingChange(name: string, value: string) {
       <!-- Row: Payload -->
       <div class="form-row">
         <div class="field" style="flex: 1">
-          <label>Payload</label>
-          <HoverPreview :text="prettyJson(activeState.payload)" :delay="600">
+          <div class="payload-head">
+            <label>Payload</label>
+            <div class="payload-mode">
+              <span
+                :class="['pm-tab', { active: payloadMode === 'text' }]"
+                @click="payloadMode = 'text'"
+              >文本</span>
+              <span
+                :class="['pm-tab', { active: payloadMode === 'json' }]"
+                @click="tryEnableJsonMode"
+              >JSON 可视化</span>
+            </div>
+          </div>
+          <HoverPreview v-if="payloadMode === 'text'" :text="prettyJson(activeState.payload)" :delay="600">
             <el-input
               v-model="activeState.payload"
               type="textarea"
@@ -361,6 +414,17 @@ function onBindingChange(name: string, value: string) {
               placeholder='{"temp":{{temp}},"device":"{{deviceId}}"}'
             />
           </HoverPreview>
+          <div v-else-if="payloadMode === 'json'" class="json-editor-box">
+            <JsonEditor
+              v-if="payloadJsonValid"
+              :value="payloadJsonValue"
+              height="260"
+              @change="onJsonPayloadChange"
+            />
+            <div v-else class="json-editor-fallback">
+              Payload 已不是合法 JSON，请切回文本模式
+            </div>
+          </div>
         </div>
       </div>
 
@@ -648,6 +712,50 @@ function onBindingChange(name: string, value: string) {
   font-size: 11px;
   color: var(--comfort-text-secondary, var(--el-text-color-secondary));
   font-weight: 500;
+}
+
+/* ─── Payload mode toggle ────────────────────────────────────── */
+.payload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.payload-mode {
+  display: flex;
+  gap: 1px;
+  background: var(--el-fill-color);
+  border-radius: 4px;
+  padding: 1px;
+}
+.pm-tab {
+  font-size: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--comfort-text-secondary, var(--el-text-color-secondary));
+  transition: all 0.12s;
+  line-height: 18px;
+  user-select: none;
+}
+.pm-tab:hover {
+  color: var(--el-color-primary);
+}
+.pm-tab.active {
+  color: var(--el-color-primary);
+  background: var(--comfort-bg-card, var(--el-bg-color));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+.json-editor-box {
+  border: 1px solid var(--comfort-border, var(--el-border-color));
+  border-radius: 6px;
+  overflow: hidden;
+}
+.json-editor-fallback {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--comfort-text-muted, var(--el-text-color-placeholder));
 }
 
 /* ─── Empty state ────────────────────────────────────────────── */

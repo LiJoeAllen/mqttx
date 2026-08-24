@@ -23,6 +23,12 @@ importers:
       '@tauri-apps/plugin-updater':
         specifier: ^2
         version: 2.10.1
+      '@visual-json/core':
+        specifier: ^0.4.0
+        version: 0.4.0
+      '@visual-json/vue':
+        specifier: ^0.4.0
+        version: 0.4.0(vue@3.5.41(typescript@6.0.3))
       element-plus:
         specifier: ^2.14.4
         version: 2.14.4(vue@3.5.41(typescript@6.0.3))
@@ -281,6 +287,14 @@ packages:
 
   '@types/web-bluetooth@0.0.21':
     resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
+
+  '@visual-json/core@0.4.0':
+    resolution: {integrity: sha512-T/HvRIp7r6SehxVnO+akV72NLv2OMBEoQdYTFbpwMi6uU2TaXQOpIOHBG4r9XBz7OqC2e8aedOwal/NtqtzyCg==}
+
+  '@visual-json/vue@0.4.0':
+    resolution: {integrity: sha512-fNAxSJOlE/z4CgxB2L+sC4kQgQ1jTG/JcBYTzowG5NOthMlh/VkY0bPEGQRdbIV3QaJBJUwcMtf5+9orfoNgLw==}
+    peerDependencies:
+      vue: ^3.3.0
 
   '@vitejs/plugin-vue@6.0.8':
     resolution: {integrity: sha512-0ZjgOg7oO6farnNGup7yvoM/YXZV84OZxHAwtflItNa/6zzQyVb5LNxyea3FEKEX2XlagIKzrlH7wwxkKgtiew==}
@@ -732,6 +746,13 @@ snapshots:
   '@types/lodash@4.17.25': {}
 
   '@types/web-bluetooth@0.0.21': {}
+
+  '@visual-json/core@0.4.0': {}
+
+  '@visual-json/vue@0.4.0(vue@3.5.41(typescript@6.0.3))':
+    dependencies:
+      '@visual-json/core': 0.4.0
+      vue: 3.5.41(typescript@6.0.3)
 
   '@vitejs/plugin-vue@6.0.8(vite@8.2.1)(vue@3.5.41(typescript@6.0.3))':
     dependencies:

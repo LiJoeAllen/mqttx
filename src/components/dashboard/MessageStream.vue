@@ -2,7 +2,9 @@
 import { ref, watch, nextTick } from 'vue'
 import type { MqttMessage } from '../../types/mqtt'
 import { prettyJson, isJson, truncate } from '../../utils/format'
+import type { JsonValue } from '@visual-json/core'
 import HoverPreview from '../common/HoverPreview.vue'
+import JsonViewer from './JsonViewer.vue'
 
 const props = defineProps<{
   messages: MqttMessage[]
@@ -66,6 +68,14 @@ function formatPayload(msg: MqttMessage): string {
     case 'base64': return btoa(msg.payload)
     case 'plain':
     default: return msg.payload
+  }
+}
+
+function getJsonValue(msg: MqttMessage): JsonValue {
+  try {
+    return JSON.parse(msg.payload) as JsonValue
+  } catch {
+    return {}
   }
 }
 
@@ -166,10 +176,15 @@ function formatTime(ts: number): string {
 
       <!-- Payload Content -->
       <div class="msg-payload" :class="{ expanded: !collapsedPayloads.has(msg.id) }">
-        <pre
-          v-if="!collapsedPayloads.has(msg.id)"
-          :class="['payload-full', { 'is-json': getEffectiveFormat(msg) === 'json' }]"
-        ><HoverPreview :text="formatPayload(msg)">{{ formatPayload(msg) }}</HoverPreview></pre>
+        <template v-if="!collapsedPayloads.has(msg.id)">
+          <JsonViewer
+            v-if="getEffectiveFormat(msg) === 'json'"
+            :value="getJsonValue(msg)"
+            height="320"
+            class="msg-json-viewer"
+          />
+          <pre v-else class="payload-full"><HoverPreview :text="formatPayload(msg)">{{ formatPayload(msg) }}</HoverPreview></pre>
+        </template>
         <pre v-else class="payload-truncated">
               <HoverPreview :text="prettyJson(msg.payload)">{{ truncate(prettyJson(msg.payload), 200) }}</HoverPreview>
             </pre>
@@ -357,6 +372,9 @@ function formatTime(ts: number): string {
 .msg-payload {
   margin-top: 2px;
 }
+.msg-json-viewer {
+  margin-top: 4px;
+}
 .msg-payload pre {
   margin: 0;
   white-space: pre-wrap;
@@ -372,9 +390,6 @@ function formatTime(ts: number): string {
   font-size: 12px;
   line-height: 1.5;
   border: 1px solid var(--el-border-color-extra-light);
-}
-.payload-full.is-json {
-  color: var(--el-color-primary-dark-2);
 }
 .payload-truncated {
   max-height: 1.4em;

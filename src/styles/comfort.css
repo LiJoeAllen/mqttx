@@ -302,3 +302,59 @@ body {
   --el-checkbox-checked-input-border-color: var(--comfort-primary);
   --el-checkbox-input-border-color-hover: var(--comfort-primary-light);
 }
+
+/* ─── visual-json theme override ───────────────────────────────────
+   The library injects its dark defaults as inline custom properties,
+   so we need !important stylesheet rules to win the cascade and follow
+   the app's light/dark comfort palette. */
+[data-vj-root] {
+  --vj-bg: var(--comfort-bg-card) !important;
+  --vj-bg-panel: var(--comfort-bg-soft) !important;
+  --vj-bg-hover: #f0f0eb !important;
+  --vj-bg-selected: var(--comfort-primary-bg) !important;
+  --vj-bg-selected-muted: #f0f0eb !important;
+  --vj-bg-match: #f7ecd2 !important;
+  --vj-bg-match-active: #f0dc9f !important;
+  --vj-border: var(--comfort-border) !important;
+  --vj-border-subtle: var(--comfort-border-light) !important;
+  --vj-text: var(--comfort-text) !important;
+  --vj-text-muted: var(--comfort-text-secondary) !important;
+  --vj-text-dim: var(--comfort-text-muted) !important;
+  --vj-text-dimmer: #c0c0ba !important;
+  --vj-string: #a31515 !important;
+  --vj-number: #098658 !important;
+  --vj-boolean: #0000ff !important;
+  --vj-accent: var(--comfort-primary) !important;
+  --vj-accent-muted: #d7e5d6 !important;
+  --vj-input-bg: var(--comfort-bg-card) !important;
+  --vj-input-border: var(--comfort-border) !important;
+  --vj-error: var(--comfort-danger) !important;
+  --vj-font: var(--comfort-font-mono) !important;
+  --vj-input-font-size: 13px !important;
+}
+
+.dark [data-vj-root] {
+  --vj-bg: var(--comfort-bg-card) !important;
+  --vj-bg-panel: var(--comfort-bg-soft) !important;
+  --vj-bg-hover: #323236 !important;
+  --vj-bg-selected: var(--comfort-primary-bg) !important;
+  --vj-bg-selected-muted: #2e2e32 !important;
+  --vj-bg-match: #3a3520 !important;
+  --vj-bg-match-active: #51502b !important;
+  --vj-border: var(--comfort-border) !important;
+  --vj-border-subtle: var(--comfort-border-light) !important;
+  --vj-text: var(--comfort-text) !important;
+  --vj-text-muted: var(--comfort-text-secondary) !important;
+  --vj-text-dim: var(--comfort-text-muted) !important;
+  --vj-text-dimmer: #555555 !important;
+  --vj-string: #ce9178 !important;
+  --vj-number: #b5cea8 !important;
+  --vj-boolean: #569cd6 !important;
+  --vj-accent: var(--comfort-primary) !important;
+  --vj-accent-muted: #3a4a3a !important;
+  --vj-input-bg: #36363a !important;
+  --vj-input-border: #4a4a4e !important;
+  --vj-error: var(--comfort-danger) !important;
+  --vj-font: var(--comfort-font-mono) !important;
+  --vj-input-font-size: 13px !important;
+}

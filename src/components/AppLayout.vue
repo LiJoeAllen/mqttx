@@ -69,10 +69,14 @@ onMounted(() => {
     <header class="app-header">
       <div class="header-left">
         <div class="app-brand">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="brand-icon">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 6v6l4 2"/>
-          </svg>
+          <img
+            src="/mqttx.svg"
+            width="22"
+            height="22"
+            alt="MQTTX"
+            class="brand-icon"
+            draggable="false"
+          />
           <span class="brand-name">MQTTX</span>
           <span class="brand-version">v0.1</span>
         </div>
@@ -203,7 +207,9 @@ onMounted(() => {
   gap: 8px;
 }
 .brand-icon {
-  color: var(--el-color-primary);
+  display: block;
+  border-radius: 6px;
+  user-select: none;
 }
 .brand-name {
   font-size: 18px;
