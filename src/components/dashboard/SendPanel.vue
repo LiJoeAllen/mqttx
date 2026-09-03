@@ -60,6 +60,13 @@ const connectedConnections = computed(() =>
   props.connections.filter((c) => c.status === 'connected'),
 )
 
+const selectedConnection = computed(() =>
+  props.connections.find((c) => c.id === selectedConnectionId.value),
+)
+
+/** MQTT 3.1.1 连接不支持 v5 属性 */
+const isV5Connection = computed(() => selectedConnection.value?.protocolVersion !== '3.1.1')
+
 const activePreset = computed(() =>
   props.presets.find((p) => p.id === activePresetId.value),
 )
@@ -440,6 +447,7 @@ function onJsonPayloadChange(value: JsonValue) {
           <span v-if="presetVariables.length" class="toggle-badge">{{ presetVariables.length }}</span>
         </el-button>
         <el-button
+          v-if="isV5Connection"
           size="small"
           :class="['toggle-btn', { active: showV5Props }]"
           @click="showV5Props = !showV5Props"
@@ -496,7 +504,7 @@ function onJsonPayloadChange(value: JsonValue) {
 
       <!-- v5 Props -->
       <transition name="slide">
-        <div v-if="showV5Props" class="expand-section">
+        <div v-if="showV5Props && isV5Connection" class="expand-section">
           <div class="v5-grid">
             <div class="field">
               <label>Content Type</label>

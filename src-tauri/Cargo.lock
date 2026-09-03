@@ -2248,6 +2248,7 @@ dependencies = [
 name = "mqttx"
 version = "0.1.0"
 dependencies = [
+ "rumqttc-v4-next",
  "rumqttc-v5-next",
  "serde",
  "serde_json",
@@ -3105,6 +3106,29 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "rumqttc-v4-next"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3767dde22a804ea806107d0f4331e33cb794d1b8468b11c86fb0c1366f07054"
+dependencies = [
+ "async-tungstenite",
+ "bytes",
+ "fixedbitset",
+ "flume",
+ "futures-util",
+ "log",
+ "mqttbytes-core-next",
+ "rumqttc-core-next",
+ "rustls-native-certs",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
 ]
 
 [[package]]

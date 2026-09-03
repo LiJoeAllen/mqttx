@@ -27,7 +27,9 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rumqttc-v5-next = "0.34"
+# rumqttc-v5-next 与 rumqttc-v4-next 的 lib 目标名都是 "rumqttc"，必须重命名依赖才能共存
+rumqttc = { package = "rumqttc-v5-next", version = "0.34" }
+rumqttc-v4 = { package = "rumqttc-v4-next", version = "0.34" }
 tokio = { version = "1", features = ["sync"] }
 uuid = { version = "1", features = ["v4"] }
 

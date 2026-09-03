@@ -5,6 +5,7 @@ use rumqttc::{
     AsyncClient, Broker, ConnectionError, Event, EventLoop, MqttOptions, Outgoing,
     PublishOptions,
 };
+use rumqttc_v4 as rv4;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -12,6 +13,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{RwLock, watch};
+
+// ─── 调试日志 ────────────────────────────────────────────────────────────────
+
+fn write_debug_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("mqttx_debug.log")
+    {
+        let _ = writeln!(f, "[{}] {}", chrono_now(), msg);
+    }
+}
+
+fn chrono_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    // 简单 UTC 时间
+    let h = (secs / 3600) % 24;
+    let m = (secs / 60) % 60;
+    let s = secs % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
 
 // ─── DTO structs ───────────────────────────────────────────────────────────────
 
@@ -24,6 +48,9 @@ pub struct MqttConnectionDto {
     pub username: String,
     pub password: String,
     pub client_id: String,
+    /// MQTT 协议版本: "3.1.1" | "5.0"，老数据缺省按 5.0 处理
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: String,
     pub clean_start: bool,
     pub session_expiry_interval: u32,
     pub keep_alive: u64,
@@ -31,6 +58,10 @@ pub struct MqttConnectionDto {
     pub receive_maximum: Option<u16>,
     pub maximum_packet_size: Option<u32>,
     pub topic_alias_maximum: Option<u16>,
+}
+
+fn default_protocol_version() -> String {
+    "5.0".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,8 +214,13 @@ impl LogWriter {
 
 // ─── State management ──────────────────────────────────────────────────────────
 
+enum ClientKind {
+    V5(AsyncClient),
+    V4(rv4::AsyncClient),
+}
+
 struct ClientHandle {
-    client: AsyncClient,
+    client: ClientKind,
     cancel_tx: watch::Sender<bool>,
     connected: Arc<AtomicBool>,
 }
@@ -238,6 +274,22 @@ fn emit_log(app_handle: &AppHandle, connection_id: &str, level: &str, event: &st
     }
 }
 
+fn make_status(
+    connection_id: &str,
+    status: &str,
+    error: Option<String>,
+    session_present: Option<bool>,
+    reason_code: Option<u8>,
+) -> MqttStatusEvent {
+    MqttStatusEvent {
+        connection_id: connection_id.to_string(),
+        status: status.to_string(),
+        error,
+        session_present,
+        reason_code,
+    }
+}
+
 fn extract_publish_info(publish: &Publish) -> MqttMessageEvent {
     let payload_str = String::from_utf8_lossy(&publish.payload).to_string();
     let props = publish.properties.as_ref();
@@ -268,6 +320,26 @@ fn extract_publish_info(publish: &Publish) -> MqttMessageEvent {
         message_expiry_interval: props.and_then(|p| p.message_expiry_interval),
         subscription_identifier: props
             .and_then(|p| p.subscription_identifiers.first().copied().map(|v| v as u32)),
+    }
+}
+
+/// MQTT 3.1.1 的 Publish 没有 v5 properties，v5 专属字段一律置空
+fn extract_publish_info_v4(publish: &rv4::Publish) -> MqttMessageEvent {
+    MqttMessageEvent {
+        connection_id: String::new(), // will be filled by caller
+        topic: String::from_utf8_lossy(&publish.topic).to_string(),
+        payload: String::from_utf8_lossy(&publish.payload).to_string(),
+        qos: qos_to_u8(publish.qos),
+        retain: publish.retain,
+        timestamp: now_timestamp(),
+        reason_code: None,
+        user_properties: Vec::new(),
+        content_type: None,
+        content_encoding: None,
+        response_topic: None,
+        correlation_data: None,
+        message_expiry_interval: None,
+        subscription_identifier: None,
     }
 }
 
@@ -308,7 +380,7 @@ fn describe_publish_properties(props: &Option<PublishProperties>) -> String {
 
 // ─── Background event loop task ────────────────────────────────────────────────
 
-fn spawn_event_loop(
+fn spawn_event_loop_v5(
     connection_id: String,
     mut eventloop: EventLoop,
     mut cancel_rx: watch::Receiver<bool>,
@@ -361,13 +433,10 @@ fn spawn_event_loop(
                                 emit_log(&app_handle, &connection_id, "error", "connack",
                                     format!("连接被拒绝: {:?} (code: {})", connack.code, reason_code), None);
                             }
-                            let status_event = MqttStatusEvent {
-                                connection_id: connection_id.clone(),
-                                status: "connected".to_string(),
-                                error: None,
-                                session_present: Some(connack.session_present),
-                                reason_code: Some(reason_code),
-                            };
+                            let status_event = make_status(
+                                &connection_id, "connected", None,
+                                Some(connack.session_present), Some(reason_code),
+                            );
                             let _ = app_handle.emit("mqtt:status", &status_event);
                         }
 
@@ -389,13 +458,11 @@ fn spawn_event_loop(
                                 format!("收到断开连接: {reason_desc} (code: {reason_code})"),
                                 Some(props_info).filter(|d| !d.is_empty()),
                             );
-                            let status_event = MqttStatusEvent {
-                                connection_id: connection_id.clone(),
-                                status: "disconnected".to_string(),
-                                error: Some(format!("Disconnect reason: {reason_desc}")),
-                                session_present: None,
-                                reason_code: Some(reason_code),
-                            };
+                            let status_event = make_status(
+                                &connection_id, "disconnected",
+                                Some(format!("Disconnect reason: {reason_desc}")),
+                                None, Some(reason_code),
+                            );
                             let _ = app_handle.emit("mqtt:status", &status_event);
                             break;
                         }
@@ -545,13 +612,7 @@ fn spawn_event_loop(
                             connected.store(false, Ordering::SeqCst);
                             emit_log(&app_handle, &connection_id, "info", "disconnect_sent",
                                 "已发送断开连接请求".to_string(), None);
-                            let status_event = MqttStatusEvent {
-                                connection_id: connection_id.clone(),
-                                status: "disconnected".to_string(),
-                                error: None,
-                                session_present: None,
-                                reason_code: None,
-                            };
+                            let status_event = make_status(&connection_id, "disconnected", None, None, None);
                             let _ = app_handle.emit("mqtt:status", &status_event);
                             break;
                         }
@@ -560,13 +621,7 @@ fn spawn_event_loop(
                             connected.store(false, Ordering::SeqCst);
                             emit_log(&app_handle, &connection_id, "info", "requests_done",
                                 "所有请求已完成，连接关闭".to_string(), None);
-                            let status_event = MqttStatusEvent {
-                                connection_id: connection_id.clone(),
-                                status: "disconnected".to_string(),
-                                error: None,
-                                session_present: None,
-                                reason_code: None,
-                            };
+                            let status_event = make_status(&connection_id, "disconnected", None, None, None);
                             let _ = app_handle.emit("mqtt:status", &status_event);
                             break;
                         }
@@ -575,13 +630,9 @@ fn spawn_event_loop(
                             connected.store(false, Ordering::SeqCst);
                             emit_log(&app_handle, &connection_id, "error", "connection_error",
                                 format!("连接错误: {e}"), None);
-                            let status_event = MqttStatusEvent {
-                                connection_id: connection_id.clone(),
-                                status: "error".to_string(),
-                                error: Some(e.to_string()),
-                                session_present: None,
-                                reason_code: None,
-                            };
+                            let status_event = make_status(
+                                &connection_id, "error", Some(e.to_string()), None, None,
+                            );
                             let _ = app_handle.emit("mqtt:status", &status_event);
                             break;
                         }
@@ -618,13 +669,210 @@ fn spawn_event_loop(
                     connected.store(false, Ordering::SeqCst);
                     emit_log(&app_handle, &connection_id, "info", "disconnect_cancelled",
                         "用户取消连接".to_string(), None);
-                    let status_event = MqttStatusEvent {
-                        connection_id: connection_id.clone(),
-                        status: "disconnected".to_string(),
-                        error: None,
-                        session_present: None,
-                        reason_code: None,
-                    };
+                    let status_event = make_status(&connection_id, "disconnected", None, None, None);
+                    let _ = app_handle.emit("mqtt:status", &status_event);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// MQTT 3.1.1 事件循环：与 v5 平行，packet 类型/日志行为按 v4 协议对齐
+fn spawn_event_loop_v4(
+    connection_id: String,
+    mut eventloop: rv4::EventLoop,
+    mut cancel_rx: watch::Receiver<bool>,
+    connected: Arc<AtomicBool>,
+    app_handle: AppHandle,
+) {
+    let conn_id = connection_id.clone();
+    let ah = app_handle.clone();
+    emit_log(&ah, &conn_id, "info", "event_loop_started", "MQTT 3.1.1 事件循环已启动".to_string(), None);
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                event = eventloop.poll() => {
+                    match event {
+                        Ok(rv4::Event::Incoming(rv4::Packet::Publish(publish))) => {
+                            let topic = String::from_utf8_lossy(&publish.topic).to_string();
+                            let payload_len = publish.payload.len();
+                            let payload_preview = String::from_utf8_lossy(&publish.payload).to_string().chars().take(200).collect::<String>();
+                            emit_log(&app_handle, &connection_id, "info", "publish_received",
+                                format!("收到消息: {topic} ({} 字节, QoS {})", payload_len, qos_to_u8(publish.qos)),
+                                Some(format!("payload: {}{}",
+                                    payload_preview,
+                                    if payload_len > 200 { format!("... (共 {} 字节)", payload_len) } else { String::new() })),
+                            );
+                            let mut msg = extract_publish_info_v4(&publish);
+                            msg.connection_id = connection_id.clone();
+                            let _ = app_handle.emit("mqtt:message", &msg);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::ConnAck(connack))) => {
+                            connected.store(true, Ordering::SeqCst);
+                            let reason_code = connack.code as u8;
+                            let is_success = connack.code == rv4::ConnectReturnCode::Success;
+                            if is_success {
+                                emit_log(&app_handle, &connection_id, "info", "connack",
+                                    format!("连接成功 (session_present: {})", connack.session_present), None);
+                            } else {
+                                emit_log(&app_handle, &connection_id, "error", "connack",
+                                    format!("连接被拒绝: {:?} (code: {})", connack.code, reason_code), None);
+                            }
+                            let status_event = make_status(
+                                &connection_id, "connected", None,
+                                Some(connack.session_present), Some(reason_code),
+                            );
+                            let _ = app_handle.emit("mqtt:status", &status_event);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::Disconnect)) => {
+                            connected.store(false, Ordering::SeqCst);
+                            emit_log(&app_handle, &connection_id, "warn", "disconnect_received",
+                                "收到断开连接 (MQTT 3.1.1)".to_string(), None);
+                            let status_event = make_status(
+                                &connection_id, "disconnected",
+                                Some("收到服务端断开连接".to_string()), None, None,
+                            );
+                            let _ = app_handle.emit("mqtt:status", &status_event);
+                            break;
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::SubAck(suback))) => {
+                            let codes: Vec<String> = suback.return_codes.iter().map(|rc| {
+                                match rc {
+                                    rv4::SubscribeReasonCode::Success(qos) => format!("成功(QoS {})", qos_to_u8(*qos)),
+                                    rv4::SubscribeReasonCode::Failure => "失败(0x80)".to_string(),
+                                }
+                            }).collect();
+                            let any_failure = suback.return_codes.iter().any(|rc| !matches!(rc, rv4::SubscribeReasonCode::Success(_)));
+                            let level = if any_failure { "warn" } else { "info" };
+                            emit_log(&app_handle, &connection_id, level, "suback",
+                                format!("订阅确认 (packet_id: {}): {}", suback.pkid, codes.join(", ")), None);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::UnsubAck(unsuback))) => {
+                            emit_log(&app_handle, &connection_id, "info", "unsuback",
+                                format!("取消订阅确认 (packet_id: {})", unsuback.pkid), None);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::PubAck(puback))) => {
+                            emit_log(&app_handle, &connection_id, "info", "puback",
+                                format!("发布确认 (packet_id: {})", puback.pkid), None);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::PubRec(pubrec))) => {
+                            emit_log(&app_handle, &connection_id, "info", "pubrec",
+                                format!("QoS2 发布收到 (packet_id: {})", pubrec.pkid), None);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::PubRel(pubrel))) => {
+                            emit_log(&app_handle, &connection_id, "info", "pubrel",
+                                format!("QoS2 发布释放 (packet_id: {})", pubrel.pkid), None);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::PubComp(pubcomp))) => {
+                            emit_log(&app_handle, &connection_id, "info", "pubcomp",
+                                format!("QoS2 发布完成 (packet_id: {})", pubcomp.pkid), None);
+                        }
+
+                        Ok(rv4::Event::Incoming(rv4::Packet::PingResp)) => {
+                            // Ping responses are too noisy to log every time
+                        }
+
+                        // ─── Outgoing events (packet IDs only) ──────────────────────
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::PingReq)) => {
+                            // Ping requests are too noisy
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::Publish(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "publish_sent",
+                                format!("发送消息 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::Subscribe(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "subscribe_sent",
+                                format!("发送订阅请求 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::Unsubscribe(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "unsubscribe_sent",
+                                format!("发送取消订阅请求 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::PubAck(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "puback_sent",
+                                format!("发送发布确认 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::PubRec(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "pubrec_sent",
+                                format!("发送QoS2发布收到 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::PubRel(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "pubrel_sent",
+                                format!("发送QoS2发布释放 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::PubComp(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "pubcomp_sent",
+                                format!("发送QoS2发布完成 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::PingResp)) => {
+                            // Ping responses are too noisy
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::AwaitAck(pkid))) => {
+                            emit_log(&app_handle, &connection_id, "info", "await_ack",
+                                format!("等待应答 (packet_id: {pkid})"), None);
+                        }
+
+                        Ok(rv4::Event::Outgoing(rv4::Outgoing::Disconnect)) => {
+                            connected.store(false, Ordering::SeqCst);
+                            emit_log(&app_handle, &connection_id, "info", "disconnect_sent",
+                                "已发送断开连接请求".to_string(), None);
+                            let status_event = make_status(&connection_id, "disconnected", None, None, None);
+                            let _ = app_handle.emit("mqtt:status", &status_event);
+                            break;
+                        }
+
+                        Err(rv4::ConnectionError::RequestsDone) => {
+                            connected.store(false, Ordering::SeqCst);
+                            emit_log(&app_handle, &connection_id, "info", "requests_done",
+                                "所有请求已完成，连接关闭".to_string(), None);
+                            let status_event = make_status(&connection_id, "disconnected", None, None, None);
+                            let _ = app_handle.emit("mqtt:status", &status_event);
+                            break;
+                        }
+
+                        Err(e) => {
+                            connected.store(false, Ordering::SeqCst);
+                            emit_log(&app_handle, &connection_id, "error", "connection_error",
+                                format!("连接错误: {e}"), None);
+                            let status_event = make_status(
+                                &connection_id, "error", Some(e.to_string()), None, None,
+                            );
+                            let _ = app_handle.emit("mqtt:status", &status_event);
+                            break;
+                        }
+
+                        Ok(rv4::Event::Incoming(other)) => {
+                            emit_log(&app_handle, &connection_id, "info", "incoming_other",
+                                format!("未处理入站事件: {:?}", std::mem::discriminant(&other)), None);
+                        }
+                    }
+                }
+
+                _ = cancel_rx.changed() => {
+                    connected.store(false, Ordering::SeqCst);
+                    emit_log(&app_handle, &connection_id, "info", "disconnect_cancelled",
+                        "用户取消连接".to_string(), None);
+                    let status_event = make_status(&connection_id, "disconnected", None, None, None);
                     let _ = app_handle.emit("mqtt:status", &status_event);
                     break;
                 }
@@ -641,28 +889,15 @@ async fn mqtt_connect(
     state: tauri::State<'_, AppState>,
     conn: MqttConnectionDto,
 ) -> Result<(), String> {
-    let broker = Broker::tcp(&conn.host, conn.port);
-    let mut mqttopts = MqttOptions::new(&conn.client_id, broker);
-    mqttopts.set_keep_alive(conn.keep_alive as u16);
-    mqttopts.set_clean_start(conn.clean_start);
-
-    if conn.session_expiry_interval > 0 {
-        mqttopts.set_session_expiry_interval(Some(conn.session_expiry_interval));
-    }
-
-    if !conn.username.is_empty() {
-        mqttopts.set_credentials(conn.username.clone(), conn.password.clone());
-    }
-
-    if let Some(rm) = conn.receive_maximum {
-        mqttopts.set_receive_maximum(Some(rm));
-    }
-    if let Some(mps) = conn.maximum_packet_size {
-        mqttopts.set_max_packet_size(Some(mps));
-    }
-    if let Some(tam) = conn.topic_alias_maximum {
-        mqttopts.set_topic_alias_max(Some(tam));
-    }
+    // 调试日志：打印连接参数（密码脱敏，避免明文落盘）
+    let debug_info = format!(
+        "MQTT连接参数:\n  host: {}\n  port: {}\n  client_id: {}\n  username: {}\n  password: ***\n  protocol: {}\n  clean_start: {}",
+        conn.host, conn.port, conn.client_id, conn.username,
+        conn.protocol_version, conn.clean_start
+    );
+    write_debug_log(&debug_info);
+    emit_log(&app_handle, &conn.id, "debug", "connect_params", debug_info.clone(), None);
+    eprintln!("[MQTT DEBUG] {}", debug_info);
 
     // Cancel existing connection if any
     {
@@ -672,36 +907,74 @@ async fn mqtt_connect(
         }
     }
 
-    let (client, eventloop) = AsyncClient::builder(mqttopts).build();
     let connected = Arc::new(AtomicBool::new(false));
     let (cancel_tx, cancel_rx) = watch::channel(false);
 
-    let handle = ClientHandle {
-        client: client.clone(),
-        cancel_tx,
-        connected: connected.clone(),
+    let is_v4 = conn.protocol_version == "3.1.1";
+
+    let client_kind = if is_v4 {
+        let broker = rv4::Broker::tcp(&conn.host, conn.port);
+        let mut mqttopts = rv4::MqttOptions::new(&conn.client_id, broker);
+        mqttopts.set_keep_alive(conn.keep_alive as u16);
+        mqttopts.set_clean_session(conn.clean_start);
+        if !conn.username.is_empty() {
+            mqttopts.set_credentials(conn.username.clone(), conn.password.clone());
+        }
+
+        let (client, eventloop) = rv4::AsyncClient::builder(mqttopts).build();
+        let handle = ClientHandle {
+            client: ClientKind::V4(client.clone()),
+            cancel_tx,
+            connected: connected.clone(),
+        };
+        spawn_event_loop_v4(conn.id.clone(), eventloop, cancel_rx, connected.clone(), app_handle.clone());
+        handle
+    } else {
+        let broker = Broker::tcp(&conn.host, conn.port);
+        let mut mqttopts = MqttOptions::new(&conn.client_id, broker);
+        mqttopts.set_keep_alive(conn.keep_alive as u16);
+        mqttopts.set_clean_start(conn.clean_start);
+
+        if conn.session_expiry_interval > 0 {
+            mqttopts.set_session_expiry_interval(Some(conn.session_expiry_interval));
+        }
+
+        if !conn.username.is_empty() {
+            mqttopts.set_credentials(conn.username.clone(), conn.password.clone());
+        }
+
+        if let Some(rm) = conn.receive_maximum {
+            mqttopts.set_receive_maximum(Some(rm));
+        }
+        if let Some(mps) = conn.maximum_packet_size {
+            mqttopts.set_max_packet_size(Some(mps));
+        }
+        if let Some(tam) = conn.topic_alias_maximum {
+            mqttopts.set_topic_alias_max(Some(tam));
+        }
+
+        let (client, eventloop) = AsyncClient::builder(mqttopts).build();
+        let handle = ClientHandle {
+            client: ClientKind::V5(client.clone()),
+            cancel_tx,
+            connected: connected.clone(),
+        };
+        spawn_event_loop_v5(conn.id.clone(), eventloop, cancel_rx, connected.clone(), app_handle.clone());
+        handle
     };
 
     {
         let mut clients = state.clients.write().await;
-        clients.insert(conn.id.clone(), handle);
+        clients.insert(conn.id.clone(), client_kind);
     }
 
     // Emit connecting status
-    let status_event = MqttStatusEvent {
-        connection_id: conn.id.clone(),
-        status: "connecting".to_string(),
-        error: None,
-        session_present: None,
-        reason_code: None,
-    };
+    let status_event = make_status(&conn.id, "connecting", None, None, None);
     let _ = app_handle.emit("mqtt:status", &status_event);
 
     emit_log(&app_handle, &conn.id, "info", "connect",
-        format!("正在连接 {0}:{1}", conn.host, conn.port), None);
-
-    // Spawn background task
-    spawn_event_loop(conn.id, eventloop, cancel_rx, connected, app_handle);
+        format!("正在连接 {0}:{1} (MQTT {2})", conn.host, conn.port, conn.protocol_version),
+        Some(format!("protocol_version: {}", conn.protocol_version)));
 
     Ok(())
 }
@@ -710,45 +983,87 @@ async fn mqtt_connect(
 async fn mqtt_test_connection(conn: MqttConnectionDto) -> Result<String, String> {
     use tokio::time::timeout;
 
-    let test_id = format!("{}_test_{}", conn.client_id, std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis());
+    // 调试日志：打印测试连接参数（密码脱敏，避免明文落盘）
+    let debug_info = format!(
+        "MQTT测试连接参数:\n  host: {}\n  port: {}\n  client_id: {}\n  username: {}\n  password: ***\n  protocol: {}",
+        conn.host, conn.port, conn.client_id, conn.username,
+        conn.protocol_version
+    );
+    write_debug_log(&debug_info);
+    eprintln!("[MQTT TEST DEBUG] {}", debug_info);
 
-    let broker = Broker::tcp(&conn.host, conn.port);
-    let mut mqttopts = MqttOptions::new(&test_id, broker);
-    mqttopts.set_keep_alive(10);
-    mqttopts.set_clean_start(true);
+    // 测试连接使用原始 client_id，不修改它
+    // 因为 password 是基于 client_id 计算的签名
+    let is_v4 = conn.protocol_version == "3.1.1";
 
-    if !conn.username.is_empty() {
-        mqttopts.set_credentials(conn.username.clone(), conn.password.clone());
-    }
-
-    let (client, mut eventloop) = AsyncClient::builder(mqttopts).build();
-
-    let result = timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            match eventloop.poll().await {
-                Ok(Event::Incoming(Packet::ConnAck(connack))) => {
-                    if connack.code == ConnectReturnCode::Success {
-                        return Ok("连接测试成功！".to_string());
-                    } else {
-                        return Err(format!("连接被拒绝: {:?}", connack.code));
-                    }
-                }
-                Ok(Event::Incoming(Packet::Disconnect(disconnect))) => {
-                    return Err(format!("连接被拒绝: {:?}", disconnect.reason_code));
-                }
-                Err(e) => {
-                    return Err(format!("连接失败: {}", e));
-                }
-                _ => {}
-            }
+    let result = if is_v4 {
+        let broker = rv4::Broker::tcp(&conn.host, conn.port);
+        let mut mqttopts = rv4::MqttOptions::new(&conn.client_id, broker);
+        mqttopts.set_keep_alive(10);
+        mqttopts.set_clean_session(true);
+        if !conn.username.is_empty() {
+            mqttopts.set_credentials(conn.username.clone(), conn.password.clone());
         }
-    }).await;
 
-    // Drop client to close the connection
-    drop(client);
+        let (_client, mut eventloop) = rv4::AsyncClient::builder(mqttopts).build();
+        timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match eventloop.poll().await {
+                    Ok(rv4::Event::Incoming(rv4::Packet::ConnAck(connack))) => {
+                        if connack.code == rv4::ConnectReturnCode::Success {
+                            write_debug_log("MQTT测试连接成功");
+                            return Ok("连接测试成功！".to_string());
+                        } else {
+                            let err = format!("连接被拒绝: {:?}", connack.code);
+                            write_debug_log(&err);
+                            return Err(err);
+                        }
+                    }
+                    Ok(rv4::Event::Incoming(rv4::Packet::Disconnect)) => {
+                        let err = "连接被拒绝: 服务端主动断开".to_string();
+                        write_debug_log(&err);
+                        return Err(err);
+                    }
+                    Err(e) => {
+                        let err = format!("连接失败: {}", e);
+                        write_debug_log(&err);
+                        return Err(err);
+                    }
+                    _ => {}
+                }
+            }
+        }).await
+    } else {
+        let broker = Broker::tcp(&conn.host, conn.port);
+        let mut mqttopts = MqttOptions::new(&conn.client_id, broker);
+        mqttopts.set_keep_alive(10);
+        mqttopts.set_clean_start(true);
+        if !conn.username.is_empty() {
+            mqttopts.set_credentials(conn.username.clone(), conn.password.clone());
+        }
+
+        let (_client, mut eventloop) = AsyncClient::builder(mqttopts).build();
+        timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match eventloop.poll().await {
+                    Ok(Event::Incoming(Packet::ConnAck(connack))) => {
+                        if connack.code == ConnectReturnCode::Success {
+                            return Ok("连接测试成功！".to_string());
+                        } else {
+                            return Err(format!("连接被拒绝: {:?}", connack.code));
+                        }
+                    }
+                    Ok(Event::Incoming(Packet::Disconnect(disconnect))) => {
+                        return Err(format!("连接被拒绝: {:?}", disconnect.reason_code));
+                    }
+                    Err(e) => {
+                        return Err(format!("连接失败: {}", e));
+                    }
+                    _ => {}
+                }
+            }
+        }).await
+    };
 
     match result {
         Ok(r) => r,
@@ -789,15 +1104,6 @@ async fn mqtt_publish(
     let qos = qos_from_u8(publish.qos);
     let payload = publish.payload.into_bytes();
 
-    let mut props = PublishProperties::default();
-    props.user_properties = publish.user_properties;
-    props.content_type = publish.content_type.clone();
-    props.message_expiry_interval = publish.message_expiry_interval;
-    props.response_topic = publish.response_topic.clone();
-    props.correlation_data = publish
-        .correlation_data
-        .map(|s| s.into_bytes().into());
-
     emit_log(&app_handle, &publish.connection_id, "info", "publish_sent",
         format!("发布消息到 {topic}: {size} 字节 (QoS {qos}, retain={retain})",
             topic = publish.topic,
@@ -808,19 +1114,44 @@ async fn mqtt_publish(
         Some(format!("payload: {}", String::from_utf8_lossy(&payload).to_string().chars().take(200).collect::<String>())),
     );
 
-    let options = PublishOptions::new(qos)
-        .retain(publish.retain)
-        .properties(props);
+    match &handle.client {
+        ClientKind::V5(client) => {
+            let mut props = PublishProperties::default();
+            props.user_properties = publish.user_properties;
+            props.content_type = publish.content_type.clone();
+            props.message_expiry_interval = publish.message_expiry_interval;
+            props.response_topic = publish.response_topic.clone();
+            props.correlation_data = publish
+                .correlation_data
+                .map(|s| s.into_bytes().into());
 
-    handle
-        .client
-        .publish(publish.topic, payload, options)
-        .await
-        .map_err(|e| {
-            emit_log(&app_handle, &publish.connection_id, "error", "publish_error",
-                format!("发布失败: {e}"), None);
-            e.to_string()
-        })?;
+            let options = PublishOptions::new(qos)
+                .retain(publish.retain)
+                .properties(props);
+
+            client
+                .publish(publish.topic, payload, options)
+                .await
+                .map_err(|e| {
+                    emit_log(&app_handle, &publish.connection_id, "error", "publish_error",
+                        format!("发布失败: {e}"), None);
+                    e.to_string()
+                })?;
+        }
+        ClientKind::V4(client) => {
+            // MQTT 3.1.1 没有 v5 properties，直接忽略
+            let options = rv4::PublishOptions::new(qos).retain(publish.retain);
+
+            client
+                .publish(publish.topic, payload, options)
+                .await
+                .map_err(|e| {
+                    emit_log(&app_handle, &publish.connection_id, "error", "publish_error",
+                        format!("发布失败: {e}"), None);
+                    e.to_string()
+                })?;
+        }
+    }
 
     Ok(())
 }
@@ -842,23 +1173,40 @@ async fn mqtt_subscribe(
         format!("订阅主题: {topic} (QoS {qos})", topic = subscribe.topic, qos = subscribe.qos), None);
 
     // Use tracked subscribe to wait for SubAck result
-    let notice = handle
-        .client
-        .subscribe_tracked(subscribe.topic, qos)
-        .await
-        .map_err(|e| {
-            emit_log(&app_handle, &subscribe.connection_id, "error", "subscribe_error",
-                format!("订阅请求失败: {e}"), None);
-            e.to_string()
-        })?;
-
-    // Wait for SubAck and check return codes
-    notice.wait_completion_async().await.map_err(|e| {
-        let err_msg = format!("订阅被拒绝: {e}");
-        emit_log(&app_handle, &subscribe.connection_id, "error", "subscribe_rejected",
-            err_msg.clone(), None);
-        err_msg
-    })?;
+    match &handle.client {
+        ClientKind::V5(client) => {
+            let notice = client
+                .subscribe_tracked(subscribe.topic, qos)
+                .await
+                .map_err(|e| {
+                    emit_log(&app_handle, &subscribe.connection_id, "error", "subscribe_error",
+                        format!("订阅请求失败: {e}"), None);
+                    e.to_string()
+                })?;
+            notice.wait_completion_async().await.map_err(|e| {
+                let err_msg = format!("订阅被拒绝: {e}");
+                emit_log(&app_handle, &subscribe.connection_id, "error", "subscribe_rejected",
+                    err_msg.clone(), None);
+                err_msg
+            })?;
+        }
+        ClientKind::V4(client) => {
+            let notice = client
+                .subscribe_tracked(subscribe.topic, qos)
+                .await
+                .map_err(|e| {
+                    emit_log(&app_handle, &subscribe.connection_id, "error", "subscribe_error",
+                        format!("订阅请求失败: {e}"), None);
+                    e.to_string()
+                })?;
+            notice.wait_completion_async().await.map_err(|e| {
+                let err_msg = format!("订阅被拒绝: {e}");
+                emit_log(&app_handle, &subscribe.connection_id, "error", "subscribe_rejected",
+                    err_msg.clone(), None);
+                err_msg
+            })?;
+        }
+    }
 
     Ok(())
 }
@@ -878,15 +1226,22 @@ async fn mqtt_unsubscribe(
     emit_log(&app_handle, &connection_id, "info", "unsubscribe",
         format!("取消订阅主题: {topic}"), None);
 
-    handle
-        .client
-        .unsubscribe(topic)
-        .await
-        .map_err(|e| {
-            emit_log(&app_handle, &connection_id, "error", "unsubscribe_error",
-                format!("取消订阅失败: {e}"), None);
-            e.to_string()
-        })?;
+    match &handle.client {
+        ClientKind::V5(client) => {
+            client.unsubscribe(topic).await.map_err(|e| {
+                emit_log(&app_handle, &connection_id, "error", "unsubscribe_error",
+                    format!("取消订阅失败: {e}"), None);
+                e.to_string()
+            })?;
+        }
+        ClientKind::V4(client) => {
+            client.unsubscribe(topic).await.map_err(|e| {
+                emit_log(&app_handle, &connection_id, "error", "unsubscribe_error",
+                    format!("取消订阅失败: {e}"), None);
+                e.to_string()
+            })?;
+        }
+    }
 
     Ok(())
 }
@@ -931,6 +1286,18 @@ fn mqtt_get_log_dir(app_handle: AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+async fn mqtt_read_debug_log() -> Result<String, String> {
+    let path = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("mqttx_debug.log");
+    if path.exists() {
+        std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    } else {
+        Ok("日志文件不存在".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let log_writer = std::env::current_dir()
@@ -960,6 +1327,7 @@ pub fn run() {
             mqtt_get_connection_status,
             mqtt_test_connection,
             mqtt_get_log_dir,
+            mqtt_read_debug_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

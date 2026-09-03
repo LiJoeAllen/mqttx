@@ -149,6 +149,10 @@ export async function mqttTestConnection(conn: MqttConnectionDto): Promise<strin
   return await invoke<string>('mqtt_test_connection', { conn })
 }
 
+export async function mqttReadDebugLog(): Promise<string> {
+  return await invoke<string>('mqtt_read_debug_log')
+}
+
 export async function mqttGetLogDir(): Promise<string> {
   return await invoke<string>('mqtt_get_log_dir')
 }
