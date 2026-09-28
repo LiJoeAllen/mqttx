@@ -46,6 +46,8 @@ jobs:
         run: cargo test -p mqttx-desktop --lib
 
   # ─── 构建矩阵 ─────────────────────────────────────────────────
+  # 目前 Gitea 实例只注册了 ubuntu-latest 标签的 Linux runner，
+  # Windows 产物由本地 scripts/publish-gitea.ps1/.sh 上传补充。
   build:
     name: Build (${{ matrix.os }})
     needs: [meta, test]
@@ -54,12 +56,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            asset: mqttx.exe
-            target: x86_64-pc-windows-msvc
           - os: ubuntu-latest
             asset: mqttx
             target: x86_64-unknown-linux-gnu
+        # runner 就绪后可恢复 Windows 构建：
+        # - os: windows-latest
+        #   asset: mqttx.exe
+        #   target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
