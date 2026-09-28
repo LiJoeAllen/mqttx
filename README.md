@@ -1,153 +1,142 @@
-# MQTTX — MQTT v5 桌面调试工具
+# MQTTX — 基于 GPUI 的跨平台 MQTT 桌面客户端
 
-基于 **Tauri v2** + **Vue 3** + **TypeScript** 构建的跨平台 MQTT v5 调试客户端，支持完整的 MQTT v5 特性（用户属性、内容类型、消息过期、响应主题、关联数据等），提供直观的 GUI 操作体验。
+使用 **Rust + [gpui-kit](https://github.com/longbridge/gpui-kit)**（基于 [GPUI](https://github.com/zed-industries/zed)）重写的 MQTT 调试客户端，对标官方 [MQTTX](https://mqttx.app)。
+纯 Rust 实现：MQTT 引擎、数据持久化与原生 UI 同属一个轻量二进制，无 Electron/WebView 运行时。
+
+> 旧的 Tauri + Vue 版本仍保留在 `src/` 与 `src-tauri/`，新实现位于 `gpui-app/`。
 
 ## 功能特性
 
-- **MQTT v5 完整支持** — 连接、发布、订阅、取消订阅，全面支持 MQTT v5 属性
-- **多连接管理** — 同时管理多个 MQTT 连接，连接状态实时可见
-- **消息流监控** — 实时查看收发消息，支持消息过滤和搜索
-- **主题树** — 以树形结构组织订阅的主题，方便浏览
-- **预设模板** — 保存常用的连接/发布/订阅配置为预设，快速复用
-- **全局变量** — 支持在消息负载中使用 `{{变量名}}` 模板语法
-- **用户属性编辑器** — 可视化编辑 MQTT v5 用户属性键值对
-- **日志系统** — 实时日志面板 + 文件日志持久化，方便排查问题
-- **暗色模式** — 支持亮色/暗色主题切换，自动跟随系统
-- **自动更新** — 内置 Tauri 更新器，支持应用自动升级
+- **双协议支持** — MQTT 5.0 与 MQTT 3.1.1（[`rumqttc-next`](https://crates.io/crates/rumqttc-v5-next)）
+- **多传输方式** — 明文 TCP、TLS、WebSocket(ws)、WebSocket over TLS(wss)，默认 rustls（aws-lc）
+- **多连接管理** — 同时管理多个连接，侧边栏实时显示连接状态（未连接/连接中/已连接/错误），多标签页切换
+- **完整 MQTT 5 属性** — 用户属性（可视化键值对编辑器）、Content-Type、消息过期间隔、Response Topic、Correlation Data
+- **发布 / 订阅** — QoS 0/1/2、Retain、遗嘱消息（Last Will）、订阅自动恢复（auto resubscribe）、断线自动重连
+- **消息流** — 收发方向区分、时间戳、QoS/Retain 标记、点击展开查看格式化 JSON 与 v5 属性、主题/内容过滤
+- **全局变量** — 发布主题与负载中使用 `{{变量名}}`，内置 `{{$ts}}`、`{{$ts_ms}}`、`{{$uuid}}`
+- **负载格式** — Plaintext / JSON（发送前校验）/ Base64 / Hex
+- **阿里云 IoT** — Token（GroupId@@@DeviceId + HMAC-SHA1 签名）与一机一密两种鉴权方式一键生成连接
+- **连接测试** — 表单内 5 秒握手测试，保存前验证连通性
+- **日志面板** — 连接级事件日志（CONNACK/SUBACK/PUBACK/错误/重连等）
+- **主题** — 浅色 / 深色切换
+- **本地持久化** — 连接、订阅、预设、变量、设置以 JSON 存于系统数据目录
 
 ## 技术栈
 
 | 层 | 技术 |
-|---|---|
-| 桌面框架 | [Tauri v2](https://v2.tauri.app/) |
-| 前端框架 | [Vue 3](https://vuejs.org/) (Composition API + `<script setup>`) |
-| 语言 | TypeScript / Rust |
-| UI 组件库 | [Element Plus](https://element-plus.org/) |
-| MQTT 客户端 | [rumqttc v5-next](https://crates.io/crates/rumqttc-v5-next) |
-| 构建工具 | [Vite](https://vitejs.dev/) |
-| 包管理 | pnpm |
+| --- | --- |
+| UI | GPUI 0.3 + gpui-kit（gpui-component）0.6 |
+| MQTT | rumqttc-v5-next 0.34 / rumqttc-v4-next 0.34（TCP/TLS/WS） |
+| 异步 | 引擎跑在独立 tokio runtime，事件经 smol channel 泵回 UI 线程 |
+| 持久化 | serde + serde_json，原子写（临时文件 + rename） |
+| 其他 | chrono、dirs、uuid、hmac/sha1/base64（阿里云签名） |
 
-## 快速开始
+## 目录结构
 
-### 前置要求
+```
+gpui-app/
+├── Cargo.toml
+├── src/
+│   ├── main.rs          # 入口：创建窗口、挂载 gpui-kit Root
+│   ├── lib.rs           # 库导出（模型/引擎/UI 可被集成测试复用）
+│   ├── model.rs         # 数据模型（连接/订阅/消息/预设/变量/设置/模板渲染）
+│   ├── mqtt.rs          # MQTT 引擎：多连接生命周期、TLS/WS、重连、事件通道
+│   ├── store.rs         # JSON 持久化（%APPDATA%/MQTTX-GPUI）
+│   ├── aliyun.rs        # 阿里云 IoT 签名与连接生成
+│   └── ui/
+│       ├── app.rs              # 应用外壳：标题栏/侧边栏/标签页/事件泵
+│       ├── connection_form.rs  # 新建/编辑连接对话框
+│       ├── connection_view.rs  # 连接工作区：订阅、消息流、发布面板、日志
+│       ├── aliyun_dialog.rs    # 阿里云设备对话框
+│       ├── variables_dialog.rs # 全局变量对话框
+│       ├── settings_dialog.rs  # 设置对话框
+│       └── widgets.rs          # 复用组件（枚举下拉、键值对编辑器等）
+└── tests/
+    └── engine_live.rs   # 真实 broker 端到端测试（默认 ignored）
+```
 
-- [Node.js](https://nodejs.org/) >= 18
-- [pnpm](https://pnpm.io/)
-- [Rust](https://www.rust-lang.org/) (安装参考 [Tauri 环境准备](https://v2.tauri.app/start/prerequisites/))
-- Windows: [Microsoft Visual Studio C++ 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+## 构建与运行
 
-### 安装依赖
+前置：Rust nightly（GPUI 0.3 依赖，使用 `rustup default nightly`）。
 
 ```bash
-pnpm install
+# 开发运行
+cargo run -p mqttx-desktop
+
+# 优化构建
+cargo build --release -p mqttx-desktop
+# 产物：target/release/mqttx(.exe)
 ```
 
-### 开发模式运行
+> 中国大陆网络下若 `index.crates.io` 不可达，仓库已提供仅作用于本工程的
+> `.cargo/config.toml`（rsproxy 镜像）。
+
+### 端到端连通性测试
+
+测试默认 `#[ignore]`，需要外网：
 
 ```bash
-pnpm tauri dev
+MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 ```
 
-### 生产构建
+会连接公共服务器 `broker.emqx.io:1883`，验证：
+
+- MQTT 5.0 连接 → 订阅 → 发布 → 回环接收
+- MQTT 3.1.1 连接握手
+
+## 发布到 Gitea Package Registry
+
+构建产物可通过 Gitea 的 Generic Package API 发布，两种方式：
+
+### 方式一：手动发布（本地脚本）
+
+前置：构建 release 产物 + 一个 Gitea 访问令牌（需 `package` 写权限）。
+
+```powershell
+# Windows（PowerShell）
+$env:GITEA_URL = "https://gitea.example.com"
+$env:GITEA_TOKEN = "gta_xxx"
+.\scripts\publish-gitea.ps1                    # 默认产物 + 自动推断版本/owner
+.\scripts\publish-gitea.ps1 -Version v1.0.1    # 指定版本
+```
 
 ```bash
-pnpm tauri build
+# macOS / Linux（bash）
+export GITEA_URL=https://gitea.example.com
+export GITEA_TOKEN=gta_xxx
+./scripts/publish-gitea.sh                     # 默认产物
+./scripts/publish-gitea.sh target/release/mqttx v1.0.1
 ```
 
-构建产物将输出到 `src-tauri/target/release/bundle/` 目录。
+- **owner** 自动从 `git remote origin` 推断（可用 `GITEA_OWNER` / `-Owner` 覆盖）
+- **版本** 依次取参数 → `git describe --tags` → `Cargo.toml`
+- 每个文件附带 `.sha256` 校验侧车；同名版本重复上传按 409 跳过（Gitea 不允许覆盖）
+- 软件包页面：`{GITEA_URL}/{owner}?tab=packages`
 
-## 自动更新配置
+### 方式二：CI 自动发布（Gitea Actions）
 
-MQTTX 内置了 Tauri 更新器插件。要启用自动更新，需要完成以下步骤：
+推送 `v*` tag 即触发 [.gitea/workflows/release.yml](.gitea/workflows/release.yml)：
 
-### 1. 生成签名密钥
+1. 单元测试
+2. Windows / Linux 双平台 release 构建（产物重命名为 `mqttx-<ver>-<target>-<ext>`）
+3. 调用 `scripts/publish-gitea.sh` 上传到包注册表
 
-```bash
-pnpm tauri signer generate -w ~/.tauri/mqttx.key
-```
+需要在仓库 **Settings → Actions → Secrets** 配置 `GITEA_TOKEN`；
+若 runner 使用自定义 label，请相应修改工作流的 `runs-on`。
 
-### 2. 配置公钥
+## 数据目录
 
-将生成的公钥粘贴到 `src-tauri/tauri.conf.json` 中的 `plugins.updater.pubkey` 字段。
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `%APPDATA%\MQTTX-GPUI` |
+| macOS | `~/Library/Application Support/MQTTX-GPUI` |
+| Linux | `~/.local/share/MQTTX-GPUI` |
 
-### 3. 部署更新服务器
+刻意与官方 Electron MQTTX 的 `MQTTX/` 目录区分，互不影响。读取时容忍 UTF-8 BOM。
 
-更新端点默认配置为 `https://releases.mqttx.app/update/{{target}}-{{arch}}/{{current_version}}`，需要替换为你自己的更新服务器地址。更新服务器需返回如下格式的 JSON：
+## 与 Tauri 版本的差异
 
-```json
-{
-  "version": "1.0.0",
-  "notes": "更新说明",
-  "pub_date": "2024-01-01T00:00:00Z",
-  "platforms": {
-    "windows-x86_64": {
-      "signature": "...",
-      "url": "https://releases.example.com/mqttx_1.0.0_x64.msi.zip"
-    },
-    "darwin-x86_64": {
-      "signature": "...",
-      "url": "https://releases.example.com/mqttx_1.0.0_x64.dmg"
-    },
-    "darwin-aarch64": {
-      "signature": "...",
-      "url": "https://releases.example.com/mqttx_1.0.0_aarch64.dmg"
-    },
-    "linux-x86_64": {
-      "signature": "...",
-      "url": "https://releases.example.com/mqttx_1.0.0_amd64.AppImage"
-    }
-  }
-}
-```
-
-参考文档：[Tauri 更新器插件](https://v2.tauri.org.cn/plugin/updater/)
-
-## 项目结构
-
-```
-mqttx/
-├── src/                          # 前端源码
-│   ├── components/               # Vue 组件
-│   │   ├── common/               # 通用组件 (ContextMenu, HoverPreview)
-│   │   ├── connections/          # 连接管理相关组件
-│   │   ├── dashboard/            # 看板相关组件 (消息流、发送面板、日志等)
-│   │   ├── presets/              # 预设管理相关组件
-│   │   ├── AppLayout.vue         # 主布局
-│   │   └── App.vue               # 根组件
-│   ├── composables/              # 组合式函数
-│   │   ├── useContextMenu.ts     # 右键菜单
-│   │   └── useUpdater.ts         # 自动更新器
-│   ├── stores/                   # Pinia 状态管理
-│   │   ├── useConnections.ts     # 连接状态
-│   │   ├── useMqttBridge.ts      # MQTT 桥接 (Tauri 命令调用)
-│   │   ├── useMessages.ts        # 消息存储
-│   │   ├── useLogs.ts            # 日志管理
-│   │   └── ...
-│   ├── types/                    # TypeScript 类型定义
-│   ├── utils/                    # 工具函数
-│   ├── styles/                   # 全局样式
-│   └── main.ts                   # 入口文件
-├── src-tauri/                    # Rust 后端源码
-│   ├── src/
-│   │   ├── lib.rs                # Tauri 应用入口、命令定义
-│   │   └── main.rs               # 桌面入口点
-│   ├── Cargo.toml                # Rust 依赖
-│   └── tauri.conf.json           # Tauri 配置
-├── package.json
-├── vite.config.ts
-└── README.md
-```
-
-## 命令参考
-
-| 命令 | 说明 |
-|---|---|
-| `pnpm dev` | 启动 Vite 前端开发服务器 |
-| `pnpm build` | 构建前端 |
-| `pnpm tauri dev` | 启动 Tauri 开发模式（前端 + 桌面窗口） |
-| `pnpm tauri build` | 生产构建 |
-| `pnpm tauri signer generate` | 生成更新签名密钥对 |
-
-## 协议
-
-[MIT](./LICENSE)
+- 单一 Rust 二进制（release ~17MB），无需打包 Node/WebView 资源
+- MQTT 引擎从 Tauri 命令模型改为独立 tokio runtime + 事件通道，UI 直接订阅
+- 数据存储从浏览器 `localStorage` 迁移到系统数据目录下的 JSON 文件
+- 新增 TLS/WSS 传输、负载格式（Base64/Hex）、遗嘱消息、连接测试等能力

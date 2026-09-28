@@ -1,0 +1,130 @@
+# Gitea Actions：打 tag 时构建 release 产物并发布到 Gitea Package Registry。
+#
+# 依赖的仓库 Secrets/Variables（Settings → Actions → Secrets）：
+#   GITEA_TOKEN  — 包写权限令牌（package scope），用于上传 Generic 包
+#   可选 GITEA_OWNER — 软件包所属用户/组织，缺省用仓库 owner
+#
+# 说明：Gitea Actions 语法与 GitHub Actions 兼容；若 runner 使用自定义
+# label（如 `ubuntu`），请把 runs-on 改成你的 runner labels。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── 版本与元信息 ─────────────────────────────────────────────
+  meta:
+    name: Meta
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      owner: ${{ steps.ver.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: ver
+        run: |
+          version="${GITHUB_REF_NAME}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          owner="${GITEA_OWNER_OVERRIDE:-${GITHUB_REPOSITORY_OWNER}}"
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+
+  # ─── 测试（不依赖系统图形库） ─────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Unit tests
+        run: cargo test -p mqttx-desktop --lib
+
+  # ─── 构建矩阵 ─────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.os }})
+    needs: [meta, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: mqttx.exe
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            asset: mqttx
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Install Linux system deps (GPUI)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libasound2-dev libfontconfig-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - name: Build
+        run: cargo build --release -p mqttx-desktop --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          out="dist-${{ matrix.target }}"
+          mkdir -p "$out"
+          src="target/${{ matrix.target }}/release/${{ matrix.asset }}"
+          ver="${{ needs.meta.outputs.version }}"
+          dst="$out/mqttx-${ver}-${{ matrix.target }}-${{ matrix.asset }}"
+          cp "$src" "$dst"
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$dst" > "$dst.sha256"
+          else
+            shasum -a 256 "$dst" > "$dst.sha256"
+          fi
+          echo "ASSET_DIR=$out" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mqttx-${{ matrix.target }}
+          path: ${{ env.ASSET_DIR }}/*
+
+  # ─── 发布到 Gitea Package Registry ────────────────────────────
+  publish:
+    name: Publish package
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload to Generic Package Registry
+        env:
+          GITEA_URL: ${{ github.server_url }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_OWNER: ${{ needs.meta.outputs.owner }}
+          GITEA_PKG: mqttx
+        run: |
+          chmod +x scripts/publish-gitea.sh
+          files=(artifacts/*)
+          # 过滤掉 .sha256 侧车文件，脚本会自行生成
+          upload=()
+          for f in "${files[@]}"; do
+            case "$f" in *.sha256) ;; *) upload+=("$f") ;; esac
+          done
+          ./scripts/publish-gitea.sh "${upload[@]}" "${{ needs.meta.outputs.version }}"

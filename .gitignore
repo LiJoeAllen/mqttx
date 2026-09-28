@@ -32,3 +32,9 @@ src-tauri/target_d
 *.njsproj
 *.sln
 *.sw?
+
+# Workspace-level Rust build artifacts (GPUI app)
+/target
+*.pdb
+/.v2c
+/.video_agent

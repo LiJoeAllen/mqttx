@@ -1,0 +1,33 @@
+[package]
+name = "mqttx-desktop"
+version = "1.0.0"
+edition.workspace = true
+description = "MQTT X —— 基于 GPUI 的跨平台 MQTT 调试客户端"
+default-run = "mqttx"
+
+[[bin]]
+name = "mqttx"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "0.6"
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# MQTT 引擎运行在独立的 tokio runtime 线程上
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "time", "io-util"] }
+# GPUI 侧与引擎线程通信使用 smol 通道（GPUI 执行器兼容）
+smol = "2"
+
+rumqttc = { package = "rumqttc-v5-next", version = "0.34", features = ["websocket"] }
+rumqttc-v4 = { package = "rumqttc-v4-next", version = "0.34", features = ["websocket"] }
+
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["clock"] }
+dirs = "6"
+
+# 阿里云 MQTT 签名: HMAC-SHA1 -> Base64
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
