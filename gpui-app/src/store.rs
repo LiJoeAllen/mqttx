@@ -4,13 +4,16 @@
 //!
 //! 刻意与官方 Electron MQTTX 的 `MQTTX/` 目录区分，避免互相覆盖数据。
 
-/// 存储层诊断输出到 stderr（避免仅为文件持久化引入日志框架）。
+/// 存储层诊断输出到 stderr（避免仅为文件持久化引入日志框架），
+/// 并同步上报 Sentry（未初始化时为空操作）。
 macro_rules! elog {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
+        let msg = format!($($arg)*);
         eprintln!("[store][{}] {}",
             chrono::Local::now().format("%H:%M:%S"),
-            format!($($arg)*))
-    };
+            msg);
+        sentry::capture_message(&msg, sentry::Level::Error);
+    }};
 }
 
 use std::path::{Path, PathBuf};

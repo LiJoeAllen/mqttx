@@ -43,3 +43,12 @@ rfd = "0.17"
 # OTA 自更新：Gitea Release 检查/下载（ureq 用 rustls，与 rumqttc 依赖同源）
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
+
+# 错误上报（自建 Sentry）：panic 捕获 + 持久化错误；rustls 传输避免 openssl 依赖
+sentry = { version = "0.49", default-features = false, features = [
+    "backtrace",
+    "contexts",
+    "panic",
+    "reqwest",
+    "rustls",
+] }
