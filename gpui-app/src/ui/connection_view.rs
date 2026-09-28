@@ -1546,7 +1546,7 @@ impl ConnectionView {
                             || contains_ignore_case(&r.payload, &query);
                         let sub_ok = sub_filter
                             .as_deref()
-                            .map_or(true, |f| topic_matches(f, &r.topic));
+                            .is_none_or(|f| topic_matches(f, &r.topic));
                         if dir_ok && query_ok && sub_ok {
                             matched += 1;
                             if records.len() < MAX_RENDERED_MESSAGES {
@@ -2513,15 +2513,13 @@ fn extract_placeholder_keys(topic: &str, payload: &str) -> Vec<String> {
         let bytes = text.as_bytes();
         let mut i = 0;
         while i + 1 < bytes.len() {
-            if bytes[i] == b'{' && bytes[i + 1] == b'{' {
-                if let Some(rel_end) = text[i + 2..].find("}}") {
-                    let key = text[i + 2..i + 2 + rel_end].trim();
-                    if !key.is_empty() && !key.starts_with('$') && !out.iter().any(|k| k == key) {
-                        out.push(key.to_string());
-                    }
-                    i = i + 2 + rel_end + 2;
-                    continue;
+            if bytes[i] == b'{' && bytes[i + 1] == b'{' && let Some(rel_end) = text[i + 2..].find("}}") {
+                let key = text[i + 2..i + 2 + rel_end].trim();
+                if !key.is_empty() && !key.starts_with('$') && !out.iter().any(|k| k == key) {
+                    out.push(key.to_string());
                 }
+                i = i + 2 + rel_end + 2;
+                continue;
             }
             // 按字符推进，避免把多字节 UTF-8 拆开
             let ch = text[i..].chars().next().unwrap();

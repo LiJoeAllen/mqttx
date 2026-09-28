@@ -28,6 +28,7 @@ use crate::model::{
 };
 use crate::mqtt::{EngineEvent, MqttEngine};
 use crate::store::Storage;
+use crate::update;
 use crate::ui::IconName;
 use crate::ui::{
     connection_form::ConnectionForm,
@@ -126,6 +127,28 @@ impl MqttXApp {
                 .ok();
             }
         });
+
+        // OTA：清理上次自更新遗留文件；开启自动检查则后台查一次新版本
+        update::cleanup_old();
+        if settings.auto_check_update {
+            let rx = engine.run_blocking(update::check_latest);
+            let weak = cx.entity().downgrade();
+            cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+                if let Ok(Ok(Some(info))) = rx.recv().await {
+                    weak.update_in(cx, |_app, window, cx| {
+                        window.push_notification(
+                            Notification::info(format!(
+                                "发现新版本 v{}，可在 设置 → 关于 中更新",
+                                info.version
+                            )),
+                            cx,
+                        );
+                    })
+                    .ok();
+                }
+            })
+            .detach();
+        }
 
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索连接…"));
 

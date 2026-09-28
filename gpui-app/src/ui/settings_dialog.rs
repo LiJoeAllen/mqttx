@@ -1,6 +1,7 @@
 //! 应用设置对话框：主题、消息缓存、时间戳、自动检查更新、数据/日志目录、关于。
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::clipboard::Clipboard;
@@ -17,9 +18,11 @@ use gpui_kit::{
 };
 
 use crate::model::{AppSettings, ThemeModePref};
+use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
 use crate::ui::widgets::{field, make_select, OptionDelegate};
 use crate::ui::IconName;
+use crate::update::{self, UpdateInfo};
 
 const THEMES: [&str; 3] = ["跟随系统（暂按浅色）", "浅色", "深色"];
 
@@ -30,17 +33,31 @@ const MAX_MESSAGES_MAX: usize = 100_000;
 const SITE_URL: &str = "https://mqttx.app";
 const REPO_URL: &str = "https://gitea.heavenlybook.cn/JoeAllen/mqttx";
 
+/// 更新检查/安装在设置对话框内的展示状态。
+#[derive(Debug, Clone)]
+enum UpdateUi {
+    Idle,
+    Checking,
+    UpToDate,
+    Available(Box<UpdateInfo>),
+    Downloading { downloaded: u64, total: u64 },
+    Failed(String),
+}
+
 struct SettingsDialog {
+    engine: Arc<MqttEngine>,
     theme: Entity<SelectState<OptionDelegate>>,
     max_messages: Entity<InputState>,
     show_millis: bool,
     auto_check_update: bool,
     data_dir: PathBuf,
     log_dir: PathBuf,
+    update: UpdateUi,
 }
 
 impl SettingsDialog {
     fn new(
+        engine: Arc<MqttEngine>,
         initial: AppSettings,
         data_dir: PathBuf,
         log_dir: PathBuf,
@@ -53,6 +70,7 @@ impl SettingsDialog {
             ThemeModePref::Dark => 2,
         };
         Self {
+            engine,
             theme: make_select(&THEMES, theme_idx, window, cx),
             max_messages: cx.new(|cx| {
                 InputState::new(window, cx).default_value(initial.max_messages.to_string())
@@ -61,8 +79,184 @@ impl SettingsDialog {
             auto_check_update: initial.auto_check_update,
             data_dir,
             log_dir,
+            update: UpdateUi::Idle,
         }
     }
+
+    fn run_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.update = UpdateUi::Checking;
+        cx.notify();
+        let rx = self.engine.run_blocking(update::check_latest);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = rx.recv().await.unwrap_or(Err("任务丢失".into()));
+            this.update_in(cx, |s, _window, cx| {
+                s.update = match result {
+                    Ok(Some(info)) => UpdateUi::Available(Box::new(info)),
+                    Ok(None) => UpdateUi::UpToDate,
+                    Err(e) => UpdateUi::Failed(e),
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn run_update(&mut self, info: &UpdateInfo, window: &mut Window, cx: &mut Context<Self>) {
+        self.update = UpdateUi::Downloading { downloaded: 0, total: info.size };
+        cx.notify();
+        let (prog_tx, prog_rx) = smol::channel::unbounded();
+        let info = info.clone();
+        let rx: smol::channel::Receiver<Result<(), String>> =
+            self.engine.run_blocking(move || {
+            let result = update::download_and_verify(&info, &|d, t| {
+                let _ = prog_tx.try_send((d, t));
+            });
+            match result {
+                Ok(tmp) => match update::install_and_restart(&tmp) {
+                    // 新进程已拉起并接管，旧进程直接退出（设置均为即时落盘）
+                    Ok(()) => std::process::exit(0),
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e),
+            }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            while let Ok((downloaded, total)) = prog_rx.recv().await {
+                this.update_in(cx, |s, _window, cx| {
+                    s.update = UpdateUi::Downloading { downloaded, total };
+                    cx.notify();
+                })
+                .ok();
+            }
+            // 进度通道关闭：要么安装成功（进程已退出），要么拿到最终结果
+            let result = rx.recv().await.unwrap_or(Err("任务丢失".into()));
+            this.update_in(cx, |s, _window, cx| {
+                if let Err(e) = result {
+                    s.update = UpdateUi::Failed(e);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn fmt_mb(bytes: u64) -> String {
+        format!("{:.1} MB", bytes as f64 / (1024. * 1024.))
+    }
+
+    /// 关于区的更新行：按钮 + 状态 + 下载进度。
+    fn render_update_row(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let row = |button: gpui_kit::AnyElement, status: gpui_kit::AnyElement, accent: bool| {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(button)
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(if accent {
+                            cx.theme().accent
+                        } else {
+                            cx.theme().muted_foreground
+                        })
+                        .child(status),
+                )
+        };
+        match &self.update {
+            UpdateUi::Idle => row(
+                Button::new("check-update")
+                    .label("检查更新")
+                    .outline()
+                    .xsmall()
+                    .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
+                    .into_any_element(),
+                "检查 Gitea Release 上的新版本".into_any_element(),
+                false,
+            ),
+            UpdateUi::Checking => row(
+                Button::new("check-update")
+                    .label("检查中…")
+                    .outline()
+                    .xsmall()
+                    .loading(true)
+                    .into_any_element(),
+                "正在检查更新…".into_any_element(),
+                false,
+            ),
+            UpdateUi::UpToDate => row(
+                Button::new("check-update")
+                    .label("重新检查")
+                    .outline()
+                    .xsmall()
+                    .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
+                    .into_any_element(),
+                "已是最新版本".into_any_element(),
+                false,
+            ),
+            UpdateUi::Available(info) => {
+                let ver = info.version.clone();
+                let info_for_click = info.clone();
+                row(
+                    Button::new("apply-update")
+                        .label(format!("立即更新到 v{}", ver))
+                        .primary()
+                        .xsmall()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.run_update(&info_for_click, window, cx)
+                        }))
+                        .into_any_element(),
+                    format!("发现新版本 v{}，下载后自动替换重启", ver).into_any_element(),
+                    true,
+                )
+            }
+            UpdateUi::Downloading { downloaded, total } => {
+                let pct = if *total > 0 {
+                    *downloaded as f32 / *total as f32
+                } else {
+                    0.
+                };
+                let status = if *total > 0 {
+                    format!(
+                        "下载中 {:.0}%（{} / {}）",
+                        pct * 100.,
+                        Self::fmt_mb(*downloaded),
+                        Self::fmt_mb(*total)
+                    )
+                } else {
+                    format!("下载中 {}", Self::fmt_mb(*downloaded))
+                };
+                v_flex()
+                    .gap_1()
+                    .child(
+                        gpui_kit::component::progress::Progress::new("update-progress")
+                            .value(pct),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    )
+            }
+            UpdateUi::Failed(e) => row(
+                Button::new("check-update")
+                    .label("重试")
+                    .outline()
+                    .xsmall()
+                    .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
+                    .into_any_element(),
+                format!("更新失败：{e}").into_any_element(),
+                false,
+            ),
+        }
+    }
+
 
     fn collect(&self, cx: &App) -> Result<AppSettings, String> {
         let theme = match self.theme.read(cx).selected_value() {
@@ -111,7 +305,7 @@ fn open_in_file_manager(path: &Path, window: &mut Window, cx: &mut App) {
 }
 
 impl Render for SettingsDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let data_dir = self.data_dir.to_string_lossy().into_owned();
         let log_dir = self.log_dir.to_string_lossy().into_owned();
         let data_dir_for_open = self.data_dir.clone();
@@ -141,17 +335,7 @@ impl Render for SettingsDialog {
             .child(
                 h_flex()
                     .justify_between()
-                    .child(
-                        h_flex().gap_1p5().items_center()
-                            .child(div().text_sm().child("自动检查更新"))
-                            // 更新通道尚未接入，先保留开关并明示状态
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("即将支持"),
-                            ),
-                    )
+                    .child(div().text_sm().child("自动检查更新（启动时）"))
                     .child(
                         Switch::new("auto-check-update")
                             .checked(self.auto_check_update)
@@ -236,9 +420,14 @@ impl Render for SettingsDialog {
                                 .gap_2()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!("版本 {}", env!("CARGO_PKG_VERSION")))
+                                .child(format!(
+                                    "版本 {}（更新源 {}）",
+                                    update::current_version(),
+                                    update::PKG_REPO
+                                ))
                                 .child("Apache-2.0 许可证"),
                         )
+                        .child(self.render_update_row(window, cx))
                         .child(
                             div()
                                 .text_xs()
@@ -268,12 +457,17 @@ impl Render for SettingsDialog {
 }
 
 pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
-    let (initial, data_dir, log_dir) = {
+    let (engine, initial, data_dir, log_dir) = {
         let state = app.read(cx);
-        (state.settings.clone(), state.data_dir(), state.log_dir())
+        (
+            state.engine.clone(),
+            state.settings.clone(),
+            state.data_dir(),
+            state.log_dir(),
+        )
     };
     let dialog_view: Entity<SettingsDialog> = cx.new(|cx| {
-        SettingsDialog::new(initial, data_dir, log_dir, window, cx)
+        SettingsDialog::new(engine, initial, data_dir, log_dir, window, cx)
     });
     let app_save = app.clone();
     window.open_dialog(cx, move |dialog, _window, _cx| {

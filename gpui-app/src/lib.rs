@@ -5,3 +5,4 @@ pub mod model;
 pub mod mqtt;
 pub mod store;
 pub mod ui;
+pub mod update;

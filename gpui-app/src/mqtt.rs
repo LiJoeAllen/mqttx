@@ -475,6 +475,21 @@ impl MqttEngine {
 
     /// 测试连接：使用配置的连接超时（上限 30 秒，防止误填过大值长时间挂起），
     /// 结果通过 channel 返回。
+    /// 在引擎的 tokio runtime 上调度阻塞任务（OTA 下载等），
+    /// 结果经 smol 通道送回 GPUI 执行器；任务 panic 时接收端以空错误结束。
+    pub fn run_blocking<T: Send + 'static>(
+        &self,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> smol::channel::Receiver<T> {
+        let (tx, rx) = smol::channel::bounded(1);
+        self.runtime.spawn(async move {
+            if let Ok(value) = tokio::task::spawn_blocking(f).await {
+                let _ = tx.send(value).await;
+            }
+        });
+        rx
+    }
+
     pub fn test_connection(
         self: &Arc<Self>,
         cfg: ConnectionConfig,
