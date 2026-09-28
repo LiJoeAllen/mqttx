@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -16,14 +16,15 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use crate::ui::IconName;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, StatefulInteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window,
+    div, hsla, px, App, AppContext as _, ClipboardItem, Context, Entity, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window,
 };
 use gpui_kit::component::IndexPath;
 
 use crate::model::{
     render_template, ConnectionConfig, ConnectionStatus, Direction, LogLevel, MqttRecord,
-    PayloadFormat, PublishParams,
+    PayloadFormat, PublishParams, SubscribeOptions, Subscription,
 };
 use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
@@ -31,7 +32,22 @@ use crate::ui::widgets::{field, format_time, make_select, KvEditor, OptionDelega
 
 const QOS: [&str; 3] = ["QoS 0", "QoS 1", "QoS 2"];
 const PAYLOAD_FORMATS: [&str; 4] = ["Plaintext", "JSON", "Base64", "Hex"];
+/// Retain Handling 0/1/2 的下拉文案
+const RETAIN_HANDLING: [&str; 3] = ["0 每次发送", "1 仅新订阅", "2 不发送"];
 const MAX_RENDERED_MESSAGES: usize = 300;
+/// 订阅色板预设：色相（度）+ 名称
+const PRESET_HUES: [(f32, &str); 10] = [
+    (0., "红"),
+    (30., "橙"),
+    (60., "黄"),
+    (120., "绿"),
+    (160., "青"),
+    (200., "蓝"),
+    (240., "靛"),
+    (270., "紫"),
+    (300., "品红"),
+    (330., "玫红"),
+];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Panel {
@@ -39,14 +55,98 @@ enum Panel {
     Logs,
 }
 
+/// 消息流方向过滤（与搜索、订阅过滤叠加生效）
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirFilter {
+    All,
+    Received,
+    Published,
+}
+
+impl DirFilter {
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "全部",
+            Self::Received => "接收",
+            Self::Published => "发布",
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::All => 0,
+            Self::Received => 1,
+            Self::Published => 2,
+        }
+    }
+
+    fn from_index(i: usize) -> Self {
+        match i {
+            1 => Self::Received,
+            2 => Self::Published,
+            _ => Self::All,
+        }
+    }
+}
+
+/// 展开消息详情里的 payload 展示格式。任一时刻只展开一条消息，
+/// 视图级单值即可视作「逐消息」选择。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DetailFormat {
+    Auto,
+    Text,
+    Hex,
+    Base64,
+}
+
+impl DetailFormat {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "自动",
+            Self::Text => "文本",
+            Self::Hex => "Hex",
+            Self::Base64 => "Base64",
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Auto => 0,
+            Self::Text => 1,
+            Self::Hex => 2,
+            Self::Base64 => 3,
+        }
+    }
+
+    fn from_index(i: usize) -> Self {
+        match i {
+            1 => Self::Text,
+            2 => Self::Hex,
+            3 => Self::Base64,
+            _ => Self::Auto,
+        }
+    }
+}
+
 pub struct ConnectionView {
     conn_id: String,
     app: gpui_kit::WeakEntity<MqttXApp>,
     engine: Arc<MqttEngine>,
 
-    // 订阅
+    // ── 订阅 ──
     sub_topic: Entity<InputState>,
     sub_qos: Entity<SelectState<OptionDelegate>>,
+    sub_alias: Entity<InputState>,
+    // v5 高级订阅选项
+    sub_identifier: Entity<InputState>,
+    sub_no_local: bool,
+    sub_rap: bool,
+    sub_retain_handling: Entity<SelectState<OptionDelegate>>,
+    sub_show_advanced: bool,
+    /// 编辑中的旧主题：提交时用旧主题移除原订阅，避免改名过程丢数据
+    editing: Option<String>,
+    /// 点击订阅项激活的消息过滤主题（再点一次取消）
+    sub_filter: Option<String>,
 
     // 发布
     pub_topic: Entity<InputState>,
@@ -56,12 +156,17 @@ pub struct ConnectionView {
     retain: bool,
     content_type: Entity<InputState>,
     user_props: Entity<KvEditor>,
+    msg_expiry: Entity<InputState>,
+    response_topic: Entity<InputState>,
+    correlation_data: Entity<InputState>,
     show_props: bool,
 
     // 过滤与面板
     filter: Entity<InputState>,
     panel: Panel,
     expanded: Option<u64>,
+    msg_dir: DirFilter,
+    detail_format: DetailFormat,
 
     // 预设
     preset_name: Entity<InputState>,
@@ -77,9 +182,12 @@ impl ConnectionView {
     ) -> Self {
 
         let sub_topic = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("订阅主题，支持通配符 # +")
+            InputState::new(window, cx).placeholder("订阅主题，支持 # +，多个用逗号/空格分隔")
         });
         let sub_qos = make_select(&QOS, 0, window, cx);
+        let sub_alias = cx.new(|cx| InputState::new(window, cx).placeholder("别名（可选）"));
+        let sub_identifier = cx.new(|cx| InputState::new(window, cx).placeholder("订阅标识符"));
+        let sub_retain_handling = make_select(&RETAIN_HANDLING, 0, window, cx);
         let pub_topic = cx.new(|cx| InputState::new(window, cx).placeholder("发布主题"));
         let payload = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -88,6 +196,11 @@ impl ConnectionView {
         let pub_qos = make_select(&QOS, 0, window, cx);
         let payload_format = make_select(&PAYLOAD_FORMATS, 0, window, cx);
         let content_type = cx.new(|cx| InputState::new(window, cx).placeholder("Content-Type（可选）"));
+        let msg_expiry = cx.new(|cx| InputState::new(window, cx).placeholder("秒，如 60"));
+        let response_topic =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Response Topic（可选）"));
+        let correlation_data =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Correlation Data（可选）"));
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("过滤主题或内容…"));
         let user_props = cx.new(|cx| KvEditor::new("pub", &[], window, cx));
         let preset_name =
@@ -99,6 +212,14 @@ impl ConnectionView {
             engine,
             sub_topic,
             sub_qos,
+            sub_alias,
+            sub_identifier,
+            sub_no_local: false,
+            sub_rap: false,
+            sub_retain_handling,
+            sub_show_advanced: false,
+            editing: None,
+            sub_filter: None,
             pub_topic,
             payload,
             pub_qos,
@@ -106,10 +227,15 @@ impl ConnectionView {
             retain: false,
             content_type,
             user_props,
+            msg_expiry,
+            response_topic,
+            correlation_data,
             show_props: false,
             filter,
             panel: Panel::Messages,
             expanded: None,
+            msg_dir: DirFilter::All,
+            detail_format: DetailFormat::Auto,
             preset_name,
         }
     }
@@ -126,82 +252,285 @@ impl ConnectionView {
         .flatten()
     }
 
+    fn is_v5(&self, cx: &App) -> bool {
+        self.config(cx).map(|c| c.protocol.is_v5()).unwrap_or(true)
+    }
+
+    // ── 订阅数据操作 ────────────────────────────────────────────────────────
+
+    /// 订阅按 (连接, 主题) 唯一：先摘掉旧条目再走 `add_subscription`，
+    /// 借它入列 + `save_subscriptions` 落盘的逻辑完成 upsert（storage 字段是私有的）。
+    /// 落盘顺序以 add 时为准，入列后移回原位以保持界面顺序稳定。
+    fn upsert_subscription(&self, sub: Subscription, cx: &mut Context<Self>) {
+        let Some(app_entity) = self.app.upgrade() else {
+            return;
+        };
+        app_entity.update(cx, |app, cx| {
+            let slot = app
+                .subscriptions
+                .iter()
+                .position(|s| s.connection_id == sub.connection_id && s.topic == sub.topic);
+            app.subscriptions.retain(|s| {
+                !(s.connection_id == sub.connection_id && s.topic == sub.topic)
+            });
+            let new_id = sub.id.clone();
+            app.add_subscription(sub);
+            if let Some(pos) = slot
+                && let Some(from) = app.subscriptions.iter().position(|s| s.id == new_id)
+            {
+                let moved = app.subscriptions.remove(from);
+                app.subscriptions.insert(pos.min(app.subscriptions.len()), moved);
+            }
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    fn set_subscription_color(&mut self, sub_id: &str, hue: Option<f32>, cx: &mut Context<Self>) {
+        let sub = self
+            .with_app(cx, |app| {
+                app.subscriptions
+                    .iter()
+                    .find(|s| s.id == sub_id)
+                    .cloned()
+            })
+            .flatten();
+        if let Some(mut sub) = sub {
+            sub.color = hue;
+            self.upsert_subscription(sub, cx);
+        }
+    }
+
+    /// 启停订阅：置灰/恢复行显示，并在已连接时对引擎退订/重订。
+    fn toggle_subscription_enabled(&mut self, sub_id: &str, cx: &mut Context<Self>) {
+        let Some(mut sub) = self
+            .with_app(cx, |app| {
+                app.subscriptions
+                    .iter()
+                    .find(|s| s.id == sub_id)
+                    .cloned()
+            })
+            .flatten()
+        else {
+            return;
+        };
+        sub.enabled = !sub.enabled;
+        let enabled = sub.enabled;
+        let topic = sub.topic.clone();
+        let conn = self.conn_id.clone();
+        self.upsert_subscription(sub.clone(), cx);
+        if self.engine.is_connected(&conn) {
+            if enabled {
+                self.engine
+                    .subscribe_with_options(conn, sub.clone(), SubscribeOptions::from(&sub));
+            } else {
+                self.engine.unsubscribe(conn, topic);
+            }
+        }
+    }
+
+    /// 回填输入区进入编辑态；旧订阅保留到提交时才替换，中途放弃不丢数据。
+    fn start_edit_subscription(&mut self, sub: &Subscription, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing = Some(sub.topic.clone());
+        self.sub_topic
+            .update(cx, |s, cx| s.set_value(sub.topic.clone(), window, cx));
+        let qos_idx = (sub.qos.min(2)) as usize;
+        self.sub_qos.update(cx, |s, cx| {
+            s.set_selected_index(Some(IndexPath::new(qos_idx)), window, cx)
+        });
+        let alias = sub.alias.clone().unwrap_or_default();
+        self.sub_alias
+            .update(cx, |s, cx| s.set_value(alias, window, cx));
+        let ident = sub
+            .sub_identifier
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        self.sub_identifier
+            .update(cx, |s, cx| s.set_value(ident, window, cx));
+        self.sub_no_local = sub.no_local;
+        self.sub_rap = sub.retain_as_published;
+        let rh_idx = sub.retain_handling.min(2) as usize;
+        self.sub_retain_handling.update(cx, |s, cx| {
+            s.set_selected_index(Some(IndexPath::new(rh_idx)), window, cx)
+        });
+        self.sub_show_advanced = true;
+        cx.notify();
+    }
+
+    // ── 订阅 / 发布动作 ─────────────────────────────────────────────────────
+
     fn do_subscribe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let topic = self.sub_topic.read(cx).value().to_string();
-        if topic.trim().is_empty() {
+        let raw = self.sub_topic.read(cx).value().to_string();
+        let topics = split_topic_list(&raw);
+        if topics.is_empty() {
             window.push_notification(Notification::warning("订阅主题不能为空"), cx);
             return;
         }
         let qos = self.sub_qos.read(cx).selected_value().copied().unwrap_or(0) as u8;
-        let sub = crate::model::Subscription::new(self.conn_id.clone(), topic, qos);
-        self.engine.subscribe(self.conn_id.clone(), sub);
-        self.sub_topic.update(cx, |s, cx| s.set_value("", window, cx));
+        let alias_raw = self.sub_alias.read(cx).value().to_string();
+        let alias = {
+            let t = alias_raw.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        };
+        let is_v5 = self.is_v5(cx);
+        // v5 选项只对 v5 连接生效，v4 下不读取（避免无效输入阻断订阅）
+        let mut sub_identifier = None;
+        if is_v5 {
+            let ident = self.sub_identifier.read(cx).value().to_string();
+            let t = ident.trim();
+            if !t.is_empty() {
+                match t.parse::<u32>() {
+                    Ok(v) if v > 0 => sub_identifier = Some(v),
+                    _ => {
+                        window.push_notification(
+                            Notification::warning("订阅标识符须为正整数"),
+                            cx,
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+        let no_local = self.sub_no_local;
+        let rap = self.sub_rap;
+        let retain_handling = self
+            .sub_retain_handling
+            .read(cx)
+            .selected_value()
+            .copied()
+            .unwrap_or(0) as u8;
+
+        let connected = self.engine.is_connected(&self.conn_id);
+        let conn = self.conn_id.clone();
+
+        // 编辑提交：旧主题不在新列表里时先移除（含引擎退订），新主题由下方 upsert 覆盖
+        if let Some(old_topic) = self.editing.take()
+            && !topics.contains(&old_topic)
+        {
+            if self.sub_filter.as_deref() == Some(old_topic.as_str()) {
+                self.sub_filter = None;
+            }
+            if let Some(app_entity) = self.app.upgrade() {
+                app_entity.update(cx, |app, cx| {
+                    app.remove_subscription(&conn, &old_topic);
+                    cx.notify();
+                });
+            }
+        }
+
+        for topic in topics {
+            let mut sub = Subscription::new(conn.clone(), topic, qos);
+            sub.alias = alias.clone();
+            if is_v5 {
+                sub.sub_identifier = sub_identifier;
+                sub.no_local = no_local;
+                sub.retain_as_published = rap;
+                sub.retain_handling = retain_handling;
+            }
+            self.upsert_subscription(sub.clone(), cx);
+            if connected {
+                self.engine.subscribe_with_options(
+                    conn.clone(),
+                    sub.clone(),
+                    SubscribeOptions::from(&sub),
+                );
+            }
+        }
+        if !connected {
+            let hint = if self
+                .config(cx)
+                .map(|c| c.auto_resubscribe)
+                .unwrap_or(true)
+            {
+                "未连接：订阅已保存，连接后自动恢复"
+            } else {
+                "未连接：订阅已保存"
+            };
+            window.push_notification(Notification::warning(hint), cx);
+        }
+
+        self.sub_topic
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.sub_alias
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        cx.notify();
     }
 
     fn do_publish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let topic = self.pub_topic.read(cx).value().to_string();
-        if topic.trim().is_empty() {
+        let mut params = self.collect_publish_params(cx);
+        if params.topic.trim().is_empty() {
             window.push_notification(Notification::warning("发布主题不能为空"), cx);
             return;
         }
-        let raw_payload = self.payload.read(cx).value().to_string();
+        // 过期秒数输入非法时 collect 会静默得到 None，这里显式拦截避免误发
+        let expiry_raw = self.msg_expiry.read(cx).value().to_string();
+        if !expiry_raw.trim().is_empty() && params.message_expiry_interval.is_none() {
+            window.push_notification(Notification::warning("消息过期须为非负整数（秒）"), cx);
+            return;
+        }
 
         let vars = self.with_app(cx, |app| app.variables.clone()).unwrap_or_default();
-        let topic = render_template(&topic, &vars);
-        let rendered = render_template(&raw_payload, &vars);
+        params.topic = render_template(&params.topic, &vars);
+        params.payload = render_template(&params.payload, &vars);
+        // {{变量}} 同样作用于用户属性的 key/value
+        params.user_properties = params
+            .user_properties
+            .into_iter()
+            .map(|(k, v)| (render_template(&k, &vars), render_template(&v, &vars)))
+            .collect();
 
-        let format = PayloadFormat::ALL[
-            self.payload_format.read(cx).selected_value().copied().unwrap_or(0)
-        ];
-        if let PayloadFormat::Json = format
-            && let Err(e) = serde_json::from_str::<serde_json::Value>(&rendered) {
+        if let PayloadFormat::Json = params.payload_format
+            && let Err(e) = serde_json::from_str::<serde_json::Value>(&params.payload) {
                 window.push_notification(
                     Notification::warning(format!("JSON 格式无效: {e}")),
                     cx,
                 );
                 return;
             }
-        let encoded = match format.encode(&rendered) {
-            Ok(bytes) => bytes,
+        match params.payload_format.encode(&params.payload) {
+            Ok(bytes) => params.raw_bytes = Some(bytes),
             Err(e) => {
                 window.push_notification(Notification::warning(e), cx);
                 return;
             }
-        };
+        }
 
-        let is_v5 = self.config(cx).map(|c| c.protocol.is_v5()).unwrap_or(true);
-        let mut params = PublishParams {
-            topic,
-            payload: rendered,
-            payload_format: format,
-            qos: self.pub_qos.read(cx).selected_value().copied().unwrap_or(0) as u8,
-            retain: self.retain,
-            raw_bytes: Some(encoded),
-            ..Default::default()
-        };
-        if is_v5 {
-            let ct = self.content_type.read(cx).value().to_string();
-            params.content_type = (!ct.is_empty()).then_some(ct);
-            params.user_properties = self.user_props.read(cx).pairs(cx);
+        // v3.1.1 忽略 v5 属性，避免残留输入带进发布报文
+        if !self.is_v5(cx) {
+            params.user_properties.clear();
+            params.content_type = None;
+            params.message_expiry_interval = None;
+            params.response_topic = None;
+            params.correlation_data = None;
         }
         self.engine.publish(self.conn_id.clone(), params);
     }
 
-    /// 读取当前发布面板上的参数（模板渲染前的原始值）。
+    /// 读取当前发布面板上的参数（模板渲染前的原始值）；保存预设与发布共用，
+    /// 须覆盖全部 v5 属性与用户属性。
     fn collect_publish_params(&self, cx: &App) -> PublishParams {
         let qos = self.pub_qos.read(cx).selected_value().copied().unwrap_or(0) as u8;
         let format = PayloadFormat::ALL
             [self.payload_format.read(cx).selected_value().copied().unwrap_or(0)];
+        let opt = |s: String| {
+            let t = s.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        };
         PublishParams {
             topic: self.pub_topic.read(cx).value().to_string(),
             payload: self.payload.read(cx).value().to_string(),
             payload_format: format,
             qos,
             retain: self.retain,
-            content_type: {
-                let ct = self.content_type.read(cx).value().to_string();
-                (!ct.is_empty()).then_some(ct)
+            user_properties: self.user_props.read(cx).pairs(cx),
+            content_type: opt(self.content_type.read(cx).value().to_string()),
+            message_expiry_interval: {
+                let t = self.msg_expiry.read(cx).value().to_string();
+                let t = t.trim();
+                if t.is_empty() { None } else { t.parse::<u32>().ok() }
             },
+            response_topic: opt(self.response_topic.read(cx).value().to_string()),
+            correlation_data: opt(self.correlation_data.read(cx).value().to_string()),
             ..Default::default()
         }
     }
@@ -221,6 +550,20 @@ impl ConnectionView {
         let ct = params.content_type.clone().unwrap_or_default();
         self.content_type
             .update(cx, |s, cx| s.set_value(ct, window, cx));
+        let expiry = params
+            .message_expiry_interval
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        self.msg_expiry
+            .update(cx, |s, cx| s.set_value(expiry, window, cx));
+        let rt = params.response_topic.clone().unwrap_or_default();
+        self.response_topic
+            .update(cx, |s, cx| s.set_value(rt, window, cx));
+        let cd = params.correlation_data.clone().unwrap_or_default();
+        self.correlation_data
+            .update(cx, |s, cx| s.set_value(cd, window, cx));
+        // KvEditor 不支持运行时整体替换，直接重建实体回填用户属性
+        self.user_props = cx.new(|cx| KvEditor::new("pub", &params.user_properties, window, cx));
         let qos_idx = params.qos.min(2) as usize;
         self.pub_qos.update(cx, |s, cx| {
             s.set_selected_index(Some(IndexPath::new(qos_idx)), window, cx)
@@ -235,9 +578,11 @@ impl ConnectionView {
         self.retain = params.retain;
         cx.notify();
     }
+}
 
-    // ── 渲染 ──────────────────────────────────────────────────────────────
+// ── 渲染 ──────────────────────────────────────────────────────────────────────
 
+impl ConnectionView {
     fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.conn_id.clone();
         let (name, status, is_v5) = self
@@ -315,30 +660,120 @@ impl ConnectionView {
     fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let sub_topic = self.sub_topic.clone();
         let sub_qos = self.sub_qos.clone();
-        h_flex()
-            .gap_2()
-            .px_3()
-            .h_12()
-            .items_center()
+        let sub_alias = self.sub_alias.clone();
+        let is_v5 = self.is_v5(cx);
+        let editing = self.editing.is_some();
+        let show_advanced = self.sub_show_advanced && is_v5;
+
+        let mut bar = v_flex()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().secondary)
-            .child(div().flex_1().min_w(px(0.)).child(Input::new(&sub_topic).small()))
-            .child(div().w(px(96.)).child(Select::new(&sub_qos).small()))
-            .child(
-                Button::new(SharedString::from(format!("subscribe-{}", self.conn_id)))
-                    .icon(IconName::Plus)
-                    .label("订阅")
-                    .primary()
-                    .small()
-                    .on_click(cx.listener(|this, _, window, cx| this.do_subscribe(window, cx))),
-            )
+            .bg(cx.theme().secondary);
+        bar = bar.child(
+            h_flex()
+                .gap_2()
+                .px_3()
+                .h_12()
+                .items_center()
+                .child(div().flex_1().min_w(px(0.)).child(Input::new(&sub_topic).small()))
+                .child(div().w(px(96.)).child(Select::new(&sub_qos).small()))
+                .child(div().w(px(112.)).child(Input::new(&sub_alias).small()))
+                .when(is_v5, |h| {
+                    h.child(
+                        Button::new(SharedString::from(format!("sub-adv-{}", self.conn_id)))
+                            .icon(IconName::SlidersHorizontal)
+                            .label("高级")
+                            .ghost()
+                            .small()
+                            .when(show_advanced, |b| b.selected(true))
+                            .tooltip("MQTT 5 订阅选项")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.sub_show_advanced = !this.sub_show_advanced;
+                                cx.notify();
+                            })),
+                    )
+                })
+                .child(
+                    Button::new(SharedString::from(format!("subscribe-{}", self.conn_id)))
+                        .icon(if editing { IconName::Check } else { IconName::Plus })
+                        .label(if editing { "更新" } else { "订阅" })
+                        .primary()
+                        .small()
+                        .on_click(cx.listener(|this, _, window, cx| this.do_subscribe(window, cx))),
+                )
+                .when(editing, |h| {
+                    h.child(
+                        Button::new(SharedString::from(format!("sub-edit-cancel-{}", self.conn_id)))
+                            .icon(IconName::Close)
+                            .ghost()
+                            .small()
+                            .tooltip("取消编辑")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.editing = None;
+                                cx.notify();
+                            })),
+                    )
+                }),
+        );
+
+        if show_advanced {
+            let sub_identifier = self.sub_identifier.clone();
+            let sub_no_local = self.sub_no_local;
+            let sub_rap = self.sub_rap;
+            let sub_retain_handling = self.sub_retain_handling.clone();
+            bar = bar.child(
+                h_flex()
+                    .gap_4()
+                    .px_3()
+                    .pb_2()
+                    .items_start()
+                    .child(
+                        div()
+                            .w(px(150.))
+                            .child(field("订阅标识符", Input::new(&sub_identifier).small())),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .pt_4()
+                            .child(Switch::new("sub-no-local").checked(sub_no_local).on_change(
+                                cx.listener(|this, v, _, cx| {
+                                    this.sub_no_local = *v;
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(div().text_xs().child("No Local")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .pt_4()
+                            .child(Switch::new("sub-rap").checked(sub_rap).on_change(
+                                cx.listener(|this, v, _, cx| {
+                                    this.sub_rap = *v;
+                                    cx.notify();
+                                }),
+                            ))
+                            .child(div().text_xs().child("Retain As Published")),
+                    )
+                    .child(
+                        div().w(px(150.)).child(field(
+                            "Retain Handling",
+                            Select::new(&sub_retain_handling).small(),
+                        )),
+                    ),
+            );
+        }
+        bar
     }
 
     fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let hover_bg = cx.theme().muted;
+        let muted_fg = cx.theme().muted_foreground;
         let conn = self.conn_id.clone();
-        let subs: Vec<_> = self
+        let subs: Vec<Subscription> = self
             .with_app(cx, |app| {
                 app.subscriptions
                     .iter()
@@ -347,6 +782,7 @@ impl ConnectionView {
                     .collect()
             })
             .unwrap_or_default();
+        let active_filter = self.sub_filter.clone();
 
         let mut list = v_flex().gap_0p5();
         if subs.is_empty() {
@@ -369,9 +805,201 @@ impl ConnectionView {
             );
         }
         for sub in subs {
+            let enabled = sub.enabled;
+            let is_active = enabled && active_filter.as_deref() == Some(sub.topic.as_str());
             let topic = sub.topic.clone();
-            let topic_for_click = topic.clone();
-            let cid = self.conn_id.clone();
+            let sub_id = sub.id.clone();
+            let alias = sub.alias.clone().filter(|a| !a.trim().is_empty());
+            let primary = alias.clone().unwrap_or_else(|| topic.clone());
+
+            // 颜色按钮：已设色显示色点，未设显示灰色「+」
+            let color_btn = {
+                let weak_menu = cx.weak_entity();
+                let sid = sub_id.clone();
+                let trigger_id = SharedString::from(format!("sub-color-{}", sub_id));
+                let trigger = if let Some(hue) = sub.color {
+                    Button::new(trigger_id)
+                        .ghost()
+                        .xsmall()
+                        .tooltip("订阅颜色")
+                        .child(
+                            div()
+                                .size(px(11.))
+                                .rounded_full()
+                                .bg(hue_color(hue))
+                                .border_1()
+                                .border_color(cx.theme().border),
+                        )
+                } else {
+                    Button::new(trigger_id)
+                        .ghost()
+                        .xsmall()
+                        .tooltip("订阅颜色")
+                        .child(
+                            div()
+                                .size(px(11.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(cx.theme().muted)
+                                .text_color(muted_fg)
+                                .text_xs()
+                                .child("+"),
+                        )
+                };
+                trigger.dropdown_menu(move |mut menu, _, _| {
+                    for (hue, name) in PRESET_HUES {
+                        let weak = weak_menu.clone();
+                        let sid = sid.clone();
+                        let swatch = hue_color(hue);
+                        let label = SharedString::from(format!("{name} {hue:.0}°"));
+                        menu = menu.item(
+                            PopupMenuItem::element(move |_, _| {
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .size(px(10.))
+                                            .rounded_full()
+                                            .bg(swatch)
+                                            .border_1()
+                                            .border_color(hsla(0., 0., 1., 0.6)),
+                                    )
+                                    .child(div().text_sm().child(label.clone()))
+                            })
+                            .on_click(move |_, _, cx| {
+                                weak
+                                    .update(cx, |view, cx| {
+                                        view.set_subscription_color(&sid, Some(hue), cx);
+                                    })
+                                    .ok();
+                            }),
+                        );
+                    }
+                    menu = menu.separator();
+                    let weak_rand = weak_menu.clone();
+                    let sid_rand = sid.clone();
+                    menu = menu.item(PopupMenuItem::new("随机颜色").on_click(move |_, _, cx| {
+                        let hue = (uuid::Uuid::new_v4().as_u128() % 360) as f32;
+                        weak_rand
+                            .update(cx, |view, cx| {
+                                view.set_subscription_color(&sid_rand, Some(hue), cx);
+                            })
+                            .ok();
+                    }));
+                    let weak_clear = weak_menu.clone();
+                    let sid_clear = sid.clone();
+                    menu = menu.item(PopupMenuItem::new("清除颜色").on_click(move |_, _, cx| {
+                        weak_clear
+                            .update(cx, |view, cx| {
+                                view.set_subscription_color(&sid_clear, None, cx);
+                            })
+                            .ok();
+                    }));
+                    menu
+                })
+            };
+
+            let eye_sid = sub_id.clone();
+            let eye_btn = Button::new(SharedString::from(format!("sub-eye-{}", sub_id)))
+                .icon(if enabled { IconName::Eye } else { IconName::EyeOff })
+                .ghost()
+                .xsmall()
+                .tooltip(if enabled { "停用订阅" } else { "启用订阅" })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_subscription_enabled(&eye_sid, cx);
+                }));
+
+            let edit_sid = sub_id.clone();
+            let edit_btn = Button::new(SharedString::from(format!("sub-edit-{}", sub_id)))
+                .icon(IconName::Pencil)
+                .ghost()
+                .xsmall()
+                .tooltip("编辑订阅")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let sub = this
+                        .with_app(cx, |app| {
+                            app.subscriptions
+                                .iter()
+                                .find(|s| s.id == edit_sid)
+                                .cloned()
+                        })
+                        .flatten();
+                    if let Some(sub) = sub {
+                        this.start_edit_subscription(&sub, window, cx);
+                    }
+                }));
+
+            let del_cid = self.conn_id.clone();
+            let del_topic = topic.clone();
+            let del_weak_filter = self.sub_filter.clone();
+            let del_btn = Button::new(SharedString::from(format!("sub-del-{}", sub_id)))
+                .icon(IconName::Close)
+                .ghost()
+                .xsmall()
+                .tooltip("取消订阅")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // 若删除的是当前过滤主题，一并清掉消息过滤
+                    if del_weak_filter.as_deref() == Some(del_topic.as_str()) {
+                        this.sub_filter = None;
+                    }
+                    if let Some(app) = this.app.upgrade() {
+                        app.update(cx, |app, cx| {
+                            app.remove_subscription(&del_cid, &del_topic);
+                            cx.notify();
+                        });
+                    }
+                    this.editing = None;
+                    cx.notify();
+                }));
+
+            // 点击区（非按钮）：切换按该主题过滤消息流；禁用的订阅不参与
+            let filter_topic = topic.clone();
+            let click_zone = h_flex()
+                .id(SharedString::from(format!("sub-click-{}", sub_id)))
+                .flex_1()
+                .min_w(px(0.))
+                .when(enabled, |z| {
+                    z.cursor_pointer().on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.sub_filter = if this.sub_filter.as_deref()
+                                == Some(filter_topic.as_str())
+                            {
+                                None
+                            } else {
+                                Some(filter_topic.clone())
+                            };
+                            cx.notify();
+                        },
+                    ))
+                })
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .text_sm()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .when(!enabled, |t| t.text_color(muted_fg))
+                                .child(primary),
+                        )
+                        .when_some(alias, |v, _| {
+                            v.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted_fg)
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(topic.clone()),
+                            )
+                        }),
+                );
+
             list = list.child(
                 h_flex()
                     .id(SharedString::from(format!("sub-{}-{}", self.conn_id, sub.id)))
@@ -380,50 +1008,28 @@ impl ConnectionView {
                     .px_2()
                     .py_1p5()
                     .rounded_md()
-                    .hover(move |this| this.bg(hover_bg))
-                    .child(
-                        gpui_kit::component::Icon::new(IconName::Hash)
-                            .xsmall()
-                            .text_color(cx.theme().muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .text_sm()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(topic),
-                    )
+                    .when(is_active, |t| t.bg(cx.theme().secondary))
+                    .when(!is_active, |t| t.hover(move |this| this.bg(hover_bg)))
+                    .when(!enabled, |t| t.opacity(0.55))
+                    .child(color_btn)
+                    .child(click_zone)
                     .child(
                         div()
                             .text_xs()
                             .px_1()
                             .rounded_sm()
                             .bg(cx.theme().muted)
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(muted_fg)
                             .child(format!("Q{}", sub.qos)),
                     )
-                    .child(
-                        Button::new(SharedString::from(format!("sub-del-{}", sub.id)))
-                            .icon(IconName::Close)
-                            .ghost()
-                            .xsmall()
-                            .tooltip("取消订阅")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(app) = this.app.upgrade() {
-                                    app.update(cx, |app, cx| {
-                                        app.remove_subscription(&cid, &topic_for_click);
-                                        cx.notify();
-                                    });
-                                }
-                            })),
-                    ),
+                    .child(eye_btn)
+                    .child(edit_btn)
+                    .child(del_btn),
             );
         }
 
         v_flex()
-            .w(px(220.))
+            .w(px(248.))
             .flex_shrink_0()
             .h_full()
             .bg(cx.theme().sidebar)
@@ -438,7 +1044,12 @@ impl ConnectionView {
             .child(div().flex_1().overflow_y_scrollbar().px_2().child(list))
     }
 
-    fn render_message_row(&self, record: &MqttRecord, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_message_row(
+        &self,
+        record: &MqttRecord,
+        sub_color: Option<f32>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let seq = record.seq;
         let expanded = self.expanded == Some(seq);
         let received = matches!(record.direction, Direction::Received);
@@ -452,112 +1063,184 @@ impl ConnectionView {
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
         let direction_label = if received { "接收" } else { "发送" };
+        let show_millis = self
+            .with_app(cx, |app| app.settings.show_millis)
+            .unwrap_or(true);
 
-        let mut row = v_flex()
-            .id(SharedString::from(format!(
-                "msg-{}-{}",
-                record.connection_id, record.seq
-            )))
-            .w_full()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(border)
-            .hover(move |this| this.bg(hover_bg))
-            .cursor_pointer()
+        let header = h_flex()
+            .gap_2()
+            .items_center()
             .child(
-                h_flex()
-                    .gap_2()
+                div()
+                    .size(px(18.))
+                    .flex()
                     .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(accent.alpha(0.14))
                     .child(
-                        div()
-                            .size(px(18.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .bg(accent.alpha(0.14))
-                            .child(
-                                gpui_kit::component::Icon::new(if received {
-                                    IconName::ArrowDown
-                                } else {
-                                    IconName::ArrowUp
-                                })
-                                .size_3()
-                                .text_color(accent),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .text_sm()
-                            .font_medium()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .font_family(mono.clone())
-                            .child(record.topic.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .font_family(mono.clone())
-                            .child(direction_label),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .px_1()
-                            .rounded_sm()
-                            .bg(cx.theme().muted)
-                            .text_color(muted)
-                            .font_family(mono.clone())
-                            .child(format!("Q{}", record.qos)),
-                    )
-                    .when(record.retain, |t| {
-                        t.child(
-                            div()
-                                .text_xs()
-                                .px_1()
-                                .rounded_sm()
-                                .bg(cx.theme().warning.alpha(0.15))
-                                .text_color(cx.theme().warning)
-                                .child("retain"),
-                        )
-                    })
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .font_family(mono.clone())
-                            .child(format_time(record.timestamp, true)),
+                        gpui_kit::component::Icon::new(if received {
+                            IconName::ArrowDown
+                        } else {
+                            IconName::ArrowUp
+                        })
+                        .size_3()
+                        .text_color(accent),
                     ),
             )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_sm()
+                    .font_medium()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .font_family(mono.clone())
+                    // 匹配到订阅色时主题文字着色，否则保持默认前景色
+                    .when_some(sub_color, |t, hue| t.text_color(hue_color(hue)))
+                    .child(record.topic.clone()),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .font_family(mono.clone())
+                    .child(direction_label),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .px_1()
+                    .rounded_sm()
+                    .bg(cx.theme().muted)
+                    .text_color(muted)
+                    .font_family(mono.clone())
+                    .child(format!("Q{}", record.qos)),
+            )
+            .when(record.retain, |t| {
+                t.child(
+                    div()
+                        .text_xs()
+                        .px_1()
+                        .rounded_sm()
+                        .bg(cx.theme().warning.alpha(0.15))
+                        .text_color(cx.theme().warning)
+                        .child("retain"),
+                )
+            })
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .font_family(mono.clone())
+                    .child(format_time(record.timestamp, show_millis)),
+            );
+
+        let mut body = v_flex()
+            .flex_1()
+            .min_w(px(0.))
+            .px_3()
+            .py_2()
+            .child(header)
             .child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().foreground)
                     .pt_0p5()
                     .font_family(mono.clone())
-                    .child(preview_payload(&record.payload, expanded)),
+                    .child(preview_payload(&record.payload)),
             );
 
         if expanded {
+            let fmt = self.detail_format;
+            let detail_text = format_payload_detail(&record.payload, fmt);
             let mut details = v_flex().gap_1p5().pt_1();
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&record.payload) {
-                details = details.child(
-                    div()
-                        .font_family(mono.clone())
-                        .text_xs()
-                        .p_2()
-                        .rounded_md()
-                        .bg(cx.theme().background)
-                        .border_1()
-                        .border_color(border)
-                        .child(serde_json::to_string_pretty(&v).unwrap_or_default()),
+
+            // 格式切换 + 复制按钮；stop_propagation 避免点击时又收起整行
+            let fmt_group = ButtonGroup::new(SharedString::from(format!("msg-fmt-{}", seq)))
+                .compact()
+                .children(
+                    [DetailFormat::Auto, DetailFormat::Text, DetailFormat::Hex, DetailFormat::Base64]
+                        .into_iter()
+                        .map(|f| {
+                            Button::new(SharedString::from(format!(
+                                "msg-fmt-btn-{}-{}",
+                                seq,
+                                f.index()
+                            )))
+                            .label(f.label())
+                            .small()
+                            .selected(f == fmt)
+                        }),
+                )
+                .on_click(cx.listener(|this, ixs: &Vec<usize>, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(&i) = ixs.first() {
+                        this.detail_format = DetailFormat::from_index(i);
+                        cx.notify();
+                    }
+                }));
+
+            let copy_topic = record.topic.clone();
+            let copy_payload = record.payload.clone();
+            let copy_detail = details_copy_text(record, show_millis);
+            let detail_toolbar = h_flex()
+                .gap_1()
+                .items_center()
+                .child(fmt_group)
+                .child(div().flex_1())
+                .child(
+                    Button::new(SharedString::from(format!("msg-copy-topic-{}", seq)))
+                        .icon(IconName::Copy)
+                        .label("主题")
+                        .ghost()
+                        .xsmall()
+                        .tooltip("复制主题")
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_topic.clone()));
+                            window.push_notification(Notification::success("已复制主题"), cx);
+                        }),
+                )
+                .child(
+                    Button::new(SharedString::from(format!("msg-copy-payload-{}", seq)))
+                        .icon(IconName::Copy)
+                        .label("负载")
+                        .ghost()
+                        .xsmall()
+                        .tooltip("复制负载原文")
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.clone()));
+                            window.push_notification(Notification::success("已复制负载"), cx);
+                        }),
+                )
+                .child(
+                    Button::new(SharedString::from(format!("msg-copy-detail-{}", seq)))
+                        .icon(IconName::Copy)
+                        .label("详情")
+                        .ghost()
+                        .xsmall()
+                        .tooltip("复制完整详情（含 v5 属性）")
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_detail.clone()));
+                            window.push_notification(Notification::success("已复制详情"), cx);
+                        }),
                 );
-            }
+            details = details.child(detail_toolbar).child(
+                div()
+                    .font_family(mono.clone())
+                    .text_xs()
+                    .p_2()
+                    .rounded_md()
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(border)
+                    .child(detail_text),
+            );
+
             if !record.user_properties.is_empty() {
                 let props: String = record
                     .user_properties
@@ -578,6 +1261,16 @@ impl ConnectionView {
                 ("Content-Type", record.content_type.clone()),
                 ("Response Topic", record.response_topic.clone()),
                 ("Correlation Data", record.correlation_data.clone()),
+                (
+                    "消息过期",
+                    record
+                        .message_expiry_interval
+                        .map(|v| format!("{v} 秒")),
+                ),
+                (
+                    "订阅标识符",
+                    record.subscription_identifier.map(|v| v.to_string()),
+                ),
             ] {
                 if let Some(v) = value {
                     details = details.child(
@@ -589,7 +1282,7 @@ impl ConnectionView {
                     );
                 }
             }
-            row = row.child(
+            body = body.child(
                 div()
                     .mt_1()
                     .p_2()
@@ -598,41 +1291,88 @@ impl ConnectionView {
                     .child(details),
             );
         }
-        row.on_click(cx.listener(move |this, _, _, cx| {
-            this.expanded = if this.expanded == Some(seq) {
-                None
-            } else {
-                Some(seq)
-            };
-            cx.notify();
-        }))
+
+        h_flex()
+            .id(SharedString::from(format!(
+                "msg-{}-{}",
+                record.connection_id, record.seq
+            )))
+            .w_full()
+            .border_b_1()
+            .border_color(border)
+            .hover(move |this| this.bg(hover_bg))
+            .cursor_pointer()
+            // 左侧色条：有订阅色时显示，否则透明以保持行内对齐
+            .child(
+                div()
+                    .w(px(3.))
+                    .self_stretch()
+                    .rounded_full()
+                    .bg(sub_color.map(hue_color).unwrap_or(hsla(0., 0., 0., 0.))),
+            )
+            .child(body)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.expanded = if this.expanded == Some(seq) {
+                    None
+                } else {
+                    Some(seq)
+                };
+                cx.notify();
+            }))
     }
 
     fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.filter.read(cx).value().to_lowercase();
         let conn = self.conn_id.clone();
-        let records: Vec<MqttRecord> = self
+        let dir = self.msg_dir;
+        let sub_filter = self.sub_filter.clone();
+        let (records, subs): (Vec<MqttRecord>, Vec<Subscription>) = self
             .with_app(cx, |app| {
-                app.messages
+                let subs: Vec<Subscription> = app
+                    .subscriptions
+                    .iter()
+                    .filter(|s| s.connection_id == conn)
+                    .cloned()
+                    .collect();
+                let records: Vec<MqttRecord> = app
+                    .messages
                     .get(&conn)
                     .map(|m| {
                         m.iter()
                             .rev()
-                            .take(MAX_RENDERED_MESSAGES)
+                            // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
                             .filter(|r| {
-                                query.is_empty()
+                                let dir_ok = match dir {
+                                    DirFilter::All => true,
+                                    DirFilter::Received => {
+                                        r.direction == Direction::Received
+                                    }
+                                    DirFilter::Published => {
+                                        r.direction == Direction::Published
+                                    }
+                                };
+                                let query_ok = query.is_empty()
                                     || r.topic.to_lowercase().contains(&query)
-                                    || r.payload.to_lowercase().contains(&query)
+                                    || r.payload.to_lowercase().contains(&query);
+                                let sub_ok = sub_filter
+                                    .as_deref()
+                                    .map_or(true, |f| topic_matches(f, &r.topic));
+                                dir_ok && query_ok && sub_ok
                             })
+                            .take(MAX_RENDERED_MESSAGES)
                             .cloned()
                             .collect::<Vec<_>>()
                     })
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                (records, subs)
             })
             .unwrap_or_default();
 
         let mut body = v_flex().flex_1().overflow_y_scrollbar();
         if records.is_empty() {
+            let filtering = !query.is_empty()
+                || sub_filter.is_some()
+                || dir != DirFilter::All;
             body = body.child(
                 v_flex()
                     .h_full()
@@ -658,19 +1398,83 @@ impl ConnectionView {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(if query.is_empty() {
-                                "暂无消息，订阅主题后消息会显示在这里"
-                            } else {
+                            .child(if filtering {
                                 "没有匹配的消息"
+                            } else {
+                                "暂无消息，订阅主题后消息会显示在这里"
                             }),
                     ),
             );
         } else {
             // 最新消息在最上方（与 MQTTX 一致，避免长列表需要手动滚底）
             for r in &records {
-                body = body.child(self.render_message_row(r, cx));
+                let color = pick_subscription_color(&subs, &r.topic);
+                body = body.child(self.render_message_row(r, color, cx));
             }
         }
+
+        // 方向过滤 seg
+        let dir_group = ButtonGroup::new(SharedString::from(format!(
+            "msg-dir-{}",
+            self.conn_id
+        )))
+        .compact()
+        .children([DirFilter::All, DirFilter::Received, DirFilter::Published].into_iter().map(
+            |d| {
+                Button::new(SharedString::from(format!(
+                    "msg-dir-btn-{}-{}",
+                    self.conn_id,
+                    d.index()
+                )))
+                .label(d.label())
+                .small()
+                .selected(d == dir)
+            },
+        ))
+        .on_click(cx.listener(|this, ixs: &Vec<usize>, _, cx| {
+            if let Some(&i) = ixs.first() {
+                this.msg_dir = DirFilter::from_index(i);
+                cx.notify();
+            }
+        }));
+
+        // 订阅过滤 chip（点击订阅项激活）
+        let filter_chip = self.sub_filter.clone().map(|topic| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .px_1p5()
+                .py_0p5()
+                .rounded_md()
+                .bg(cx.theme().secondary)
+                .max_w(px(180.))
+                .child(
+                    gpui_kit::component::Icon::new(IconName::ListFilter)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(topic),
+                )
+                .child(
+                    Button::new(SharedString::from(format!(
+                        "msg-filter-clear-{}",
+                        self.conn_id
+                    )))
+                    .icon(IconName::Close)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("清除订阅过滤")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.sub_filter = None;
+                        cx.notify();
+                    })),
+                )
+        });
 
         v_flex()
             .flex_1()
@@ -685,6 +1489,7 @@ impl ConnectionView {
                     .items_center()
                     .border_b_1()
                     .border_color(cx.theme().border)
+                    .child(dir_group)
                     .child(
                         div()
                             .flex_1()
@@ -693,12 +1498,32 @@ impl ConnectionView {
                                 gpui_kit::component::Icon::new(IconName::Search).small(),
                             )),
                     )
+                    .children(filter_chip)
                     .child(
                         div()
                             .text_xs()
                             .px_1p5()
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("{} 条", records.len())),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("msg-clear-{}", self.conn_id)))
+                            .icon(IconName::Eraser)
+                            .label("清空")
+                            .ghost()
+                            .small()
+                            .tooltip("清空当前连接的消息")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let id = this.conn_id.clone();
+                                this.expanded = None;
+                                if let Some(app) = this.app.upgrade() {
+                                    app.update(cx, |app, cx| {
+                                        app.messages.remove(&id);
+                                        cx.notify();
+                                    });
+                                }
+                                cx.notify();
+                            })),
                     ),
             )
             .child(body)
@@ -707,6 +1532,9 @@ impl ConnectionView {
     fn render_logs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let conn = self.conn_id.clone();
+        let show_millis = self
+            .with_app(cx, |app| app.settings.show_millis)
+            .unwrap_or(true);
         let logs: Vec<_> = self
             .with_app(cx, |app| {
                 app.logs
@@ -758,7 +1586,7 @@ impl ConnectionView {
                             .text_xs()
                             .text_color(muted)
                             .font_family(cx.theme().mono_font_family.clone())
-                            .child(format_time(l.timestamp, true)),
+                            .child(format_time(l.timestamp, show_millis)),
                     )
                     .child(
                         div()
@@ -800,20 +1628,19 @@ impl ConnectionView {
             )
             .child(body)
     }
-
     fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let pub_topic = self.pub_topic.clone();
         let payload = self.payload.clone();
         let pub_qos = self.pub_qos.clone();
         let payload_format = self.payload_format.clone();
         let content_type = self.content_type.clone();
+        let msg_expiry = self.msg_expiry.clone();
+        let response_topic = self.response_topic.clone();
+        let correlation_data = self.correlation_data.clone();
         let user_props = self.user_props.clone();
         let retain = self.retain;
         let show_props = self.show_props;
-        let is_v5 = self
-            .config(cx)
-            .map(|c| c.protocol.is_v5())
-            .unwrap_or(true);
+        let is_v5 = self.is_v5(cx);
 
         // 发布预设
         let presets = self.with_app(cx, |app| app.presets.clone()).unwrap_or_default();
@@ -831,7 +1658,22 @@ impl ConnectionView {
             h_flex()
                 .gap_2()
                 .items_center()
-                .child(div().flex_1().min_w(px(0.)).child(Input::new(&pub_topic).small()))
+                // Ctrl+Enter 快捷发送（焦点在主题输入上时）
+                .child(
+                    div()
+                        .id(SharedString::from(format!("pub-topic-wrap-{}", self.conn_id)))
+                        .flex_1()
+                        .min_w(px(0.))
+                        .on_key_down(cx.listener(
+                            |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
+                                if ev.keystroke.modifiers.control && ev.keystroke.key == "enter" {
+                                    cx.stop_propagation();
+                                    this.do_publish(window, cx);
+                                }
+                            },
+                        ))
+                        .child(Input::new(&pub_topic).small()),
+                )
                 .child(div().w(px(92.)).child(Select::new(&pub_qos).small()))
                 .child(div().w(px(124.)).child(Select::new(&payload_format).small()))
                 .child(self.render_preset_menu(presets, cx))
@@ -873,26 +1715,60 @@ impl ConnectionView {
 
         card = card.child(
             div()
+                .id(SharedString::from(format!("payload-wrap-{}", self.conn_id)))
                 .h(px(110.))
                 .rounded_md()
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().background)
                 .p_1()
+                // Ctrl+Enter 快捷发送（焦点在负载输入上时）
+                .on_key_down(cx.listener(
+                    |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
+                        if ev.keystroke.modifiers.control && ev.keystroke.key == "enter" {
+                            cx.stop_propagation();
+                            this.do_publish(window, cx);
+                        }
+                    },
+                ))
                 .child(Textarea::new(&payload)),
         );
 
         if show_props && is_v5 {
             card = card.child(
-                h_flex()
+                v_flex()
                     .gap_2()
                     .w_full()
                     .child(
-                        div()
-                            .w(px(240.))
-                            .child(field("Content-Type", Input::new(&content_type).small())),
+                        h_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(
+                                div().w(px(220.)).child(field(
+                                    "Content-Type",
+                                    Input::new(&content_type).small(),
+                                )),
+                            )
+                            .child(
+                                div().w(px(120.)).child(field(
+                                    "消息过期(秒)",
+                                    Input::new(&msg_expiry).small(),
+                                )),
+                            )
+                            .child(
+                                div().flex_1().min_w(px(0.)).child(field(
+                                    "Response Topic",
+                                    Input::new(&response_topic).small(),
+                                )),
+                            )
+                            .child(
+                                div().flex_1().min_w(px(0.)).child(field(
+                                    "Correlation Data",
+                                    Input::new(&correlation_data).small(),
+                                )),
+                            ),
                     )
-                    .child(div().flex_1().min_w(px(0.)).child(user_props.clone())),
+                    .child(user_props.clone()),
             );
         }
         card
@@ -1039,6 +1915,7 @@ impl ConnectionView {
                                             );
                                             return;
                                         }
+                                        // collect 已覆盖用户属性与全部 v5 字段
                                         let params = weak
                                             .read_with(cx, |view, cx| {
                                                 view.collect_publish_params(cx)
@@ -1116,15 +1993,123 @@ impl Render for ConnectionView {
     }
 }
 
-fn preview_payload(payload: &str, expanded: bool) -> String {
-    if expanded {
-        payload.to_string()
-    } else {
-        let one_line: String = payload.chars().take(200).collect();
-        if payload.len() > 200 {
-            format!("{one_line}…")
-        } else {
-            one_line
+// ─── 独立工具函数 ─────────────────────────────────────────────────────────────
+
+/// 色相（度）→ gpui Hsla（h 分量为 0..=1 的整圆比例）
+fn hue_color(hue: f32) -> Hsla {
+    hsla(hue.rem_euclid(360.0) / 360.0, 0.72, 0.52, 1.0)
+}
+
+/// 逗号 / 空白 / 换行分隔的多主题输入 → 去重后的主题列表（批量订阅）
+fn split_topic_list(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split(|c: char| c == ',' || c.is_whitespace()) {
+        let t = part.trim();
+        if !t.is_empty() && !out.iter().any(|x| x == t) {
+            out.push(t.to_string());
         }
+    }
+    out
+}
+
+/// MQTT 主题过滤器匹配：`+` 匹配单层，`#` 匹配本层及以下（可匹配父级本身）。
+fn topic_matches(filter: &str, topic: &str) -> bool {
+    let f: Vec<&str> = filter.split('/').collect();
+    let t: Vec<&str> = topic.split('/').collect();
+    for (i, part) in f.iter().enumerate() {
+        if *part == "#" {
+            // "a/#" 需要匹配 "a" 自身：剩余层级数 >= 过滤器已消费层数
+            return i <= t.len();
+        }
+        if i >= t.len() {
+            return false;
+        }
+        if *part != "+" && *part != t[i] {
+            return false;
+        }
+    }
+    f.len() == t.len()
+}
+
+/// 挑选消息着色用的订阅色：先看精确匹配，再看通配匹配；只考虑启用且已设色的订阅。
+fn pick_subscription_color(subs: &[Subscription], topic: &str) -> Option<f32> {
+    let has_wild = |t: &str| t.contains('+') || t.contains('#');
+    for s in subs.iter().filter(|s| s.enabled) {
+        if s.topic == topic && !has_wild(&s.topic) && s.color.is_some() {
+            return s.color;
+        }
+    }
+    for s in subs.iter().filter(|s| s.enabled) {
+        if has_wild(&s.topic) && topic_matches(&s.topic, topic) && s.color.is_some() {
+            return s.color;
+        }
+    }
+    None
+}
+
+/// 展开详情里的 payload 渲染：自动 = 合法 JSON 美化，否则原文。
+fn format_payload_detail(payload: &str, format: DetailFormat) -> String {
+    match format {
+        DetailFormat::Auto => serde_json::from_str::<serde_json::Value>(payload)
+            .ok()
+            .and_then(|v| serde_json::to_string_pretty(&v).ok())
+            .unwrap_or_else(|| payload.to_string()),
+        DetailFormat::Text => payload.to_string(),
+        DetailFormat::Hex => payload
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        DetailFormat::Base64 => {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(payload.as_bytes())
+        }
+    }
+}
+
+/// 「复制详情」的可读文本：元数据 + v5 属性 + 用户属性 + 负载。
+fn details_copy_text(record: &MqttRecord, show_millis: bool) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Topic: {}\n", record.topic));
+    out.push_str(&format!("Direction: {}\n", record.direction.label()));
+    out.push_str(&format!("QoS: {}\n", record.qos));
+    out.push_str(&format!("Retain: {}\n", record.retain));
+    out.push_str(&format!(
+        "Time: {}\n",
+        format_time(record.timestamp, show_millis)
+    ));
+    if let Some(v) = record.content_type.as_deref() {
+        out.push_str(&format!("Content-Type: {v}\n"));
+    }
+    if let Some(v) = record.response_topic.as_deref() {
+        out.push_str(&format!("Response Topic: {v}\n"));
+    }
+    if let Some(v) = record.correlation_data.as_deref() {
+        out.push_str(&format!("Correlation Data: {v}\n"));
+    }
+    if let Some(v) = record.message_expiry_interval {
+        out.push_str(&format!("Message Expiry Interval: {v}\n"));
+    }
+    if let Some(v) = record.subscription_identifier {
+        out.push_str(&format!("Subscription Identifier: {v}\n"));
+    }
+    if !record.user_properties.is_empty() {
+        out.push_str("User Properties:\n");
+        for (k, v) in &record.user_properties {
+            out.push_str(&format!("  {k} = {v}\n"));
+        }
+    }
+    out.push_str(&format!("Payload:\n{}", record.payload));
+    out
+}
+
+/// 折叠态只显示单行预览；完整内容由展开详情按所选格式渲染。
+fn preview_payload(payload: &str) -> String {
+    let one_line: String = payload.chars().take(200).collect();
+    if payload.chars().count() > 200 {
+        format!("{one_line}…")
+    } else {
+        one_line
     }
 }

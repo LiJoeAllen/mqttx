@@ -94,6 +94,33 @@ pub struct LastWill {
     pub response_topic: Option<String>,
 }
 
+/// SSL/TLS 自定义配置（CA、双向认证、跳过校验）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SslConfig {
+    /// 自定义 CA 文件路径（PEM），作为系统根证书的补充
+    #[serde(default)]
+    pub ca_file: String,
+    /// 客户端证书（PEM），双向认证用
+    #[serde(default)]
+    pub client_cert_file: String,
+    /// 客户端私钥（PEM），与客户端证书配套
+    #[serde(default)]
+    pub client_key_file: String,
+    /// 跳过服务器证书校验（insecure），仅调试环境使用
+    #[serde(default)]
+    pub ignore_ca: bool,
+}
+
+impl SslConfig {
+    /// 是否完全未配置（走 rumqttc 默认 TLS 即可）。
+    pub fn is_default(&self) -> bool {
+        !self.ignore_ca
+            && self.ca_file.is_empty()
+            && self.client_cert_file.is_empty()
+            && self.client_key_file.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     pub id: String,
@@ -144,6 +171,19 @@ pub struct ConnectionConfig {
     /// 创建时间（unix 秒），用于排序
     #[serde(default)]
     pub created_at: i64,
+
+    /// 连接分组（对标 MQTTX folder）
+    #[serde(default)]
+    pub group: Option<String>,
+    /// 连接超时（秒），覆盖建连与 CONNACK 等待
+    #[serde(default = "default_connection_timeout")]
+    pub connection_timeout_secs: u16,
+    /// 最大重连次数，0 = 无限重连
+    #[serde(default)]
+    pub max_reconnect_times: u32,
+    /// SSL/TLS 自定义配置
+    #[serde(default)]
+    pub ssl: SslConfig,
 }
 
 fn default_true() -> bool {
@@ -151,6 +191,14 @@ fn default_true() -> bool {
 }
 fn default_keep_alive() -> u16 {
     60
+}
+fn default_connection_timeout() -> u16 {
+    10
+}
+
+/// 生成随机 Client ID（新建连接与表单「重新生成」共用同一逻辑）。
+pub fn generate_client_id() -> String {
+    format!("mqttx_{}", &uuid::Uuid::new_v4().simple().to_string()[..8])
 }
 
 impl ConnectionConfig {
@@ -164,7 +212,7 @@ impl ConnectionConfig {
             path: "/mqtt".into(),
             protocol: ProtocolVersion::V5,
             transport,
-            client_id: format!("mqttx_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
+            client_id: generate_client_id(),
             username: String::new(),
             password: String::new(),
             clean_start: true,
@@ -177,6 +225,10 @@ impl ConnectionConfig {
             auto_reconnect: true,
             last_will: None,
             created_at: chrono::Local::now().timestamp(),
+            group: None,
+            connection_timeout_secs: default_connection_timeout(),
+            max_reconnect_times: 0,
+            ssl: SslConfig::default(),
         }
     }
 
@@ -212,6 +264,24 @@ pub struct Subscription {
     /// 本地备注颜色（与 MQTTX 一致，按订阅给消息着色），0..=359 色相
     #[serde(default)]
     pub color: Option<f32>,
+    /// 订阅别名（对标 MQTTX topic alias），仅用于界面展示
+    #[serde(default)]
+    pub alias: Option<String>,
+    /// 是否启用该订阅；禁用后界面置灰、恢复订阅时跳过
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// MQTT 5 订阅标识符
+    #[serde(default)]
+    pub sub_identifier: Option<u32>,
+    /// MQTT 5 No Local (NL)
+    #[serde(default)]
+    pub no_local: bool,
+    /// MQTT 5 Retain As Published (RAP)
+    #[serde(default)]
+    pub retain_as_published: bool,
+    /// MQTT 5 Retain Handling (0/1/2)
+    #[serde(default)]
+    pub retain_handling: u8,
 }
 
 impl Subscription {
@@ -222,6 +292,38 @@ impl Subscription {
             topic: topic.into(),
             qos,
             color: None,
+            alias: None,
+            enabled: true,
+            sub_identifier: None,
+            no_local: false,
+            retain_as_published: false,
+            retain_handling: 0,
+        }
+    }
+}
+
+/// MQTT 5 订阅选项（NL/RAP/Retain Handling/订阅标识符）；v4 连接会忽略这些选项。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscribeOptions {
+    /// 订阅标识符，0 视为未设置
+    #[serde(default)]
+    pub sub_identifier: Option<u32>,
+    #[serde(default)]
+    pub no_local: bool,
+    #[serde(default)]
+    pub retain_as_published: bool,
+    /// 0=每次订阅都发送保留消息，1=仅新订阅发送，2=不发送
+    #[serde(default)]
+    pub retain_handling: u8,
+}
+
+impl From<&Subscription> for SubscribeOptions {
+    fn from(sub: &Subscription) -> Self {
+        Self {
+            sub_identifier: sub.sub_identifier,
+            no_local: sub.no_local,
+            retain_as_published: sub.retain_as_published,
+            retain_handling: sub.retain_handling,
         }
     }
 }
@@ -654,5 +756,43 @@ mod tests {
             serde_json::from_str::<PayloadFormat>(&json).unwrap(),
             PayloadFormat::Hex
         );
+    }
+
+    // 向后兼容：旧版 connections.json 不含 Phase 1 新字段，必须能反序列化且取默认值
+    #[test]
+    fn legacy_connection_json_fills_new_defaults() {
+        let legacy = r#"{
+            "id": "c1",
+            "name": "旧连接",
+            "host": "broker.emqx.io",
+            "port": 1883,
+            "client_id": "legacy_cid",
+            "keep_alive": 30
+        }"#;
+        let c: ConnectionConfig = serde_json::from_str(legacy).expect("旧版 JSON 应能反序列化");
+        assert_eq!(c.name, "旧连接");
+        assert_eq!(c.keep_alive, 30);
+        assert!(c.group.is_none(), "group 默认应为 None");
+        assert_eq!(c.connection_timeout_secs, 10, "连接超时默认 10 秒");
+        assert_eq!(c.max_reconnect_times, 0, "最大重连次数默认 0（无限）");
+        assert!(c.ssl.ca_file.is_empty());
+        assert!(c.ssl.client_cert_file.is_empty());
+        assert!(c.ssl.client_key_file.is_empty());
+        assert!(!c.ssl.ignore_ca, "ignore_ca 默认关闭");
+    }
+
+    // 向后兼容：旧版订阅 JSON 必须默认 enabled=true，其余 v5 选项为关闭/None
+    #[test]
+    fn legacy_subscription_json_defaults_enabled() {
+        let legacy = r#"{"id":"s1","connection_id":"c1","topic":"a/b","qos":1}"#;
+        let s: Subscription = serde_json::from_str(legacy).expect("旧版订阅应能反序列化");
+        assert!(s.enabled, "旧订阅默认启用");
+        assert!(s.alias.is_none());
+        assert!(s.sub_identifier.is_none());
+        assert!(!s.no_local);
+        assert!(!s.retain_as_published);
+        assert_eq!(s.retain_handling, 0);
+        // Subscription::new 同样产出默认启用的订阅
+        assert!(Subscription::new("c1", "t", 0).enabled);
     }
 }

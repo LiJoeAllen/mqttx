@@ -31,3 +31,11 @@ dirs = "6"
 hmac = "0.12"
 sha1 = "0.10"
 base64 = "0.22"
+
+# 自定义 TLS（自定义 CA / 双向认证 / 跳过校验），版本与 rumqttc 内部使用的 rustls 一致
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+# 加载系统根证书，作为自定义 CA 的补充
+rustls-native-certs = "0.8"
+
+# 原生文件对话框（连接导入/导出）；Windows 走内建 COM 后端，Linux 用默认 xdg-portal
+rfd = "0.17"

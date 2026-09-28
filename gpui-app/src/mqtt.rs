@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rumqttc::mqttbytes::v5::{
     ConnectReturnCode as V5ReturnCode, Packet as V5Packet, Publish as V5Publish,
@@ -12,14 +13,16 @@ use rumqttc::mqttbytes::v5::{
 use rumqttc::{
     AsyncClient as V5AsyncClient, Broker as V5Broker, ConnectionError as V5Error,
     Event as V5Event, EventLoop as V5EventLoop, MqttOptions as V5Options, Outgoing as V5Outgoing,
-    PublishOptions as V5PublishOptions, QoS as V5QoS, Transport as V5Transport,
+    PublishOptions as V5PublishOptions, QoS as V5QoS, RetainForwardRule, SubscribeFilterInput,
+    SubscribeProperties as V5SubscribeProperties, TlsConfiguration, Transport as V5Transport,
 };
 use rumqttc_v4 as rv4;
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use tokio::sync::watch;
 
 use crate::model::{
     ConnectionConfig, ConnectionStatus, Direction, LogEntry, LogLevel, MqttRecord, PublishParams,
-    Subscription, TransportKind,
+    SslConfig, SubscribeOptions, Subscription, TransportKind,
 };// ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -201,6 +204,7 @@ impl MqttEngine {
                         cancel_rx,
                         connected,
                         cfg.auto_reconnect,
+                        cfg.max_reconnect_times,
                     );
                 }
                 EventLoopKind::V4(el) => {
@@ -211,6 +215,7 @@ impl MqttEngine {
                         cancel_rx,
                         connected,
                         cfg.auto_reconnect,
+                        cfg.max_reconnect_times,
                     );
                 }
             }
@@ -335,7 +340,19 @@ impl MqttEngine {
 
     // ── 订阅 / 取消订阅 ─────────────────────────────────────────────────────
 
+    /// 旧签名薄封装：不携带 v5 订阅选项（连接视图等现有调用点继续可用）。
     pub fn subscribe(self: &Arc<Self>, connection_id: String, sub: Subscription) {
+        self.subscribe_with_options(connection_id, sub, SubscribeOptions::default());
+    }
+
+    /// 带 MQTT 5 订阅选项的订阅（sub_identifier / NL / RAP / Retain Handling）；
+    /// v4 连接会忽略这些选项。
+    pub fn subscribe_with_options(
+        self: &Arc<Self>,
+        connection_id: String,
+        sub: Subscription,
+        opts: SubscribeOptions,
+    ) {
         let engine = Arc::clone(self);
         self.runtime.spawn(async move {
             let Some(client) = engine.client_of(&connection_id) else {
@@ -357,8 +374,23 @@ impl MqttEngine {
             );
             let result = match &client {
                 ClientKind::V5(client) => {
+                    // NL/RAP/Retain Handling 是「按主题过滤器」的订阅选项，
+                    // 订阅标识符则在订阅报文属性里，分别写入两处。
+                    let filter = SubscribeFilterInput::new(sub.topic.clone(), v5_qos(sub.qos))
+                        .no_local(opts.no_local)
+                        .preserve_retain(opts.retain_as_published)
+                        .retain_forward_rule(match opts.retain_handling {
+                            1 => RetainForwardRule::OnNewSubscribe,
+                            2 => RetainForwardRule::Never,
+                            _ => RetainForwardRule::OnEverySubscribe,
+                        });
+                    let properties = V5SubscribeProperties {
+                        // 0 不是合法的订阅标识符，按未设置处理
+                        id: opts.sub_identifier.filter(|v| *v > 0).map(|v| v as usize),
+                        user_properties: Vec::new(),
+                    };
                     match client
-                        .subscribe_tracked(sub.topic.clone(), v5_qos(sub.qos))
+                        .subscribe_many_with_properties_tracked(std::iter::once(filter), properties)
                         .await
                     {
                         Ok(notice) => notice.wait_completion_async().await.map_err(|e| {
@@ -441,20 +473,24 @@ impl MqttEngine {
         });
     }
 
-    /// 测试连接：5 秒内等待 CONNACK，结果通过 channel 返回。
+    /// 测试连接：使用配置的连接超时（上限 30 秒，防止误填过大值长时间挂起），
+    /// 结果通过 channel 返回。
     pub fn test_connection(
         self: &Arc<Self>,
         cfg: ConnectionConfig,
     ) -> smol::channel::Receiver<Result<(), String>> {
         let (tx, rx) = smol::channel::bounded(1);
+        let secs = u64::from(cfg.connection_timeout_secs.clamp(1, 30));
         self.runtime.spawn(async move {
-            let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let result = tokio::time::timeout(Duration::from_secs(secs), async {
                 test_handshake(&cfg).await
             })
             .await;
             let reply = match result {
                 Ok(inner) => inner,
-                Err(_) => Err("连接测试超时（5 秒），请检查主机地址与端口".into()),
+                Err(_) => Err(format!(
+                    "连接测试超时（{secs} 秒），请检查主机地址与端口"
+                )),
             };
             let _ = tx.try_send(reply);
         });
@@ -483,9 +519,180 @@ enum EventLoopKind {
 
 // ─── 选项构建 ────────────────────────────────────────────────────────────────
 
+/// 连接超时秒数：至少 1 秒，避免误填 0 导致立刻超时。
+fn connection_timeout_secs(cfg: &ConnectionConfig) -> u64 {
+    u64::from(cfg.connection_timeout_secs.max(1))
+}
+
+/// SSL 配置非默认时构建自定义 rustls 配置；返回 None 表示沿用 rumqttc 默认 TLS。
+/// 文件读取/解析失败在此返回 Err，由 connect 的错误通道上报为连接失败事件。
+fn resolve_tls_config(cfg: &ConnectionConfig) -> Result<Option<TlsConfiguration>, String> {
+    if !cfg.transport.is_tls() || cfg.ssl.is_default() {
+        return Ok(None);
+    }
+    Ok(Some(TlsConfiguration::Rustls(build_rustls_config(&cfg.ssl)?)))
+}
+
+/// 按 SslConfig 构造 rustls ClientConfig：
+/// - `ignore_ca`：跳过服务器证书链/主机名校验；
+/// - `ca_file`：在系统根证书之外追加自定义 CA；
+/// - `client_cert_file` + `client_key_file`：双向认证。
+fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientConfig>, String> {
+    // 只填证书或只填私钥必然握手失败，提前给出明确错误
+    if ssl.client_cert_file.is_empty() != ssl.client_key_file.is_empty() {
+        return Err("客户端证书与客户端密钥必须同时配置".into());
+    }
+    let provider = ensure_crypto_provider();
+    let builder = rustls::ClientConfig::builder();
+    let builder = if ssl.ignore_ca {
+        builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerifier {
+                provider: provider.clone(),
+            }))
+    } else {
+        let mut roots = rustls::RootCertStore::empty();
+        let native = rustls_native_certs::load_native_certs();
+        if native.certs.is_empty() && ssl.ca_file.is_empty() {
+            let detail = native
+                .errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(format!("加载系统根证书失败: {detail}"));
+        }
+        // 个别系统证书加载失败不阻断连接：自定义 CA 与其余根证书仍参与校验
+        for cert in native.certs {
+            let _ = roots.add(cert);
+        }
+        if !ssl.ca_file.is_empty() {
+            let pem = std::fs::read(&ssl.ca_file)
+                .map_err(|e| format!("读取 CA 文件 {} 失败: {e}", ssl.ca_file))?;
+            let mut added = 0usize;
+            for cert in CertificateDer::pem_slice_iter(&pem) {
+                let cert = cert.map_err(|e| format!("解析 CA 文件 {} 失败: {e}", ssl.ca_file))?;
+                roots
+                    .add(cert)
+                    .map_err(|e| format!("CA 文件 {} 中存在无效证书: {e}", ssl.ca_file))?;
+                added += 1;
+            }
+            if added == 0 {
+                return Err(format!("CA 文件 {} 中没有找到任何证书", ssl.ca_file));
+            }
+        }
+        builder.with_root_certificates(roots)
+    };
+
+    let config = if ssl.client_cert_file.is_empty() {
+        builder.with_no_client_auth()
+    } else {
+        let chain_pem = std::fs::read(&ssl.client_cert_file).map_err(|e| {
+            format!("读取客户端证书文件 {} 失败: {e}", ssl.client_cert_file)
+        })?;
+        let key_pem = std::fs::read(&ssl.client_key_file)
+            .map_err(|e| format!("读取客户端私钥文件 {} 失败: {e}", ssl.client_key_file))?;
+        let certs = CertificateDer::pem_slice_iter(&chain_pem)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("解析客户端证书文件 {} 失败: {e}", ssl.client_cert_file))?;
+        if certs.is_empty() {
+            return Err(format!(
+                "客户端证书文件 {} 中没有找到证书",
+                ssl.client_cert_file
+            ));
+        }
+        let key = PrivateKeyDer::from_pem_slice(&key_pem)
+            .map_err(|e| format!("解析客户端私钥文件 {} 失败: {e}", ssl.client_key_file))?;
+        builder
+            .with_client_auth_cert(certs, key)
+            .map_err(|e| format!("加载客户端证书/私钥失败: {e}"))?
+    };
+    Ok(Arc::new(config))
+}
+
+/// 取得（必要时安装）进程级 CryptoProvider。
+/// 工作区同时启用 ring 与 aws-lc-rs 特性时 rustls 无法自动推断默认 provider，
+/// 不显式安装会让 `ClientConfig::builder()` panic。
+fn ensure_crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
+    if let Some(provider) = rustls::crypto::CryptoProvider::get_default() {
+        return Arc::clone(provider);
+    }
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+    // 输掉安装竞争时直接采用已安装的那个
+    match provider.clone().install_default() {
+        Ok(()) => Arc::new(provider),
+        Err(installed) => installed,
+    }
+}
+
+/// 「忽略 CA 校验」用：跳过服务器证书链与主机名校验，
+/// 握手签名仍用 provider 校验（与 rustls 官方示例做法一致）。
+struct NoVerifier {
+    provider: Arc<rustls::crypto::CryptoProvider>,
+}
+
+impl std::fmt::Debug for NoVerifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NoVerifier").finish_non_exhaustive()
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// 去掉空白字符串，避免表单存了空串也写进报文属性。
+fn non_blank(s: Option<String>) -> Option<String> {
+    s.filter(|v| !v.trim().is_empty())
+}
+
 fn build_v5(
     cfg: &ConnectionConfig,
 ) -> Result<(V5AsyncClient, V5EventLoop), String> {
+    let custom_tls = resolve_tls_config(cfg)?;
     let mut opts = match cfg.transport {
         TransportKind::Tcp | TransportKind::Tls => {
             V5Options::new(cfg.client_id.clone(), V5Broker::tcp(&cfg.host, cfg.port))
@@ -496,16 +703,39 @@ fn build_v5(
         }
         TransportKind::Wss => {
             let url = format!("wss://{}:{}{}", cfg.host, cfg.port, normalize_path(&cfg.path));
-            V5Options::try_websocket_with_default_tls(cfg.client_id.clone(), url)
-                .map_err(|e| format!("{e:?}"))?
+            match &custom_tls {
+                Some(tls) => V5Options::websocket_with_tls_config(
+                    cfg.client_id.clone(),
+                    url,
+                    tls.clone(),
+                )
+                .map_err(|e| format!("{e:?}"))?,
+                None => V5Options::try_websocket_with_default_tls(cfg.client_id.clone(), url)
+                    .map_err(|e| format!("{e:?}"))?,
+            }
         }
     };
 
     if cfg.transport == TransportKind::Tls {
-        opts.set_transport(
-            V5Transport::try_tls_with_default_config().map_err(|e| format!("TLS 初始化失败: {e:?}"))?,
-        );
+        match &custom_tls {
+            Some(tls) => {
+                opts.set_transport(V5Transport::tls_with_config(tls.clone()));
+            }
+            None => {
+                opts.set_transport(
+                    V5Transport::try_tls_with_default_config()
+                        .map_err(|e| format!("TLS 初始化失败: {e:?}"))?,
+                );
+            }
+        };
     }
+
+    // 连接超时同时覆盖底层建连与 CONNACK 等待
+    let timeout = Duration::from_secs(connection_timeout_secs(cfg));
+    opts.set_connect_timeout(timeout);
+    let mut network_options = rumqttc::NetworkOptions::new();
+    network_options.set_connection_timeout(connection_timeout_secs(cfg));
+    opts.set_network_options(network_options);
 
     opts.set_keep_alive(cfg.keep_alive);
     opts.set_clean_start(cfg.clean_start);
@@ -526,12 +756,26 @@ fn build_v5(
     }
     if let Some(will) = &cfg.last_will
         && !will.topic.is_empty() {
+            // v5 遗嘱属性：content_type / response_topic（3.1.1 下无此扩展）
+            let properties = if will.content_type.is_some() || will.response_topic.is_some() {
+                Some(rumqttc::mqttbytes::v5::LastWillProperties {
+                    delay_interval: None,
+                    payload_format_indicator: None,
+                    message_expiry_interval: None,
+                    content_type: non_blank(will.content_type.clone()),
+                    response_topic: non_blank(will.response_topic.clone()),
+                    correlation_data: None,
+                    user_properties: Vec::new(),
+                })
+            } else {
+                None
+            };
             let lw = rumqttc::mqttbytes::v5::LastWill::new(
                 will.topic.clone(),
                 will.payload.as_bytes().to_vec(),
                 v5_qos(will.qos),
                 will.retain,
-                None,
+                properties,
             );
             opts.set_last_will(lw);
         }
@@ -544,6 +788,7 @@ fn build_v4(
 ) -> Result<(rv4::AsyncClient, rv4::EventLoop), String> {
     use rv4::{Broker as V4Broker, MqttOptions as V4Options, Transport as V4Transport};
 
+    let custom_tls = resolve_tls_config(cfg)?;
     let mut opts = match cfg.transport {
         TransportKind::Tcp | TransportKind::Tls => {
             V4Options::new(cfg.client_id.clone(), V4Broker::tcp(&cfg.host, cfg.port))
@@ -554,15 +799,31 @@ fn build_v4(
         }
         TransportKind::Wss => {
             let url = format!("wss://{}:{}{}", cfg.host, cfg.port, normalize_path(&cfg.path));
-            V4Options::try_websocket_with_default_tls(cfg.client_id.clone(), url)
-                .map_err(|e| format!("{e:?}"))?
+            match &custom_tls {
+                Some(tls) => V4Options::websocket_with_tls_config(
+                    cfg.client_id.clone(),
+                    url,
+                    tls.clone(),
+                )
+                .map_err(|e| format!("{e:?}"))?,
+                None => V4Options::try_websocket_with_default_tls(cfg.client_id.clone(), url)
+                    .map_err(|e| format!("{e:?}"))?,
+            }
         }
     };
 
     if cfg.transport == TransportKind::Tls {
-        opts.set_transport(V4Transport::try_tls_with_default_config().map_err(
-            |e| format!("TLS 初始化失败: {e:?}"),
-        )?);
+        match &custom_tls {
+            Some(tls) => {
+                opts.set_transport(V4Transport::tls_with_config(tls.clone()));
+            }
+            None => {
+                opts.set_transport(
+                    V4Transport::try_tls_with_default_config()
+                        .map_err(|e| format!("TLS 初始化失败: {e:?}"))?,
+                );
+            }
+        };
     }
 
     opts.set_keep_alive(cfg.keep_alive);
@@ -572,6 +833,7 @@ fn build_v4(
     }
     if let Some(will) = &cfg.last_will
         && !will.topic.is_empty() {
+            // 3.1.1 的遗嘱没有 content_type / response_topic 属性，忽略
             let lw = rv4::mqttbytes::v4::LastWill::new(
                 will.topic.clone(),
                 will.payload.as_bytes().to_vec(),
@@ -581,7 +843,12 @@ fn build_v4(
             opts.set_last_will(lw);
         }
 
-    Ok(rv4::AsyncClient::builder(opts).build())
+    let (client, mut eventloop) = rv4::AsyncClient::builder(opts).build();
+    // v4 的连接超时（含 CONNACK 等待）由 EventLoop 的 NetworkOptions 控制
+    let mut network_options = rv4::NetworkOptions::new();
+    network_options.set_connection_timeout(connection_timeout_secs(cfg));
+    eventloop.set_network_options(network_options);
+    Ok((client, eventloop))
 }
 
 fn normalize_path(path: &str) -> String {
@@ -702,10 +969,13 @@ fn spawn_v5_loop(
     mut cancel_rx: watch::Receiver<bool>,
     connected: Arc<AtomicBool>,
     auto_reconnect: bool,
+    max_reconnect_times: u32,
 ) {
     let runtime = engine.runtime.handle().clone();
     runtime.spawn(async move {
         let mut first_connect = true;
+        // 已执行的重连次数，用于 max_reconnect_times（0=无限）限流
+        let mut reconnect_attempts: u32 = 0;
         loop {
             tokio::select! {
                 event = eventloop.poll() => {
@@ -831,9 +1101,16 @@ fn spawn_v5_loop(
                                     format!("连接错误: {e}"), None);
                                 break;
                             }
+                            // max_reconnect_times>0 时按次数停止重试；0 表示无限重连
+                            if max_reconnect_times > 0 && reconnect_attempts >= max_reconnect_times {
+                                engine.log(&id, LogLevel::Error, "reconnect_give_up",
+                                    format!("已重连 {reconnect_attempts} 次仍失败，达到最大重连次数 {max_reconnect_times}，停止重连: {e}"), None);
+                                break;
+                            }
+                            reconnect_attempts += 1;
                             engine.log(&id, LogLevel::Warn, "connection_error",
-                                format!("连接错误，2 秒后重连: {e}"), None);
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                format!("连接错误，2 秒后重连（第 {reconnect_attempts} 次）: {e}"), None);
+                            tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }
                 }
@@ -854,10 +1131,13 @@ fn spawn_v4_loop(
     mut cancel_rx: watch::Receiver<bool>,
     connected: Arc<AtomicBool>,
     auto_reconnect: bool,
+    max_reconnect_times: u32,
 ) {
     let runtime = engine.runtime.handle().clone();
     runtime.spawn(async move {
         let mut first_connect = true;
+        // 已执行的重连次数，用于 max_reconnect_times（0=无限）限流
+        let mut reconnect_attempts: u32 = 0;
         loop {
             tokio::select! {
                 event = eventloop.poll() => {
@@ -964,9 +1244,16 @@ fn spawn_v4_loop(
                                     format!("连接错误: {e}"), None);
                                 break;
                             }
+                            // max_reconnect_times>0 时按次数停止重试；0 表示无限重连
+                            if max_reconnect_times > 0 && reconnect_attempts >= max_reconnect_times {
+                                engine.log(&id, LogLevel::Error, "reconnect_give_up",
+                                    format!("已重连 {reconnect_attempts} 次仍失败，达到最大重连次数 {max_reconnect_times}，停止重连: {e}"), None);
+                                break;
+                            }
+                            reconnect_attempts += 1;
                             engine.log(&id, LogLevel::Warn, "connection_error",
-                                format!("连接错误，2 秒后重连: {e}"), None);
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                format!("连接错误，2 秒后重连（第 {reconnect_attempts} 次）: {e}"), None);
+                            tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }
                 }

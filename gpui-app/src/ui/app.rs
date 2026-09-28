@@ -1,6 +1,7 @@
 //! 应用外壳：标题栏 + 连接侧边栏 + 多标签连接视图 + 引擎事件泵。
 
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -13,14 +14,16 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, StatefulInteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window,
+    div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    KeyBinding, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window,
 };
 
 use crate::aliyun::AliyunPreset;
 use crate::model::{
     AppSettings, ConnectionConfig, ConnectionStatus, Direction, GlobalVariable, LogEntry,
-    LogLevel, MqttRecord, PublishParams, PublishPreset, Subscription, ThemeModePref,
+    LogLevel, MqttRecord, PublishParams, PublishPreset, SubscribeOptions, Subscription,
+    ThemeModePref,
 };
 use crate::mqtt::{EngineEvent, MqttEngine};
 use crate::store::Storage;
@@ -32,6 +35,35 @@ use crate::ui::{
 };
 
 const MAX_LOGS: usize = 3000;
+
+// 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
+gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections]);
+
+/// 侧边栏分组过滤；chips 只做列表过滤，分组重命名/删除通过编辑连接的分组字段完成。
+#[derive(Clone, PartialEq, Eq)]
+enum GroupFilter {
+    All,
+    Ungrouped,
+    Named(String),
+}
+
+/// 全局 action 回调只有 `&mut App`：先 defer 出当前分发栈，再取活动窗口回到实体执行，
+/// 避免在窗口借用期间重入 `update`。
+fn run_on_active_window(
+    cx: &mut App,
+    weak: gpui_kit::WeakEntity<MqttXApp>,
+    f: impl FnOnce(Entity<MqttXApp>, &mut Window, &mut App) + 'static,
+) {
+    let Some(handle) = cx.active_window() else {
+        return;
+    };
+    cx.defer(move |cx| {
+        let Some(entity) = weak.upgrade() else {
+            return;
+        };
+        let _ = handle.update(cx, move |_, window, cx| f(entity, window, cx));
+    });
+}
 
 pub struct MqttXApp {
     storage: Storage,
@@ -59,6 +91,10 @@ pub struct MqttXApp {
     views: HashMap<String, Entity<ConnectionView>>,
 
     search: Entity<InputState>,
+    /// 分组过滤状态（chips 点击切换，与搜索条件叠加）
+    group_filter: GroupFilter,
+    /// 原生文件对话框进行中标记（对话框阻塞后台线程，防止重复弹出）
+    file_dialog_open: bool,
 }
 
 impl MqttXApp {
@@ -88,7 +124,51 @@ impl MqttXApp {
 
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索连接…"));
 
-        
+        // ── 全局快捷键：绑定 + action 注册 ──
+        // 元素级 on_action 依赖焦点路径，无焦点时分发从树根开始收不到；
+        // 全局 action 在冒泡末端必达，经 defer 取窗口避免在分发栈内重入。
+        cx.bind_keys([
+            KeyBinding::new("ctrl-n", NewConnection, None),
+            KeyBinding::new("ctrl-,", OpenSettings, None),
+            KeyBinding::new("ctrl-shift-e", ExportConnections, None),
+            KeyBinding::new("ctrl-shift-i", ImportConnections, None),
+        ]);
+        let weak = cx.entity().downgrade();
+        // Context 上有同名 on_action（绘制期注册），这里必须走 App 的全局注册
+        App::on_action::<NewConnection>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                if window.has_active_dialog(cx) {
+                    return;
+                }
+                entity.update(cx, |app, cx| app.open_connection_form(None, window, cx));
+            });
+        });
+        let weak = cx.entity().downgrade();
+        App::on_action::<OpenSettings>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                if window.has_active_dialog(cx) {
+                    return;
+                }
+                crate::ui::settings_dialog::open(entity, window, cx);
+            });
+        });
+        let weak = cx.entity().downgrade();
+        App::on_action::<ExportConnections>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                entity.update(cx, |app, cx| app.export_connections(window, cx));
+            });
+        });
+        let weak = cx.entity().downgrade();
+        App::on_action::<ImportConnections>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                entity.update(cx, |app, cx| app.import_connections(window, cx));
+            });
+        });
+
         Self {
             storage,
             engine,
@@ -108,6 +188,8 @@ impl MqttXApp {
             active_tab: None,
             views: HashMap::new(),
             search,
+            group_filter: GroupFilter::All,
+            file_dialog_open: false,
         }
     }
 
@@ -206,7 +288,7 @@ impl MqttXApp {
     }
 
     fn on_connected(&mut self, connection_id: &str) {
-        // 连接成功后自动恢复已保存订阅（auto resubscribe）。
+        // 连接成功后自动恢复已保存订阅（auto resubscribe），禁用的订阅跳过。
         let Some(config) = self.connections.iter().find(|c| c.id == connection_id).cloned() else {
             return;
         };
@@ -217,10 +299,13 @@ impl MqttXApp {
             .subscriptions
             .iter()
             .filter(|s| s.connection_id == connection_id)
+            .filter(|s| s.enabled)
             .cloned()
             .collect();
         for sub in subs {
-            self.engine.subscribe(connection_id.to_string(), sub);
+            let opts = SubscribeOptions::from(&sub);
+            self.engine
+                .subscribe_with_options(connection_id.to_string(), sub, opts);
         }
     }
 
@@ -242,10 +327,59 @@ impl MqttXApp {
     }
 
     fn push_log(&mut self, entry: LogEntry) {
+        // 落盘只在事件路径执行（不在 render 热路径），与内存环形缓冲互不影响
+        self.write_log_file(&entry);
         if self.logs.len() >= MAX_LOGS {
             self.logs.pop_front();
         }
         self.logs.push_back(entry);
+    }
+
+    /// 追加写入按日切分的日志文件 `mqttx-YYYY-MM-DD.log`。
+    /// 每条都尝试写入；失败只在首次 eprintln 一次后保持静默，且绝不回调
+    /// log/push_log（防止递归触发日志）。
+    fn write_log_file(&self, entry: &LogEntry) {
+        use std::io::Write as _;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static WRITE_FAILED: AtomicBool = AtomicBool::new(false);
+
+        let result = (|| -> std::io::Result<()> {
+            use chrono::TimeZone as _;
+            let ts = chrono::Local
+                .timestamp_millis_opt(entry.timestamp)
+                .single()
+                .unwrap_or_else(chrono::Local::now);
+            let dir = self.storage.log_dir();
+            std::fs::create_dir_all(&dir)?;
+            let path = dir.join(format!("mqttx-{}.log", ts.format("%Y-%m-%d")));
+            // 连接名查不到时回退为 id，保证行格式恒定
+            let conn = self
+                .connections
+                .iter()
+                .find(|c| c.id == entry.connection_id)
+                .map(|c| c.name.as_str())
+                .unwrap_or(entry.connection_id.as_str());
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?;
+            writeln!(
+                file,
+                "{} [{}] {}/{}: {}",
+                ts.format("%Y-%m-%d %H:%M:%S%.3f"),
+                entry.level.label(),
+                conn,
+                entry.event,
+                entry.message
+            )
+        })();
+
+        if let Err(e) = result
+            && !WRITE_FAILED.swap(true, Ordering::Relaxed)
+        {
+            eprintln!("[app] 写入日志文件失败（后续静默）: {e}");
+        }
     }
 
     pub fn log(&mut self, conn: &str, level: LogLevel, event: &str, message: String) {
@@ -386,6 +520,134 @@ impl MqttXApp {
         self.storage.save_settings(&self.settings);
     }
 
+    /// 数据目录（设置对话框展示 / 打开用）。
+    pub fn data_dir(&self) -> PathBuf {
+        self.storage.dir().to_path_buf()
+    }
+
+    /// 日志目录（设置对话框展示 / 打开用）。
+    pub fn log_dir(&self) -> PathBuf {
+        self.storage.log_dir()
+    }
+
+    // ── 连接导入 / 导出 ────────────────────────────────────────────────────
+
+    /// 在后台线程弹出阻塞式原生文件对话框，完成后回主线程执行 `done`。
+    /// 对话框进行中置位，防止重复弹出。
+    fn spawn_file_dialog<R, F, D>(
+        &mut self,
+        work: F,
+        done: D,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+        D: FnOnce(&mut Self, R, &mut Window, &mut Context<Self>) + 'static,
+    {
+        if self.file_dialog_open {
+            return;
+        }
+        self.file_dialog_open = true;
+        // rfd 的阻塞对话框不可占用 UI 线程：结果经 smol 通道送回异步任务
+        let (tx, rx) = smol::channel::bounded::<R>(1);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(work());
+        });
+        let weak = cx.entity().downgrade();
+        cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+            let result = rx.recv().await.ok();
+            weak.update_in(cx, |app, window, cx| {
+                app.file_dialog_open = false;
+                if let Some(result) = result {
+                    done(app, result, window, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 导出全部连接为 JSON（原生保存对话框，默认文件名 connections-export.json）。
+    pub fn export_connections(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dir = self.storage.dir().to_path_buf();
+        self.spawn_file_dialog(
+            move || {
+                rfd::FileDialog::new()
+                    .set_title("导出连接")
+                    .set_directory(dir)
+                    .set_file_name("connections-export.json")
+                    .add_filter("JSON", &["json"])
+                    .save_file()
+            },
+            |app, path, window, cx| {
+                let Some(path) = path else {
+                    return; // 用户取消
+                };
+                let count = app.connections.len();
+                match crate::store::export_connections_to(&path, &app.connections) {
+                    Ok(()) => window.push_notification(
+                        Notification::success(format!(
+                            "已导出 {count} 条连接到 {}",
+                            path.display()
+                        )),
+                        cx,
+                    ),
+                    Err(e) => window.push_notification(Notification::error(e), cx),
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// 导入连接：按 id 去重（同 id 跳过），新 id 保留文件原值；读取解析在后台线程完成。
+    pub fn import_connections(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dir = self.storage.dir().to_path_buf();
+        self.spawn_file_dialog(
+            move || {
+                let Some(path) = rfd::FileDialog::new()
+                    .set_title("导入连接")
+                    .set_directory(dir)
+                    .add_filter("JSON", &["json"])
+                    .pick_file()
+                else {
+                    return Ok(None); // 用户取消
+                };
+                crate::store::import_connections_from(&path).map(Some)
+            },
+            |app, result, window, cx| match result {
+                Err(e) => {
+                    window.push_notification(Notification::error(e), cx);
+                }
+                Ok(None) => {}
+                Ok(Some(items)) => {
+                    let existing: std::collections::HashSet<String> =
+                        app.connections.iter().map(|c| c.id.clone()).collect();
+                    let mut added = 0usize;
+                    let mut skipped = 0usize;
+                    for item in items {
+                        if existing.contains(&item.id) {
+                            skipped += 1;
+                        } else {
+                            app.connections.push(item);
+                            added += 1;
+                        }
+                    }
+                    if added > 0 {
+                        app.storage.save_connections(&app.connections);
+                    }
+                    window.push_notification(
+                        Notification::success(format!("导入 {added} 条，跳过 {skipped} 条")),
+                        cx,
+                    );
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
     // ── 对话框 ────────────────────────────────────────────────────────────
 
     pub fn open_connection_form(
@@ -396,7 +658,16 @@ impl MqttXApp {
     ) {
         let app = cx.entity().downgrade();
         let engine = self.engine.clone();
-        let form = cx.new(|cx| ConnectionForm::new(engine, edit, window, cx));
+        // 表单的分组下拉需要现有分组列表（去重、排序）
+        let mut groups: Vec<String> = self
+            .connections
+            .iter()
+            .filter_map(|c| c.group.as_ref().map(|g| g.trim().to_string()))
+            .filter(|g| !g.is_empty())
+            .collect();
+        groups.sort();
+        groups.dedup();
+        let form = cx.new(|cx| ConnectionForm::new(engine, edit, groups, window, cx));
         window.open_dialog(cx, move |dialog, _, cx| {
             let form_ok = form.clone();
             let form_test = form.clone();
@@ -550,6 +821,8 @@ impl MqttXApp {
                                     let w1 = app_weak.clone();
                                     let w2 = app_weak.clone();
                                     let w3 = app_weak.clone();
+                                    let w4 = app_weak.clone();
+                                    let w5 = app_weak.clone();
                                     menu.item(
                                         PopupMenuItem::new("阿里云设备")
                                             .on_click(move |_, window, cx| {
@@ -562,6 +835,25 @@ impl MqttXApp {
                                         move |_, window, cx| {
                                             if let Some(entity) = w2.upgrade() {
                                                 crate::ui::variables_dialog::open(entity, window, cx);
+                                            }
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(PopupMenuItem::new("导出连接").on_click(
+                                        move |_, window, cx| {
+                                            if let Some(entity) = w4.upgrade() {
+                                                entity.update(cx, |app, cx| {
+                                                    app.export_connections(window, cx)
+                                                });
+                                            }
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("导入连接").on_click(
+                                        move |_, window, cx| {
+                                            if let Some(entity) = w5.upgrade() {
+                                                entity.update(cx, |app, cx| {
+                                                    app.import_connections(window, cx)
+                                                });
                                             }
                                         },
                                     ))
@@ -602,12 +894,23 @@ impl MqttXApp {
     fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.search.read(cx).value().to_lowercase();
         let search = self.search.clone();
+        let filter = self.group_filter.clone();
 
         let total = self.connections.len();
         let hover_bg = cx.theme().muted;
         let mut rows = v_flex().gap_0p5().flex_1().overflow_y_scrollbar();
         let mut shown = 0usize;
         for conn in self.connections.clone() {
+            // 分组过滤与搜索叠加（AND）
+            let group = conn.group.as_deref().map(str::trim).unwrap_or("");
+            let match_group = match &filter {
+                GroupFilter::All => true,
+                GroupFilter::Ungrouped => group.is_empty(),
+                GroupFilter::Named(name) => group == name.as_str(),
+            };
+            if !match_group {
+                continue;
+            }
             if !query.is_empty() && !conn.name.to_lowercase().contains(&query) {
                 continue;
             }
@@ -692,8 +995,6 @@ impl MqttXApp {
                         .text_color(cx.theme().muted_foreground)
                         .child("还没有连接，点击上方 + 新建"),
                 )
-        } else if query.is_empty() {
-            v_flex().flex_1().child(rows)
         } else if shown == 0 {
             v_flex()
                 .flex_1()
@@ -748,7 +1049,89 @@ impl MqttXApp {
             .child(v_flex().px_2().pb_2().child(Input::new(&search).small().prefix(
                 gpui_kit::component::Icon::new(IconName::Search).small(),
             )))
+            .child(self.render_group_chips(cx))
             .child(body)
+    }
+
+    /// 搜索框下方的分组 chips：全部 / 未分组 / 各分组（带计数徽标），点击切换过滤。
+    fn render_group_chips(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut names: Vec<String> = self
+            .connections
+            .iter()
+            .filter_map(|c| c.group.as_deref().map(str::trim))
+            .filter(|g| !g.is_empty())
+            .map(str::to_string)
+            .collect();
+        names.sort();
+        names.dedup();
+
+        let ungrouped = self
+            .connections
+            .iter()
+            .filter(|c| c.group.as_deref().map(str::trim).unwrap_or("").is_empty())
+            .count();
+
+        let mut row = h_flex().gap_1().flex_wrap().px_2().pb_1();
+        row = row.child(self.render_group_chip(
+            "chip-all",
+            format!("全部 {}", self.connections.len()),
+            GroupFilter::All,
+            cx,
+        ));
+        row = row.child(self.render_group_chip(
+            "chip-ungrouped",
+            format!("未分组 {ungrouped}"),
+            GroupFilter::Ungrouped,
+            cx,
+        ));
+        for name in names {
+            let count = self
+                .connections
+                .iter()
+                .filter(|c| c.group.as_deref().map(str::trim) == Some(name.as_str()))
+                .count();
+            row = row.child(self.render_group_chip(
+                SharedString::from(format!("chip-{}", name)),
+                format!("{name} {count}"),
+                GroupFilter::Named(name),
+                cx,
+            ));
+        }
+        row
+    }
+
+    fn render_group_chip(
+        &self,
+        id: impl Into<gpui_kit::ElementId>,
+        label: String,
+        filter: GroupFilter,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let selected = match (&self.group_filter, &filter) {
+            (GroupFilter::All, GroupFilter::All)
+            | (GroupFilter::Ungrouped, GroupFilter::Ungrouped) => true,
+            (GroupFilter::Named(a), GroupFilter::Named(b)) => a == b,
+            _ => false,
+        };
+        div()
+            .id(id)
+            .px_2()
+            .py_0p5()
+            .rounded_md()
+            .text_xs()
+            .when(selected, |d| d.bg(cx.theme().secondary).font_semibold())
+            .when(!selected, |d| {
+                d.bg(cx.theme().muted)
+                    .text_color(cx.theme().muted_foreground)
+                    .hover(|d| d.bg(cx.theme().secondary))
+            })
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                // listener 是 Fn（可多次调用），只能克隆而不能移出捕获的 filter
+                this.group_filter = filter.clone();
+                cx.notify();
+            }))
+            .child(label)
     }
 
     fn render_conn_power(

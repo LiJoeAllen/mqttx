@@ -9,16 +9,21 @@
 
 - **双协议支持** — MQTT 5.0 与 MQTT 3.1.1（[`rumqttc-next`](https://crates.io/crates/rumqttc-v5-next)）
 - **多传输方式** — 明文 TCP、TLS、WebSocket(ws)、WebSocket over TLS(wss)，默认 rustls（aws-lc）
-- **多连接管理** — 同时管理多个连接，侧边栏实时显示连接状态（未连接/连接中/已连接/错误），多标签页切换
-- **完整 MQTT 5 属性** — 用户属性（可视化键值对编辑器）、Content-Type、消息过期间隔、Response Topic、Correlation Data
-- **发布 / 订阅** — QoS 0/1/2、Retain、遗嘱消息（Last Will）、订阅自动恢复（auto resubscribe）、断线自动重连
-- **消息流** — 收发方向区分、时间戳、QoS/Retain 标记、点击展开查看格式化 JSON 与 v5 属性、主题/内容过滤
-- **全局变量** — 发布主题与负载中使用 `{{变量名}}`，内置 `{{$ts}}`、`{{$ts_ms}}`、`{{$uuid}}`
+- **多连接管理** — 同时管理多个连接，侧边栏实时显示连接状态（未连接/连接中/已连接/错误），多标签页切换；连接分组（分组 chips 过滤 + 表单分组归属）
+- **完整 MQTT 5 属性** — 用户属性（可视化键值对编辑器）、Content-Type、消息过期间隔、Response Topic、Correlation Data（连接/遗嘱/发布三处均支持）
+- **发布 / 订阅** — QoS 0/1/2、Retain、遗嘱消息（Last Will）、订阅自动恢复（auto resubscribe）、断线自动重连（可配置最大重连次数与连接超时）
+- **订阅增强** — 逗号/换行多主题批量订阅、订阅别名、颜色标签（消息按订阅着色）、启用/禁用、点击订阅过滤消息流、MQTT 5 订阅选项（订阅标识符 / No Local / Retain As Published / Retain Handling）
+- **消息流** — 收发方向区分、时间戳、QoS/Retain 标记、点击展开查看格式化 JSON 与 v5 属性、全部/接收/发布过滤、主题/内容搜索、逐条 payload 格式切换（自动/文本/Hex/Base64）、复制主题/负载/详情、清空历史
+- **连接导入 / 导出** — 原生文件对话框（rfd）导出/导入连接 JSON，按 id 去重
+- **SSL/TLS 证书** — 自定义 CA、客户端证书/私钥（双向认证）、忽略 CA 校验
+- **全局变量** — 发布主题与负载中使用 `{{变量名}}`，内置 `{{$ts}}`、`{{$ts_ms}}`、`{{$uuid}}`，用户属性同样参与渲染
 - **负载格式** — Plaintext / JSON（发送前校验）/ Base64 / Hex
 - **阿里云 IoT** — Token（GroupId@@@DeviceId + HMAC-SHA1 签名）与一机一密两种鉴权方式一键生成连接
-- **连接测试** — 表单内 5 秒握手测试，保存前验证连通性
-- **日志面板** — 连接级事件日志（CONNACK/SUBACK/PUBACK/错误/重连等）
-- **主题** — 浅色 / 深色切换
+- **连接测试** — 表单内握手测试（超时可配置），保存前验证连通性
+- **日志面板** — 连接级事件日志（CONNACK/SUBACK/PUBACK/错误/重连等），按日落盘 `mqttx-YYYY-MM-DD.log`，设置内一键打开日志目录
+- **快捷键** — `Ctrl+N` 新建连接、`Ctrl+,` 设置、`Ctrl+Shift+E` 导出、`Ctrl+Shift+I` 导入、`Ctrl+Enter` 发送消息
+- **主题** — 浅色 / 深色 / 跟随系统
+- **设置** — 自动检查更新开关、消息缓存条数、时间戳毫秒、数据目录展示与打开、关于页（版本 / 许可）
 - **本地持久化** — 连接、订阅、预设、变量、设置以 JSON 存于系统数据目录
 
 ## 技术栈
