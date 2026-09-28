@@ -487,7 +487,10 @@ impl MqttXApp {
         if self.engine.is_connected(&cfg.id) {
             self.engine.close(&cfg.id, true);
         } else {
-            self.engine.connect(cfg.clone());
+            // 遗嘱支持 {{变量}}：对副本注入，保存的配置仍为模板原文
+            let mut cfg = cfg.clone();
+            crate::model::render_will_templates(&mut cfg, &self.variables);
+            self.engine.connect(cfg);
         }
     }
 

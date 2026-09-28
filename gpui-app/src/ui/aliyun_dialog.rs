@@ -15,7 +15,7 @@ use gpui_kit::{
 };
 
 use crate::aliyun::{AliyunAuthMode, AliyunPreset};
-use crate::model::ConnectionConfig;
+use crate::model::{render_will_templates, ConnectionConfig};
 use crate::ui::app::MqttXApp;
 use crate::ui::widgets::{field, make_select, OptionDelegate};
 
@@ -137,6 +137,8 @@ impl AliyunDialog {
                 conn.name = preset.name.clone();
                 self.app.update(cx, |a, cx| {
                     a.save_connection(conn.clone());
+                    // 遗嘱字段同样走 {{变量}} 注入（与其它连接入口保持一致）
+                    render_will_templates(&mut conn, &a.variables);
                     a.engine.connect(conn);
                     cx.notify();
                 });

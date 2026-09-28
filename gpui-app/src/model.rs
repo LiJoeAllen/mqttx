@@ -526,6 +526,23 @@ pub fn render_template(input: &str, vars: &[GlobalVariable]) -> String {
     out
 }
 
+/// 连接前渲染遗嘱消息中的 `{{变量}}`。
+/// 只作用于本次连接的配置副本，落盘的连接配置保持模板原文，
+/// 这样改全局变量后下次重连即生效，`$ts` 等也按连接时刻求值。
+pub fn render_will_templates(cfg: &mut ConnectionConfig, vars: &[GlobalVariable]) {
+    let Some(will) = cfg.last_will.as_mut() else {
+        return;
+    };
+    will.topic = render_template(&will.topic, vars);
+    will.payload = render_template(&will.payload, vars);
+    if let Some(v) = will.content_type.take() {
+        will.content_type = Some(render_template(&v, vars));
+    }
+    if let Some(v) = will.response_topic.take() {
+        will.response_topic = Some(render_template(&v, vars));
+    }
+}
+
 // ─── 日志 ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -727,6 +744,44 @@ mod tests {
         assert!(render_template("d={{device}}/{{$uuid}}", &vars).starts_with("d=sensor-1/"));
         // 多字节字符不被拆坏
         assert_eq!(render_template("中文{{$no}}", &[]), "中文{{$no}}");
+    }
+
+    // 连接前遗嘱模板注入：只改副本、空遗嘱不 panic、v5 属性一并渲染
+    #[test]
+    fn render_will_templates_injects_and_keeps_no_will_safe() {
+        let vars = vec![GlobalVariable {
+            key: "device".into(),
+            value: "sensor-9".into(),
+        }];
+        // 无遗嘱：直接返回
+        let mut plain = ConnectionConfig::new();
+        render_will_templates(&mut plain, &vars);
+        assert!(plain.last_will.is_none());
+
+        let mut cfg = ConnectionConfig::new();
+        cfg.last_will = Some(LastWill {
+            topic: "alarm/{{device}}".into(),
+            payload: "d={{device}}".into(),
+            qos: 1,
+            retain: false,
+            content_type: Some("text/{{device}}".into()),
+            response_topic: Some("ack/{{device}}".into()),
+        });
+        render_will_templates(&mut cfg, &vars);
+        let w = cfg.last_will.as_ref().unwrap();
+        assert_eq!(w.topic, "alarm/sensor-9");
+        assert_eq!(w.payload, "d=sensor-9");
+        assert_eq!(w.content_type.as_deref(), Some("text/sensor-9"));
+        assert_eq!(w.response_topic.as_deref(), Some("ack/sensor-9"));
+        // 原始模板串不因注入而需要回写：连接配置持久化的是模板原文，
+        // 这里只验证副本注入结果；未知占位符保留
+        let mut raw = ConnectionConfig::new();
+        raw.last_will = Some(LastWill {
+            topic: "t/{{unknown}}".into(),
+            ..Default::default()
+        });
+        render_will_templates(&mut raw, &vars);
+        assert_eq!(raw.last_will.as_ref().unwrap().topic, "t/{{unknown}}");
     }
 
     // 预设持久化往返：raw_bytes 不落盘，参数完整保留

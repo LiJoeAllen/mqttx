@@ -24,7 +24,7 @@ use gpui_kit::{
 use gpui_kit::component::IndexPath;
 
 use crate::model::{
-    render_template, ConnectionConfig, ConnectionStatus, Direction, LogLevel, MqttRecord,
+    render_template, render_will_templates, ConnectionConfig, ConnectionStatus, Direction, LogLevel, MqttRecord,
     PayloadFormat, PublishParams, SubscribeOptions, Subscription,
 };
 use crate::mqtt::MqttEngine;
@@ -588,6 +588,10 @@ impl ConnectionView {
             .into_iter()
             .map(|(k, v)| (render_template(&k, &vars), render_template(&v, &vars)))
             .collect();
+        // v5 文本属性（Content-Type / Response Topic / Correlation Data）一并注入
+        params.content_type = params.content_type.map(|v| render_template(&v, &vars));
+        params.response_topic = params.response_topic.map(|v| render_template(&v, &vars));
+        params.correlation_data = params.correlation_data.map(|v| render_template(&v, &vars));
 
         if let PayloadFormat::Json = params.payload_format
             && let Err(e) = serde_json::from_str::<serde_json::Value>(&params.payload) {
@@ -794,10 +798,15 @@ impl ConnectionView {
                             return;
                         }
                         let cfg = this.config(cx);
-                        if let Some(cfg) = cfg {
+                        if let Some(mut cfg) = cfg {
                             if this.engine.is_connected(&cfg.id) {
                                 this.engine.close(&cfg.id, true);
                             } else {
+                                // 遗嘱 {{变量}} 在每次连接时按当前全局变量求值
+                                let vars = this
+                                    .with_app(cx, |app| app.variables.clone())
+                                    .unwrap_or_default();
+                                render_will_templates(&mut cfg, &vars);
                                 this.engine.connect(cfg);
                             }
                         }
@@ -2050,20 +2059,44 @@ impl ConnectionView {
                             for p in &del_presets {
                                 let weak2 = weak_del.clone();
                                 let id = p.id.clone();
+                                let name = p.name.clone();
                                 let label = format!("删除「{}」", p.name);
                                 submenu = submenu.item(
                                     PopupMenuItem::new(SharedString::from(label)).on_click(
-                                        move |_ev, _w, cx| {
-                                            if let Some(view) = weak2.upgrade() {
-                                                view.update(cx, |view, cx| {
-                                                    if let Some(app) = view.app.upgrade() {
-                                                        app.update(cx, |app, cx| {
-                                                            app.delete_publish_preset(&id);
+                                        move |_ev, window, cx| {
+                                            // 预设删除不可撤销，先弹二次确认
+                                            let weak = weak2.clone();
+                                            let pid = id.clone();
+                                            let pname = name.clone();
+                                            window.open_alert_dialog(cx, move |alert, _, _| {
+                                                let weak = weak.clone();
+                                                let pid = pid.clone();
+                                                alert
+                                                    .title("删除预设")
+                                                    .description(format!(
+                                                        "确定删除预设「{pname}」吗？此操作不可撤销。"
+                                                    ))
+                                                    .button_props(
+                                                        DialogButtonProps::default()
+                                                            .show_cancel(true)
+                                                            .cancel_text("取消")
+                                                            .ok_text("删除")
+                                                            .ok_variant(ButtonVariant::Danger),
+                                                    )
+                                                    .on_ok(move |_, _, cx| {
+                                                        weak.update(cx, |view, cx| {
+                                                            if let Some(app) = view.app.upgrade() {
+                                                                app.update(cx, |app, cx| {
+                                                                    app.delete_publish_preset(&pid);
+                                                                    cx.notify();
+                                                                });
+                                                            }
                                                             cx.notify();
-                                                        });
-                                                    }
-                                                });
-                                            }
+                                                        })
+                                                        .ok();
+                                                        true
+                                                    })
+                                            });
                                         },
                                     ),
                                 );
