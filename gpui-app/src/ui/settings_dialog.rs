@@ -21,7 +21,11 @@ use crate::ui::app::MqttXApp;
 use crate::ui::widgets::{field, make_select, OptionDelegate};
 use crate::ui::IconName;
 
-const THEMES: [&str; 3] = ["跟随系统", "浅色", "深色"];
+const THEMES: [&str; 3] = ["跟随系统（暂按浅色）", "浅色", "深色"];
+
+/// 消息缓存条数的合法范围：太少不够回看，太多占内存
+const MAX_MESSAGES_MIN: usize = 100;
+const MAX_MESSAGES_MAX: usize = 100_000;
 
 const SITE_URL: &str = "https://mqttx.app";
 const REPO_URL: &str = "https://gitea.heavenlybook.cn/JoeAllen/mqttx";
@@ -66,14 +70,21 @@ impl SettingsDialog {
             Some(2) => ThemeModePref::Dark,
             _ => ThemeModePref::System,
         };
+        // 显式校验范围而非静默钳制：越界直接报错，不落盘
         let max_messages = self
             .max_messages
             .read(cx)
             .value()
             .trim()
             .parse::<usize>()
-            .map_err(|_| "消息缓存条数必须是正整数".to_string())?
-            .max(100);
+            .map_err(|_| format!(
+                "消息缓存条数需要是 {MAX_MESSAGES_MIN}~{MAX_MESSAGES_MAX} 的整数"
+            ))?;
+        if !(MAX_MESSAGES_MIN..=MAX_MESSAGES_MAX).contains(&max_messages) {
+            return Err(format!(
+                "消息缓存条数需要是 {MAX_MESSAGES_MIN}~{MAX_MESSAGES_MAX} 的整数"
+            ));
+        }
         // 四个字段全部显式写出，避免 ..Default::default() 把开关项重置为默认值
         Ok(AppSettings {
             theme,
@@ -111,7 +122,7 @@ impl Render for SettingsDialog {
             .w(px(500.))
             .child(field("主题", Select::new(&self.theme)))
             .child(field(
-                "每条连接内存中保留的消息条数",
+                "每条连接内存中保留的消息条数（100~100000）",
                 Input::new(&self.max_messages),
             ))
             .child(
@@ -130,7 +141,17 @@ impl Render for SettingsDialog {
             .child(
                 h_flex()
                     .justify_between()
-                    .child(div().text_sm().child("自动检查更新"))
+                    .child(
+                        h_flex().gap_1p5().items_center()
+                            .child(div().text_sm().child("自动检查更新"))
+                            // 更新通道尚未接入，先保留开关并明示状态
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("即将支持"),
+                            ),
+                    )
                     .child(
                         Switch::new("auto-check-update")
                             .checked(self.auto_check_update)

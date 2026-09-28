@@ -245,6 +245,19 @@ impl ConnectionConfig {
     pub fn display_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
+
+    /// 与另一份配置相比，影响 broker 会话建立的关键参数是否变化。
+    /// 这些字段改动只有在重新建立连接后才会生效，用于提示用户重连。
+    pub fn session_params_changed(&self, other: &ConnectionConfig) -> bool {
+        self.host != other.host
+            || self.port != other.port
+            || self.transport != other.transport
+            || self.protocol != other.protocol
+            || self.client_id != other.client_id
+            || self.username != other.username
+            || self.password != other.password
+            || self.clean_start != other.clean_start
+    }
 }
 
 impl Default for ConnectionConfig {

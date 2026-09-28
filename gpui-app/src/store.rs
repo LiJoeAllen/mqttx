@@ -177,7 +177,7 @@ pub fn export_connections_to(path: &Path, conns: &[ConnectionConfig]) -> Result<
 /// 从 JSON 文件导入连接。
 ///
 /// 容错规则：容忍 UTF-8 BOM；顶层允许是数组，也可能是 `{ "connections": [...] }` 对象；
-/// 任一项不是合法连接配置时返回带序号的错误信息。
+/// 任一项不是合法连接配置、或 `id` 为空白时，返回带序号的错误信息。
 pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
     let mut text =
@@ -202,7 +202,13 @@ pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, Str
     let mut conns = Vec::with_capacity(items.len());
     for (i, item) in items.into_iter().enumerate() {
         match serde_json::from_value::<ConnectionConfig>(item) {
-            Ok(c) => conns.push(c),
+            Ok(c) => {
+                // 空 id 会在去重/订阅关联时产生悬空引用，导入层直接拒绝
+                if c.id.trim().is_empty() {
+                    return Err(format!("第 {} 项的 id 不能为空", i + 1));
+                }
+                conns.push(c);
+            }
             Err(e) => return Err(format!("第 {} 项不是合法的连接配置: {e}", i + 1)),
         }
     }
@@ -260,6 +266,20 @@ mod tests {
         std::fs::write(&path, body).expect("写入测试文件");
         let err = import_connections_from(&path).expect_err("非法项应报错");
         assert!(err.contains("第 2 项"), "错误应定位到序号: {err}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn import_rejects_empty_id() {
+        let path = temp_path("empty-id.json");
+        let mut c = ConnectionConfig::new();
+        c.id = "   ".into();
+        let good = serde_json::to_value(ConnectionConfig::new()).unwrap();
+        let body = serde_json::json!([good, serde_json::to_value(&c).unwrap()]).to_string();
+        std::fs::write(&path, body).expect("写入测试文件");
+        let err = import_connections_from(&path).expect_err("空 id 应报错");
+        assert!(err.contains("第 2 项"), "错误应定位到序号: {err}");
+        assert!(err.contains("id"), "错误应说明 id 为空: {err}");
         let _ = std::fs::remove_file(&path);
     }
 }

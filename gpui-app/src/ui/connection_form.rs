@@ -1,5 +1,7 @@
 //! 新建/编辑连接的表单对话框内容。
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -21,7 +23,7 @@ use gpui_kit::{
 
 use crate::model::{ConnectionConfig, LastWill, ProtocolVersion, SslConfig, TransportKind};
 use crate::mqtt::MqttEngine;
-use crate::ui::widgets::{field, make_select, OptionDelegate};
+use crate::ui::widgets::{field, field_ex, make_select, OptionDelegate};
 
 const PROTOCOLS: [&str; 2] = ["MQTT 5.0", "MQTT 3.1.1"];
 const TRANSPORTS: [&str; 4] = ["TCP", "TLS", "WebSocket", "WSS"];
@@ -76,11 +78,15 @@ pub struct ConnectionForm {
     will_retain: bool,
     ssl_ignore_ca: bool,
 
-    // 按需显示：高级分组默认折叠
+    // 按需显示：高级分组默认折叠（编辑已配置内容时在 new() 里默认展开）
     show_auth: bool,
     show_mqtt5: bool,
     show_will: bool,
     show_ssl: bool,
+
+    // build() 校验失败时的字段级错误（字段 key → 提示文案），
+    // render 时映射成红字；build 只拿 &self，故用 RefCell 内部可变
+    field_errors: RefCell<HashMap<&'static str, String>>,
 
     testing: bool,
     _subs: Vec<Subscription>,
@@ -220,25 +226,39 @@ impl ConnectionForm {
         let group_idx = c
             .group
             .as_deref()
-            .and_then(|g| groups.iter().position(|x| x == g))
+            .and_then(|g| {
+                // 存储值可能带首尾空白，而下拉列表在上游已 trim，
+                // 直接相等比较会匹配不上 → 回填成「无分组」，保存即丢分组
+                let g = g.trim();
+                groups.iter().position(|x| x == g)
+            })
             .map(|i| i + 1)
             .unwrap_or(0);
         let group_select = make_select(&group_labels, group_idx, window, cx);
 
         // 切换传输方式时，把端口同步成该方式的默认端口，并刷新 WS 路径的按需显示。
+        // gpui 列表点击任意项（含当前项）都会发 Confirm，若不比对索引，
+        // 打开下拉点一下当前传输就会把自定义端口静默改回默认值。
+        let last_transport = std::cell::Cell::new(transport_idx);
         let port_for_sub = port.clone();
         let sub_transport = cx.subscribe_in(
             &transport,
             window,
             move |_this, state, event, window, cx| {
                 if matches!(event, SelectEvent::Confirm(Some(_)))
-                    && let Some(idx) = state.read(cx).selected_value() {
-                        let kind = TransportKind::ALL[*idx];
-                        port_for_sub.update(cx, |p, cx| {
-                            p.set_value(kind.default_port().to_string(), window, cx);
-                        });
-                        cx.notify();
+                    && let Some(idx) = state.read(cx).selected_value().copied()
+                    && let Some(kind) = TransportKind::ALL.get(idx).copied()
+                {
+                    // 索引未变化：视为重新点选当前项，不覆盖用户输入的端口
+                    if last_transport.get() == idx {
+                        return;
                     }
+                    last_transport.set(idx);
+                    port_for_sub.update(cx, |p, cx| {
+                        p.set_value(kind.default_port().to_string(), window, cx);
+                    });
+                    cx.notify();
+                }
             },
         );
         // 切换协议时刷新 MQTT 5 属性分组的按需显示。
@@ -251,6 +271,16 @@ impl ConnectionForm {
                 }
             },
         );
+
+        // 编辑已配置 SSL/会话过期等高级项的连接时默认展开，避免配置不可见
+        let ssl_configured = !c.ssl.ca_file.trim().is_empty()
+            || !c.ssl.client_cert_file.trim().is_empty()
+            || !c.ssl.client_key_file.trim().is_empty()
+            || c.ssl.ignore_ca;
+        let mqtt5_configured = c.session_expiry_interval > 0
+            || c.receive_maximum.is_some()
+            || c.maximum_packet_size.is_some()
+            || c.topic_alias_maximum.is_some();
 
         Self {
             engine,
@@ -290,9 +320,10 @@ impl ConnectionForm {
             will_retain,
             ssl_ignore_ca: c.ssl.ignore_ca,
             show_auth: true,
-            show_mqtt5: false,
+            show_mqtt5: mqtt5_configured,
             show_will: false,
-            show_ssl: false,
+            show_ssl: ssl_configured,
+            field_errors: RefCell::default(),
             testing: false,
             _subs: vec![sub_transport, sub_protocol],
         }
@@ -300,6 +331,22 @@ impl ConnectionForm {
 
     fn val(&self, e: &Entity<InputState>, cx: &App) -> String {
         e.read(cx).value().to_string()
+    }
+
+    /// 记录字段级错误并返回同一文案，供 build 的 `?` 传播到 Toast。
+    fn fail(&self, key: &'static str, msg: impl Into<String>) -> String {
+        let msg = msg.into();
+        self.field_errors.borrow_mut().insert(key, msg.clone());
+        msg
+    }
+
+    /// 把 Result 的错误挂到指定字段上再继续 `?` 传播。
+    fn fail_as<T>(
+        &self,
+        key: &'static str,
+        r: Result<T, String>,
+    ) -> Result<T, String> {
+        r.map_err(|e| self.fail(key, e))
     }
 
     fn parse_u16(s: &str, label: &str) -> Result<u16, String> {
@@ -329,39 +376,63 @@ impl ConnectionForm {
     }
 
     fn build_inner(&self, cx: &App, for_test: bool) -> Result<ConnectionConfig, String> {
+        // 每次构建先清空上一轮字段错误，失败时由 fail() 重新登记
+        self.field_errors.borrow_mut().clear();
+
         let mut name = self.val(&self.name, cx);
         if name.trim().is_empty() {
             if !for_test {
-                return Err("连接名称不能为空".into());
+                return Err(self.fail("name", "连接名称不能为空"));
             }
             name = "测试连接".into();
         }
+        // 判空已按 trim，保存也存 trim 后的值，避免首尾空白入库
+        let name = name.trim().to_string();
         let host = self.val(&self.host, cx);
         if host.trim().is_empty() {
-            return Err("主机地址不能为空".into());
+            return Err(self.fail("host", "主机地址不能为空"));
         }
-        let port = Self::parse_u16(&self.val(&self.port, cx), "端口")?;
+        let host = host.trim().to_string();
+        let port = self.fail_as("port", Self::parse_u16(&self.val(&self.port, cx), "端口"))?;
         let mut client_id = self.val(&self.client_id, cx);
         if client_id.trim().is_empty() {
             if !for_test {
-                return Err("Client ID 不能为空".into());
+                return Err(self.fail("client_id", "Client ID 不能为空"));
             }
             client_id = format!("mqttx-test-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         }
-        let keep_alive = Self::parse_u16(&self.val(&self.keep_alive, cx), "Keep Alive")?;
-        let session_expiry = self
-            .val(&self.session_expiry, cx)
-            .trim()
-            .parse::<u32>()
-            .unwrap_or(0);
-        let receive_maximum = Self::parse_opt_u32(&self.val(&self.receive_max, cx), "接收上限")?
-            .map(|v| u16::try_from(v).map_err(|_| "接收上限不能超过 65535".to_string()))
-            .transpose()?;
-        let maximum_packet_size =
-            Self::parse_opt_u32(&self.val(&self.max_packet, cx), "最大报文长度")?;
-        let topic_alias_maximum = Self::parse_opt_u32(&self.val(&self.topic_alias, cx), "主题别名")?
-            .map(|v| u16::try_from(v).map_err(|_| "主题别名上限不能超过 65535".to_string()))
-            .transpose()?;
+        let client_id = client_id.trim().to_string();
+        let keep_alive =
+            self.fail_as("keep_alive", Self::parse_u16(&self.val(&self.keep_alive, cx), "Keep Alive"))?;
+        // 空串视为 0（会话随连接结束）；非空必须是合法非负整数，不再静默吞掉 -1/abc
+        let session_expiry = {
+            let raw = self.val(&self.session_expiry, cx);
+            let t = raw.trim();
+            if t.is_empty() {
+                0
+            } else {
+                t.parse::<u32>().map_err(|_| {
+                    self.fail(
+                        "session_expiry",
+                        "会话过期间隔需要是非负整数（0=会话随连接结束）",
+                    )
+                })?
+            }
+        };
+        let receive_maximum = self.fail_as("receive_max", (|| -> Result<_, String> {
+            Ok(Self::parse_opt_u32(&self.val(&self.receive_max, cx), "接收上限")?
+                .map(|v| u16::try_from(v).map_err(|_| "接收上限不能超过 65535".to_string()))
+                .transpose())
+        })())??;
+        let maximum_packet_size = self.fail_as(
+            "max_packet",
+            Self::parse_opt_u32(&self.val(&self.max_packet, cx), "最大报文长度"),
+        )?;
+        let topic_alias_maximum = self.fail_as("topic_alias", (|| -> Result<_, String> {
+            Ok(Self::parse_opt_u32(&self.val(&self.topic_alias, cx), "主题别名")?
+                .map(|v| u16::try_from(v).map_err(|_| "主题别名上限不能超过 65535".to_string()))
+                .transpose())
+        })())??;
 
         let conn_timeout_raw = self.val(&self.conn_timeout, cx);
         let connection_timeout_secs = if conn_timeout_raw.trim().is_empty() {
@@ -372,7 +443,7 @@ impl ConnectionForm {
                 .parse::<u16>()
                 .ok()
                 .filter(|v| *v >= 1)
-                .ok_or_else(|| "连接超时需要是 1~65535 的整数（秒）".to_string())?
+                .ok_or_else(|| self.fail("conn_timeout", "连接超时需要是 1~65535 的整数（秒）"))?
         };
         let max_reconnect_raw = self.val(&self.max_reconnect, cx);
         let max_reconnect_times = if max_reconnect_raw.trim().is_empty() {
@@ -381,7 +452,7 @@ impl ConnectionForm {
             max_reconnect_raw
                 .trim()
                 .parse::<u32>()
-                .map_err(|_| "最大重连次数需要是非负整数（0=无限）".to_string())?
+                .map_err(|_| self.fail("max_reconnect", "最大重连次数需要是非负整数（0=无限）"))?
         };
 
         // 分组：新分组名非空时优先，否则取下拉所选（首项=无分组）
@@ -416,6 +487,12 @@ impl ConnectionForm {
             .and_then(|i| TransportKind::ALL.get(*i).copied())
             .unwrap_or_default();
 
+        // WS/WSS 依赖 path 建立升级请求，缺失时连接必然失败，保存前拦截
+        let path = self.val(&self.path, cx).trim().to_string();
+        if transport.is_websocket() && path.is_empty() {
+            return Err(self.fail("path", "WS/WSS 传输下 WS 路径不能为空"));
+        }
+
         let ssl = SslConfig {
             ca_file: self.val(&self.ssl_ca, cx).trim().to_string(),
             client_cert_file: self.val(&self.ssl_client_cert, cx).trim().to_string(),
@@ -426,13 +503,25 @@ impl ConnectionForm {
         if transport.is_tls()
             && ssl.client_cert_file.is_empty() != ssl.client_key_file.is_empty()
         {
-            return Err("客户端证书与客户端密钥必须同时填写".into());
+            return Err(self.fail("ssl_client_cert", "客户端证书与客户端密钥必须同时填写"));
+        }
+        // 证书文件不存在时握手才报错太晚，保存前给出字段级提示
+        if transport.is_tls() {
+            for (key, label, p) in [
+                ("ssl_ca", "CA 证书", &ssl.ca_file),
+                ("ssl_client_cert", "客户端证书", &ssl.client_cert_file),
+                ("ssl_client_key", "客户端私钥", &ssl.client_key_file),
+            ] {
+                if !p.is_empty() && !std::path::Path::new(p).exists() {
+                    return Err(self.fail(key, format!("{label}路径不存在：{p}")));
+                }
+            }
         }
 
         let last_will = if self.will_enabled {
             let topic = self.val(&self.will_topic, cx);
             if topic.trim().is_empty() {
-                return Err("遗嘱主题不能为空".into());
+                return Err(self.fail("will_topic", "遗嘱主题不能为空"));
             }
             let opt_str = |v: String| {
                 let t = v.trim().to_string();
@@ -456,7 +545,7 @@ impl ConnectionForm {
             name,
             host,
             port,
-            path: self.val(&self.path, cx),
+            path,
             protocol,
             transport,
             client_id,
@@ -484,6 +573,8 @@ impl ConnectionForm {
             Ok(c) => c,
             Err(e) => {
                 window.push_notification(Notification::error(e), cx);
+                // 触发重绘，让刚登记的字段级红字立即显示
+                cx.notify();
                 return;
             }
         };
@@ -624,6 +715,33 @@ impl Render for ConnectionForm {
             self.transport.read(cx).selected_value(),
             Some(1) | Some(3)
         );
+        // build() 校验失败登记的字段级错误，渲染成红字；红/星号用主题错误色
+        let danger = cx.theme().danger;
+        let field_errors = self.field_errors.borrow().clone();
+        let err = move |key: &'static str| -> Option<SharedString> {
+            field_errors.get(key).map(|s| SharedString::from(s.as_str()))
+        };
+        // 折叠标题的「已配置 N 项」提示，避免编辑旧配置时看不到已填内容
+        let ssl_count = [
+            self.val(&self.ssl_ca, cx).trim().is_empty(),
+            self.val(&self.ssl_client_cert, cx).trim().is_empty(),
+            self.val(&self.ssl_client_key, cx).trim().is_empty(),
+        ]
+        .iter()
+        .filter(|empty| !**empty)
+        .count();
+        let mqtt5_count = [
+            !self.val(&self.session_expiry, cx).trim().is_empty(),
+            !self.val(&self.receive_max, cx).trim().is_empty(),
+            !self.val(&self.max_packet, cx).trim().is_empty(),
+            !self.val(&self.topic_alias, cx).trim().is_empty(),
+        ]
+        .iter()
+        .filter(|on| **on)
+        .count();
+        let ssl_hint = (ssl_count > 0).then(|| SharedString::from(format!("已配置 {ssl_count} 项")));
+        let mqtt5_hint =
+            (mqtt5_count > 0).then(|| SharedString::from(format!("已配置 {mqtt5_count} 项")));
         v_flex()
             .gap_3()
             .max_h(px(560.))
@@ -633,11 +751,11 @@ impl Render for ConnectionForm {
             .child(section("基本信息", border, card_bg,
                 v_flex().gap_2().child(
                     h_flex().gap_2().w_full()
-                        .child(div().flex_1().min_w(px(0.)).child(field("名称", Input::new(&self.name))))
-                        .child(div().w(px(120.)).child(field("端口", Input::new(&self.port))))
+                        .child(div().flex_1().min_w(px(0.)).child(field_ex("名称", Input::new(&self.name), true, err("name"), danger)))
+                        .child(div().w(px(120.)).child(field_ex("端口", Input::new(&self.port), true, err("port"), danger)))
                 )
                 .child(h_flex().gap_2().w_full()
-                    .child(div().flex_1().min_w(px(0.)).child(field("主机", Input::new(&self.host))))
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("主机", Input::new(&self.host), true, err("host"), danger)))
                     .child(div().flex_1().min_w(px(0.)).child(field("协议", Select::new(&self.protocol))))
                     .child(div().flex_1().min_w(px(0.)).child(field("传输", Select::new(&self.transport))))
                 )
@@ -646,7 +764,7 @@ impl Render for ConnectionForm {
                     .child(div().flex_1().min_w(px(0.)).child(field("新建分组（优先于左侧选择）", Input::new(&self.group_new))))
                 )
                 .child(h_flex().gap_2().w_full().items_end()
-                    .child(div().flex_1().min_w(px(0.)).child(field("Client ID", Input::new(&self.client_id))))
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("Client ID", Input::new(&self.client_id), true, err("client_id"), danger)))
                     // 一键换一个随机 Client ID，与 ConnectionConfig::new 的生成逻辑一致
                     .child(
                         Button::new("cid-regen")
@@ -660,9 +778,9 @@ impl Render for ConnectionForm {
                                 cx.notify();
                             })),
                     )
-                    // WS 路径仅对 WebSocket/WSS 有意义，按需显示
+                    // WS 路径仅对 WebSocket/WSS 有意义，按需显示；该传输下必填
                     .when(is_ws, |w| w.child(
-                        div().flex_1().min_w(px(0.)).child(field("WS 路径", Input::new(&self.path)))
+                        div().flex_1().min_w(px(0.)).child(field_ex("WS 路径", Input::new(&self.path), true, err("path"), danger))
                     ))
                 )
             ))
@@ -674,11 +792,11 @@ impl Render for ConnectionForm {
                     .child(h_flex().gap_2().w_full()
                         .child(div().flex_1().min_w(px(0.)).child(field("用户名", Input::new(&self.username))))
                         .child(div().flex_1().min_w(px(0.)).child(field("密码", Input::new(&self.password).mask_toggle())))
-                        .child(div().w(px(110.)).child(field("Keep Alive (秒)", Input::new(&self.keep_alive))))
+                        .child(div().w(px(110.)).child(field_ex("Keep Alive (秒)", Input::new(&self.keep_alive), true, err("keep_alive"), danger)))
                     )
                     .child(h_flex().gap_2().w_full()
-                        .child(div().w(px(150.)).child(field("连接超时 (秒)", Input::new(&self.conn_timeout))))
-                        .child(div().w(px(170.)).child(field("最大重连次数 (0=无限)", Input::new(&self.max_reconnect))))
+                        .child(div().w(px(150.)).child(field_ex("连接超时 (秒)", Input::new(&self.conn_timeout), false, err("conn_timeout"), danger)))
+                        .child(div().w(px(170.)).child(field_ex("最大重连次数 (0=无限)", Input::new(&self.max_reconnect), false, err("max_reconnect"), danger)))
                     )
                     .child(self.switch_row("clean_start", "Clean Start / Clean Session", self.clean_start, cx))
                     .child(self.switch_row("auto_reconnect", "断线自动重连", self.auto_reconnect, cx))
@@ -687,25 +805,25 @@ impl Render for ConnectionForm {
             ))
             // ── SSL/TLS（仅 TLS/WSS 显示） ──
             .when(is_tls, |w| w.child(self.collapsible_section(
-                "sec-ssl", "SSL/TLS", None, false, self.show_ssl,
+                "sec-ssl", "SSL/TLS", ssl_hint, true, self.show_ssl,
                 |f| f.show_ssl = !f.show_ssl, border, card_bg,
                 v_flex().gap_2()
                     // Phase 2 或后续接原生文件对话框；GPUI 暂无内置文件选择器，先用路径文本输入
-                    .child(field("CA 证书 (PEM)", Input::new(&self.ssl_ca)))
-                    .child(field("客户端证书 (PEM)", Input::new(&self.ssl_client_cert)))
-                    .child(field("客户端密钥 (PEM)", Input::new(&self.ssl_client_key)))
+                    .child(field_ex("CA 证书 (PEM)", Input::new(&self.ssl_ca), false, err("ssl_ca"), danger))
+                    .child(field_ex("客户端证书 (PEM)", Input::new(&self.ssl_client_cert), false, err("ssl_client_cert"), danger))
+                    .child(field_ex("客户端密钥 (PEM)", Input::new(&self.ssl_client_key), false, err("ssl_client_key"), danger))
                     .child(self.switch_row("ssl_ignore_ca", "忽略 CA 校验（不验证服务器证书）", self.ssl_ignore_ca, cx)),
                 cx,
             )))
             // ── MQTT 5 高级属性（仅 v5 协议显示） ──
             .when(is_v5, |w| w.child(self.collapsible_section(
-                "sec-mqtt5", "MQTT 5 属性", None, false, self.show_mqtt5,
+                "sec-mqtt5", "MQTT 5 属性", mqtt5_hint, true, self.show_mqtt5,
                 |f| f.show_mqtt5 = !f.show_mqtt5, border, card_bg,
                 h_flex().gap_2().w_full()
-                    .child(div().flex_1().min_w(px(0.)).child(field("会话过期间隔(秒)", Input::new(&self.session_expiry))))
-                    .child(div().flex_1().min_w(px(0.)).child(field("接收最大值", Input::new(&self.receive_max))))
-                    .child(div().flex_1().min_w(px(0.)).child(field("最大报文长度", Input::new(&self.max_packet))))
-                    .child(div().flex_1().min_w(px(0.)).child(field("主题别名上限", Input::new(&self.topic_alias)))),
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("会话过期间隔(秒)", Input::new(&self.session_expiry), false, err("session_expiry"), danger)))
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("接收最大值", Input::new(&self.receive_max), false, err("receive_max"), danger)))
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("最大报文长度", Input::new(&self.max_packet), false, err("max_packet"), danger)))
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("主题别名上限", Input::new(&self.topic_alias), false, err("topic_alias"), danger))),
                 cx,
             )))
             // ── 遗嘱 ──
@@ -717,7 +835,7 @@ impl Render for ConnectionForm {
                     .child(self.switch_row("will_enabled", "启用遗嘱消息", self.will_enabled, cx))
                     .when(self.will_enabled, |w| w
                         .child(h_flex().gap_2()
-                            .child(div().flex_1().min_w(px(0.)).child(field("遗嘱主题", Input::new(&self.will_topic))))
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex("遗嘱主题", Input::new(&self.will_topic), true, err("will_topic"), danger)))
                             .child(div().w(px(130.)).child(field("QoS", Select::new(&self.will_qos))))
                         )
                         .child(field("遗嘱内容", Input::new(&self.will_payload)))

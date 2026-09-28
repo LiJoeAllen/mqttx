@@ -5,7 +5,9 @@ use mqttx_desktop::ui;
 
 fn main() {
     application()
-        .with_assets(gpui_kit::assets::Assets)
+        // AllAssets 嵌入全量 Lucide 图标；Assets 只含 default-icons.txt 的 101 个，
+        // 其余 IconName（MailOpen/SlidersHorizontal 等）运行时会渲染空白
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx: &mut App| {
             gpui_kit::init(cx);
 

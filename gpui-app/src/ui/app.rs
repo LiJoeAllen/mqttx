@@ -3,8 +3,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _, ButtonVariant};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -95,6 +96,10 @@ pub struct MqttXApp {
     group_filter: GroupFilter,
     /// 原生文件对话框进行中标记（对话框阻塞后台线程，防止重复弹出）
     file_dialog_open: bool,
+    /// 按日期缓存的日志文件句柄（日期, 文件），避免每条日志都重新打开文件
+    log_file: Option<(String, std::fs::File)>,
+    /// 系统外观变化订阅：设置为「跟随系统」时重应用主题，随实体存活
+    _appearance_obs: gpui_kit::Subscription,
 }
 
 impl MqttXApp {
@@ -123,6 +128,20 @@ impl MqttXApp {
         });
 
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索连接…"));
+
+        // 「跟随系统」：监听系统外观（深浅色）变化，仅在设置为 System 时重应用主题。
+        // 订阅需随实体存活，dropped 即取消，故存入字段。
+        let appearance_weak = cx.entity().downgrade();
+        let appearance_obs = window.observe_window_appearance(move |window, cx| {
+            let Some(app) = appearance_weak.upgrade() else {
+                return;
+            };
+            if app.read(cx).settings.theme != ThemeModePref::System {
+                return;
+            }
+            let mode = ThemeMode::from(window.appearance());
+            Theme::change(mode, Some(window), cx);
+        });
 
         // ── 全局快捷键：绑定 + action 注册 ──
         // 元素级 on_action 依赖焦点路径，无焦点时分发从树根开始收不到；
@@ -158,6 +177,10 @@ impl MqttXApp {
         App::on_action::<ExportConnections>(cx, move |_, cx| {
             let w = weak.clone();
             run_on_active_window(cx, w, |entity, window, cx| {
+                // 与新建/设置一致：对话框打开时不叠加文件对话框
+                if window.has_active_dialog(cx) {
+                    return;
+                }
                 entity.update(cx, |app, cx| app.export_connections(window, cx));
             });
         });
@@ -165,6 +188,9 @@ impl MqttXApp {
         App::on_action::<ImportConnections>(cx, move |_, cx| {
             let w = weak.clone();
             run_on_active_window(cx, w, |entity, window, cx| {
+                if window.has_active_dialog(cx) {
+                    return;
+                }
                 entity.update(cx, |app, cx| app.import_connections(window, cx));
             });
         });
@@ -190,6 +216,8 @@ impl MqttXApp {
             search,
             group_filter: GroupFilter::All,
             file_dialog_open: false,
+            log_file: None,
+            _appearance_obs: appearance_obs,
         }
     }
 
@@ -336,50 +364,71 @@ impl MqttXApp {
     }
 
     /// 追加写入按日切分的日志文件 `mqttx-YYYY-MM-DD.log`。
-    /// 每条都尝试写入；失败只在首次 eprintln 一次后保持静默，且绝不回调
-    /// log/push_log（防止递归触发日志）。
-    fn write_log_file(&self, entry: &LogEntry) {
-        use std::io::Write as _;
+    /// 文件句柄按日期缓存复用，只有跨日或写失败后才重新打开；
+    /// 失败只在首次 eprintln 一次后保持静默（成功一次即复位，便于恢复后再次提示），
+    /// 且绝不回调 log/push_log（防止递归触发日志）。
+    fn write_log_file(&mut self, entry: &LogEntry) {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         static WRITE_FAILED: AtomicBool = AtomicBool::new(false);
 
-        let result = (|| -> std::io::Result<()> {
-            use chrono::TimeZone as _;
-            let ts = chrono::Local
-                .timestamp_millis_opt(entry.timestamp)
-                .single()
-                .unwrap_or_else(chrono::Local::now);
+        match self.append_log_line(entry) {
+            Ok(()) => WRITE_FAILED.store(false, Ordering::Relaxed),
+            Err(e) => {
+                // 关句柄置空，下次写入自动重开重试
+                self.log_file = None;
+                if !WRITE_FAILED.swap(true, Ordering::Relaxed) {
+                    eprintln!("[app] 写入日志文件失败（后续静默）: {e}");
+                }
+            }
+        }
+    }
+
+    /// 打开（或复用按日缓存的）日志文件并追加一行。
+    fn append_log_line(&mut self, entry: &LogEntry) -> std::io::Result<()> {
+        use std::io::Write as _;
+        use chrono::TimeZone as _;
+
+        let ts = chrono::Local
+            .timestamp_millis_opt(entry.timestamp)
+            .single()
+            .unwrap_or_else(chrono::Local::now);
+        let day = ts.format("%Y-%m-%d").to_string();
+        let need_reopen = match &self.log_file {
+            Some((cached_day, _)) => *cached_day != day,
+            None => true,
+        };
+        if need_reopen {
             let dir = self.storage.log_dir();
             std::fs::create_dir_all(&dir)?;
-            let path = dir.join(format!("mqttx-{}.log", ts.format("%Y-%m-%d")));
-            // 连接名查不到时回退为 id，保证行格式恒定
-            let conn = self
-                .connections
-                .iter()
-                .find(|c| c.id == entry.connection_id)
-                .map(|c| c.name.as_str())
-                .unwrap_or(entry.connection_id.as_str());
-            let mut file = std::fs::OpenOptions::new()
+            let path = dir.join(format!("mqttx-{day}.log"));
+            let file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(path)?;
-            writeln!(
-                file,
-                "{} [{}] {}/{}: {}",
-                ts.format("%Y-%m-%d %H:%M:%S%.3f"),
-                entry.level.label(),
-                conn,
-                entry.event,
-                entry.message
-            )
-        })();
-
-        if let Err(e) = result
-            && !WRITE_FAILED.swap(true, Ordering::Relaxed)
-        {
-            eprintln!("[app] 写入日志文件失败（后续静默）: {e}");
+            self.log_file = Some((day, file));
         }
+        // 连接名查不到时回退为 id，保证行格式恒定
+        let conn = self
+            .connections
+            .iter()
+            .find(|c| c.id == entry.connection_id)
+            .map(|c| c.name.as_str())
+            .unwrap_or(entry.connection_id.as_str());
+        let file = &mut self
+            .log_file
+            .as_mut()
+            .expect("上方已确保日志句柄存在")
+            .1;
+        writeln!(
+            file,
+            "{} [{}] {}/{}: {}",
+            ts.format("%Y-%m-%d %H:%M:%S%.3f"),
+            entry.level.label(),
+            conn,
+            entry.event,
+            entry.message
+        )
     }
 
     pub fn log(&mut self, conn: &str, level: LogLevel, event: &str, message: String) {
@@ -423,6 +472,7 @@ impl MqttXApp {
         self.subscriptions.retain(|s| s.connection_id != id);
         self.messages.remove(id);
         self.statuses.remove(id);
+        self.errors.remove(id);
         self.views.remove(id);
         self.open_tabs.retain(|t| t != id);
         if self.active_tab.as_deref() == Some(id) {
@@ -622,7 +672,7 @@ impl MqttXApp {
                 }
                 Ok(None) => {}
                 Ok(Some(items)) => {
-                    let existing: std::collections::HashSet<String> =
+                    let mut existing: std::collections::HashSet<String> =
                         app.connections.iter().map(|c| c.id.clone()).collect();
                     let mut added = 0usize;
                     let mut skipped = 0usize;
@@ -630,6 +680,8 @@ impl MqttXApp {
                         if existing.contains(&item.id) {
                             skipped += 1;
                         } else {
+                            // 记录已入库 id，导入文件内部的重复 id 也只收一条
+                            existing.insert(item.id.clone());
                             app.connections.push(item);
                             added += 1;
                         }
@@ -711,15 +763,38 @@ impl MqttXApp {
                                     let built = form_ok.read(cx).build(cx);
                                     match built {
                                         Ok(cfg) => {
+                                            // 已连接的连接改了关键参数，重连后才生效，先算好再保存
+                                            let mut stale = false;
                                             app_ok
                                                 .update(cx, |app, cx| {
+                                                    let connected = app.statuses.get(&cfg.id)
+                                                        == Some(&ConnectionStatus::Connected);
+                                                    if connected
+                                                        && app
+                                                            .connections
+                                                            .iter()
+                                                            .find(|c| c.id == cfg.id)
+                                                            .is_some_and(|old| {
+                                                                old.session_params_changed(&cfg)
+                                                            })
+                                                    {
+                                                        stale = true;
+                                                    }
                                                     app.save_connection(cfg);
                                                     cx.notify();
                                                 })
                                                 .ok();
                                             window.close_dialog(cx);
+                                            if stale {
+                                                window.push_notification(
+                                                    Notification::info("配置已保存，重连后生效"),
+                                                    cx,
+                                                );
+                                            }
                                         }
                                         Err(e) => {
+                                            // 触发重绘，让字段级红字即时显示（错误已写入表单内部）
+                                            form_ok.update(cx, |_, cx| cx.notify());
                                             window.push_notification(
                                                 Notification::error(e),
                                                 cx,
@@ -735,12 +810,15 @@ impl MqttXApp {
 
 // ─── 主题 ────────────────────────────────────────────────────────────────────
 
+/// 应用主题偏好。
+///
+/// 「跟随系统」读取 gpui 的窗口外观（`App::window_appearance`）；系统深浅色变化由
+/// `MqttXApp::new` 里注册的 `Window::observe_window_appearance` 监听并重应用本函数。
 pub fn apply_theme(pref: ThemeModePref, cx: &mut App) {
     let mode = match pref {
         ThemeModePref::Light => ThemeMode::Light,
         ThemeModePref::Dark => ThemeMode::Dark,
-        // 未做系统外观检测前，“跟随系统”暂按浅色处理
-        ThemeModePref::System => ThemeMode::Light,
+        ThemeModePref::System => ThemeMode::from(cx.window_appearance()),
     };
     Theme::change(mode, None, cx);
 }
@@ -894,6 +972,14 @@ impl MqttXApp {
     fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.search.read(cx).value().to_lowercase();
         let search = self.search.clone();
+        // 分组被改名/删除后过滤器可能悬空（列表恒空），渲染前复位到「全部」
+        let dangling = matches!(&self.group_filter, GroupFilter::Named(name)
+            if !self.connections.iter().any(|c| {
+                c.group.as_deref().map(str::trim) == Some(name.as_str())
+            }));
+        if dangling {
+            self.group_filter = GroupFilter::All;
+        }
         let filter = self.group_filter.clone();
 
         let total = self.connections.len();
@@ -1071,7 +1157,14 @@ impl MqttXApp {
             .filter(|c| c.group.as_deref().map(str::trim).unwrap_or("").is_empty())
             .count();
 
-        let mut row = h_flex().gap_1().flex_wrap().px_2().pb_1();
+        // 分组多时限制高度并纵向滚动，避免 chips 换行挤占下方连接列表
+        let mut row = h_flex()
+            .gap_1()
+            .flex_wrap()
+            .px_2()
+            .pb_1()
+            .max_h(px(88.))
+            .overflow_y_scrollbar();
         row = row.child(self.render_group_chip(
             "chip-all",
             format!("全部 {}", self.connections.len()),
@@ -1179,16 +1272,54 @@ impl MqttXApp {
                     .ok();
                 }))
                 .separator()
-                .item(PopupMenuItem::new("删除").on_click(move |_, _, cx| {
-                    w3.update(cx, |app, cx| app.delete_connection(&e3, cx)).ok();
+                .item(PopupMenuItem::new("删除").on_click(move |_, window, cx| {
+                    let Some(app) = w3.upgrade() else {
+                        return;
+                    };
+                    // 二次确认：删除会级联清理订阅并断开连接，不可撤销
+                    let (name, sub_count) = {
+                        let a = app.read(cx);
+                        let name = a
+                            .connections
+                            .iter()
+                            .find(|c| c.id == e3)
+                            .map(|c| c.name.clone())
+                            .unwrap_or_else(|| e3.clone());
+                        let n = a.subscriptions.iter().filter(|s| s.connection_id == e3).count();
+                        (name, n)
+                    };
+                    let confirm_id = e3.clone();
+                    window.open_alert_dialog(cx, move |alert, _, _| {
+                        // 构建闭包是 Fn（可重复调用），克隆后再移入按钮回调
+                        let app = app.clone();
+                        let confirm_id = confirm_id.clone();
+                        alert
+                            .title("删除连接")
+                            .description(SharedString::from(format!(
+                                "确定删除「{name}」？将同时删除 {sub_count} 个订阅，并断开当前连接，此操作不可撤销。"
+                            )))
+                            .button_props(
+                                DialogButtonProps::default()
+                                    .ok_text("删除")
+                                    .ok_variant(ButtonVariant::Danger)
+                                    .show_cancel(true),
+                            )
+                            .on_ok(move |_, _, cx| {
+                                app.update(cx, |app, cx| app.delete_connection(&confirm_id, cx));
+                                true
+                            })
+                    });
                 }))
             })
     }
 
     fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.open_tabs.is_empty() {
+            // 父级 h_flex 交叉轴居中子项，容器必须 h_full 占满高度才不会整体下沉
             return v_flex()
                 .flex_1()
+                .h_full()
+                .min_h(px(0.))
                 .items_center()
                 .justify_center()
                 .gap_3()
@@ -1220,7 +1351,9 @@ impl MqttXApp {
         }
 
         let active = self.active_tab.clone().unwrap_or_default();
-        let mut bar = TabBar::new("conn-tabs");
+        let mut bar = TabBar::new("conn-tabs")
+            // 连接名过长时截断省略，避免单个页签占满整行
+            .max_width(px(180.));
         for id in self.open_tabs.clone() {
             let name = self
                 .connections
@@ -1251,11 +1384,17 @@ impl MqttXApp {
         }
 
         let view = self.views.get(&active).cloned();
+        // h_full：父级 h_flex 交叉轴居中子项，不占满高度会被整体垂直居中；
+        // 视图根是 size_full，须包在 flex_1 容器里，否则会盖住 TabBar 并溢出。
         v_flex()
             .flex_1()
+            .h_full()
+            .min_h(px(0.))
             .min_w(px(0.))
             .child(div().flex_shrink_0().px_2().pt_1().child(bar))
-            .when_some(view, |this, v| this.child(v))
+            .when_some(view, |this, v| {
+                this.child(v_flex().flex_1().min_h(px(0.)).child(v))
+            })
             .into_any_element()
     }
 }

@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -10,8 +11,8 @@ use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
-    h_flex, notification::Notification, v_flex, ActiveTheme as _, Selectable as _, Sizable as _,
-    StyledExt as _, WindowExt as _,
+    h_flex, notification::Notification, v_flex, ActiveTheme as _, Disableable as _,
+    Selectable as _, Sizable as _, StyledExt as _, WindowExt as _,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use crate::ui::IconName;
@@ -35,6 +36,8 @@ const PAYLOAD_FORMATS: [&str; 4] = ["Plaintext", "JSON", "Base64", "Hex"];
 /// Retain Handling 0/1/2 的下拉文案
 const RETAIN_HANDLING: [&str; 3] = ["0 每次发送", "1 仅新订阅", "2 不发送"];
 const MAX_RENDERED_MESSAGES: usize = 300;
+/// 日志渲染上限，与 app.rs 的 MAX_LOGS 保持一致
+const MAX_RENDERED_LOGS: usize = 3000;
 /// 订阅色板预设：色相（度）+ 名称
 const PRESET_HUES: [(f32, &str); 10] = [
     (0., "红"),
@@ -165,6 +168,9 @@ pub struct ConnectionView {
     filter: Entity<InputState>,
     panel: Panel,
     expanded: Option<u64>,
+    /// 当前 detail_format 归属的消息：切换到另一条消息时据此重置格式，
+    /// 同一条内折叠/展开则保留用户选择
+    detail_owner: Option<u64>,
     msg_dir: DirFilter,
     detail_format: DetailFormat,
 
@@ -234,6 +240,7 @@ impl ConnectionView {
             filter,
             panel: Panel::Messages,
             expanded: None,
+            detail_owner: None,
             msg_dir: DirFilter::All,
             detail_format: DetailFormat::Auto,
             preset_name,
@@ -317,6 +324,10 @@ impl ConnectionView {
         sub.enabled = !sub.enabled;
         let enabled = sub.enabled;
         let topic = sub.topic.clone();
+        // 停用的订阅不再参与消息过滤，指向它的过滤一并清掉
+        if !enabled && self.sub_filter.as_deref() == Some(topic.as_str()) {
+            self.sub_filter = None;
+        }
         let conn = self.conn_id.clone();
         self.upsert_subscription(sub.clone(), cx);
         if self.engine.is_connected(&conn) {
@@ -355,6 +366,22 @@ impl ConnectionView {
         });
         self.sub_show_advanced = true;
         cx.notify();
+    }
+
+    /// 重置订阅表单（主题/别名/高级字段）：新增提交与取消编辑共用，
+    /// 避免高级选项残留到下一次订阅。
+    fn reset_subscribe_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sub_topic
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.sub_alias
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.sub_identifier
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.sub_no_local = false;
+        self.sub_rap = false;
+        self.sub_retain_handling.update(cx, |s, cx| {
+            s.set_selected_index(Some(IndexPath::new(0)), window, cx)
+        });
     }
 
     // ── 订阅 / 发布动作 ─────────────────────────────────────────────────────
@@ -403,6 +430,19 @@ impl ConnectionView {
         let connected = self.engine.is_connected(&self.conn_id);
         let conn = self.conn_id.clone();
 
+        // 记录编辑来源：编辑态提交后以目标订阅回填，保住编辑上下文
+        let was_editing = self.editing.clone();
+        // 改名编辑时旧记录随后会被删除，先取出供新主题承接 id/color/enabled
+        let editing_old = was_editing.as_ref().and_then(|old_topic| {
+            self.with_app(cx, |app| {
+                app.subscriptions
+                    .iter()
+                    .find(|s| s.connection_id == conn && s.topic == *old_topic)
+                    .cloned()
+            })
+            .flatten()
+        });
+
         // 编辑提交：旧主题不在新列表里时先移除（含引擎退订），新主题由下方 upsert 覆盖
         if let Some(old_topic) = self.editing.take()
             && !topics.contains(&old_topic)
@@ -418,17 +458,59 @@ impl ConnectionView {
             }
         }
 
-        for topic in topics {
-            let mut sub = Subscription::new(conn.clone(), topic, qos);
-            sub.alias = alias.clone();
-            if is_v5 {
-                sub.sub_identifier = sub_identifier;
-                sub.no_local = no_local;
-                sub.retain_as_published = rap;
-                sub.retain_handling = retain_handling;
-            }
+        for topic in &topics {
+            // 按 (连接, 主题) 查旧记录：继承 id/color/enabled，避免重复提交把备注色清掉、
+            // 把停用中的订阅静默重启
+            let existing = self
+                .with_app(cx, |app| {
+                    app.subscriptions
+                        .iter()
+                        .find(|s| s.connection_id == conn && s.topic == *topic)
+                        .cloned()
+                })
+                .flatten();
+            let sub = match existing {
+                Some(mut old) => {
+                    old.qos = qos;
+                    old.alias = alias.clone();
+                    if is_v5 {
+                        old.sub_identifier = sub_identifier;
+                        old.no_local = no_local;
+                        old.retain_as_published = rap;
+                        old.retain_handling = retain_handling;
+                    }
+                    old
+                }
+                None => {
+                    // 改名编辑的单主题提交：新主题承接旧记录身份与备注，避免改名丢数据
+                    if topics.len() == 1 && let Some(mut old) = editing_old.clone() {
+                        old.topic = topic.clone();
+                        old.qos = qos;
+                        old.alias = alias.clone();
+                        if is_v5 {
+                            old.sub_identifier = sub_identifier;
+                            old.no_local = no_local;
+                            old.retain_as_published = rap;
+                            old.retain_handling = retain_handling;
+                        }
+                        old
+                    } else {
+                        let mut sub = Subscription::new(conn.clone(), topic.clone(), qos);
+                        sub.alias = alias.clone();
+                        if is_v5 {
+                            sub.sub_identifier = sub_identifier;
+                            sub.no_local = no_local;
+                            sub.retain_as_published = rap;
+                            sub.retain_handling = retain_handling;
+                        }
+                        sub
+                    }
+                }
+            };
+            // 继承到的停用订阅保持退订状态，不因重新提交被拉起
+            let keep_disabled = !sub.enabled;
             self.upsert_subscription(sub.clone(), cx);
-            if connected {
+            if connected && !keep_disabled {
                 self.engine.subscribe_with_options(
                     conn.clone(),
                     sub.clone(),
@@ -449,14 +531,37 @@ impl ConnectionView {
             window.push_notification(Notification::warning(hint), cx);
         }
 
-        self.sub_topic
-            .update(cx, |s, cx| s.set_value("", window, cx));
-        self.sub_alias
-            .update(cx, |s, cx| s.set_value("", window, cx));
+        // 编辑态：以刚保存的目标订阅回填表单继续保留上下文；
+        // 新增态：清空主题/别名并重置高级字段，避免残留到下一次订阅
+        if was_editing.is_some() && topics.len() == 1 {
+            let target = topics[0].clone();
+            let saved = self
+                .with_app(cx, |app| {
+                    app.subscriptions
+                        .iter()
+                        .find(|s| s.connection_id == conn && s.topic == target)
+                        .cloned()
+                })
+                .flatten();
+            if let Some(saved) = saved {
+                self.start_edit_subscription(&saved, window, cx);
+            } else {
+                self.editing = None;
+                self.reset_subscribe_form(window, cx);
+            }
+        } else {
+            self.editing = None;
+            self.reset_subscribe_form(window, cx);
+        }
         cx.notify();
     }
 
     fn do_publish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 未连接时消息发不出去，先拦截给出与订阅路径一致的提示
+        if !self.engine.is_connected(&self.conn_id) {
+            window.push_notification(Notification::warning("未连接：消息未发送"), cx);
+            return;
+        }
         let mut params = self.collect_publish_params(cx);
         if params.topic.trim().is_empty() {
             window.push_notification(Notification::warning("发布主题不能为空"), cx);
@@ -472,6 +577,11 @@ impl ConnectionView {
         let vars = self.with_app(cx, |app| app.variables.clone()).unwrap_or_default();
         params.topic = render_template(&params.topic, &vars);
         params.payload = render_template(&params.payload, &vars);
+        // {{topic}} 等变量渲染后可能变空串，渲染完成后再校验一次
+        if params.topic.trim().is_empty() {
+            window.push_notification(Notification::warning("发布主题不能为空"), cx);
+            return;
+        }
         // {{变量}} 同样作用于用户属性的 key/value
         params.user_properties = params
             .user_properties
@@ -585,17 +695,19 @@ impl ConnectionView {
 impl ConnectionView {
     fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.conn_id.clone();
-        let (name, status, is_v5) = self
+        let (name, status, is_v5, error) = self
             .with_app(cx, |app| {
                 let cfg = app.connections.iter().find(|c| c.id == id);
                 (
                     cfg.map(|c| c.name.clone()).unwrap_or_else(|| id.clone()),
                     app.statuses.get(&id).copied().unwrap_or(ConnectionStatus::Disconnected),
                     cfg.map(|c| c.protocol.is_v5()).unwrap_or(true),
+                    app.errors.get(&id).cloned(),
                 )
             })
-            .unwrap_or((id.clone(), ConnectionStatus::Disconnected, true));
+            .unwrap_or((id.clone(), ConnectionStatus::Disconnected, true, None));
         let connected = matches!(status, ConnectionStatus::Connected);
+        let connecting = matches!(status, ConnectionStatus::Connecting);
         let _ = is_v5;
 
         let status_text = status.label();
@@ -605,6 +717,10 @@ impl ConnectionView {
             ConnectionStatus::Error => cx.theme().danger,
             ConnectionStatus::Disconnected => cx.theme().muted_foreground,
         };
+        // Error 状态把失败原因展示出来，避免只有「错误」二字无从排查
+        let error_hint = matches!(status, ConnectionStatus::Error)
+            .then(|| error.clone())
+            .flatten();
 
         h_flex()
             .w_full()
@@ -632,7 +748,20 @@ impl ConnectionView {
                             .child(status_text),
                     ),
             )
-            .child(div().flex_1())
+            // Error 副文本展示失败原因（截断避免挤掉按钮）
+            .when_some(error_hint.clone(), |h, e| {
+                h.child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(e),
+                )
+            })
+            .when(error_hint.is_none(), |h| h.child(div().flex_1()))
             .child(
                 Button::new(SharedString::from(format!("conn-toggle-{}", self.conn_id)))
                     .icon(if connected {
@@ -640,11 +769,30 @@ impl ConnectionView {
                     } else {
                         IconName::PlugZap
                     })
-                    .label(if connected { "断开" } else { "连接" })
+                    .label(if connected {
+                        "断开"
+                    } else if connecting {
+                        "连接中…"
+                    } else {
+                        "连接"
+                    })
                     .when(connected, |b| b.danger().ghost())
                     .when(!connected, |b| b.primary().ghost())
+                    // Connecting 期间禁用，避免重复点击重启连接流程
+                    .disabled(connecting)
                     .small()
-                    .on_click(cx.listener(|this, _, _window, cx| {
+                    .when_some(error_hint.clone(), |b, e| b.tooltip(e))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        // Connecting 期间（按钮禁用之外再兜一层）不响应，防止重复 connect 重启流程
+                        let connecting = this
+                            .with_app(cx, |app| {
+                                app.statuses.get(&this.conn_id)
+                                    == Some(&ConnectionStatus::Connecting)
+                            })
+                            .unwrap_or(false);
+                        if connecting {
+                            return;
+                        }
                         let cfg = this.config(cx);
                         if let Some(cfg) = cfg {
                             if this.engine.is_connected(&cfg.id) {
@@ -662,7 +810,8 @@ impl ConnectionView {
         let sub_qos = self.sub_qos.clone();
         let sub_alias = self.sub_alias.clone();
         let is_v5 = self.is_v5(cx);
-        let editing = self.editing.is_some();
+        let editing_topic = self.editing.clone();
+        let editing = editing_topic.is_some();
         let show_advanced = self.sub_show_advanced && is_v5;
 
         let mut bar = v_flex()
@@ -675,6 +824,19 @@ impl ConnectionView {
                 .px_3()
                 .h_12()
                 .items_center()
+                // 编辑态显式提示目标主题，避免被误当成新增提交
+                .when_some(editing_topic.clone(), |h, topic| {
+                    h.child(
+                        div()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(cx.theme().warning.alpha(0.15))
+                            .text_xs()
+                            .text_color(cx.theme().warning)
+                            .child(format!("正在编辑：{topic}")),
+                    )
+                })
                 .child(div().flex_1().min_w(px(0.)).child(Input::new(&sub_topic).small()))
                 .child(div().w(px(96.)).child(Select::new(&sub_qos).small()))
                 .child(div().w(px(112.)).child(Input::new(&sub_alias).small()))
@@ -697,7 +859,9 @@ impl ConnectionView {
                     Button::new(SharedString::from(format!("subscribe-{}", self.conn_id)))
                         .icon(if editing { IconName::Check } else { IconName::Plus })
                         .label(if editing { "更新" } else { "订阅" })
-                        .primary()
+                        // 编辑用 warning 色与新增的 primary 区分
+                        .when(editing, |b| b.warning())
+                        .when(!editing, |b| b.primary())
                         .small()
                         .on_click(cx.listener(|this, _, window, cx| this.do_subscribe(window, cx))),
                 )
@@ -708,8 +872,10 @@ impl ConnectionView {
                             .ghost()
                             .small()
                             .tooltip("取消编辑")
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 this.editing = None;
+                                // 清空回填到输入框的主题/别名/高级字段，回到新增态
+                                this.reset_subscribe_form(window, cx);
                                 cx.notify();
                             })),
                     )
@@ -853,7 +1019,8 @@ impl ConnectionView {
                         let weak = weak_menu.clone();
                         let sid = sid.clone();
                         let swatch = hue_color(hue);
-                        let label = SharedString::from(format!("{name} {hue:.0}°"));
+                        // 菜单只显示颜色名，角度数值对用户没有意义
+                        let label = SharedString::from(name);
                         menu = menu.item(
                             PopupMenuItem::element(move |_, _| {
                                 h_flex()
@@ -934,7 +1101,6 @@ impl ConnectionView {
 
             let del_cid = self.conn_id.clone();
             let del_topic = topic.clone();
-            let del_weak_filter = self.sub_filter.clone();
             let del_btn = Button::new(SharedString::from(format!("sub-del-{}", sub_id)))
                 .icon(IconName::Close)
                 .ghost()
@@ -942,7 +1108,7 @@ impl ConnectionView {
                 .tooltip("取消订阅")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     // 若删除的是当前过滤主题，一并清掉消息过滤
-                    if del_weak_filter.as_deref() == Some(del_topic.as_str()) {
+                    if this.sub_filter.as_deref() == Some(del_topic.as_str()) {
                         this.sub_filter = None;
                     }
                     if let Some(app) = this.app.upgrade() {
@@ -951,7 +1117,10 @@ impl ConnectionView {
                             cx.notify();
                         });
                     }
-                    this.editing = None;
+                    // 只有删除的是正在编辑的主题才退出编辑态，编辑别的不受影响
+                    if this.editing.as_deref() == Some(del_topic.as_str()) {
+                        this.editing = None;
+                    }
                     cx.notify();
                 }));
 
@@ -1062,7 +1231,7 @@ impl ConnectionView {
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
-        let direction_label = if received { "接收" } else { "发送" };
+        let direction_label = if received { "接收" } else { "发布" };
         let show_millis = self
             .with_app(cx, |app| app.settings.show_millis)
             .unwrap_or(true);
@@ -1284,10 +1453,15 @@ impl ConnectionView {
             }
             body = body.child(
                 div()
+                    .id(SharedString::from(format!("msg-detail-{}", seq)))
                     .mt_1()
                     .p_2()
                     .rounded_lg()
                     .bg(cx.theme().muted)
+                    // 详情区点击不冒泡到行折叠，保证文本可选中
+                    .on_click(|_, _, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(details),
             );
         }
@@ -1312,11 +1486,16 @@ impl ConnectionView {
             )
             .child(body)
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.expanded = if this.expanded == Some(seq) {
-                    None
+                if this.expanded == Some(seq) {
+                    this.expanded = None;
                 } else {
-                    Some(seq)
-                };
+                    // 切换到另一条消息时格式回到 Auto，单条内折叠/展开仍记忆选择
+                    if this.detail_owner != Some(seq) {
+                        this.detail_format = DetailFormat::Auto;
+                        this.detail_owner = Some(seq);
+                    }
+                    this.expanded = Some(seq);
+                }
                 cx.notify();
             }))
     }
@@ -1326,7 +1505,8 @@ impl ConnectionView {
         let conn = self.conn_id.clone();
         let dir = self.msg_dir;
         let sub_filter = self.sub_filter.clone();
-        let (records, subs): (Vec<MqttRecord>, Vec<Subscription>) = self
+        // 引用过滤 + 计数命中总数，仅克隆前 MAX_RENDERED_MESSAGES 条，避免全量拷贝
+        let (records, subs, matched_total): (Vec<MqttRecord>, Vec<Subscription>, usize) = self
             .with_app(cx, |app| {
                 let subs: Vec<Subscription> = app
                     .subscriptions
@@ -1334,37 +1514,31 @@ impl ConnectionView {
                     .filter(|s| s.connection_id == conn)
                     .cloned()
                     .collect();
-                let records: Vec<MqttRecord> = app
-                    .messages
-                    .get(&conn)
-                    .map(|m| {
-                        m.iter()
-                            .rev()
-                            // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
-                            .filter(|r| {
-                                let dir_ok = match dir {
-                                    DirFilter::All => true,
-                                    DirFilter::Received => {
-                                        r.direction == Direction::Received
-                                    }
-                                    DirFilter::Published => {
-                                        r.direction == Direction::Published
-                                    }
-                                };
-                                let query_ok = query.is_empty()
-                                    || r.topic.to_lowercase().contains(&query)
-                                    || r.payload.to_lowercase().contains(&query);
-                                let sub_ok = sub_filter
-                                    .as_deref()
-                                    .map_or(true, |f| topic_matches(f, &r.topic));
-                                dir_ok && query_ok && sub_ok
-                            })
-                            .take(MAX_RENDERED_MESSAGES)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                (records, subs)
+                let mut matched = 0usize;
+                let mut records: Vec<MqttRecord> = Vec::new();
+                if let Some(m) = app.messages.get(&conn) {
+                    for r in m.iter().rev() {
+                        // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
+                        let dir_ok = match dir {
+                            DirFilter::All => true,
+                            DirFilter::Received => r.direction == Direction::Received,
+                            DirFilter::Published => r.direction == Direction::Published,
+                        };
+                        let query_ok = query.is_empty()
+                            || contains_ignore_case(&r.topic, &query)
+                            || contains_ignore_case(&r.payload, &query);
+                        let sub_ok = sub_filter
+                            .as_deref()
+                            .map_or(true, |f| topic_matches(f, &r.topic));
+                        if dir_ok && query_ok && sub_ok {
+                            matched += 1;
+                            if records.len() < MAX_RENDERED_MESSAGES {
+                                records.push(r.clone());
+                            }
+                        }
+                    }
+                }
+                (records, subs, matched)
             })
             .unwrap_or_default();
 
@@ -1504,27 +1678,65 @@ impl ConnectionView {
                             .text_xs()
                             .px_1p5()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("{} 条", records.len())),
+                            // 计数显示过滤命中总数，不受渲染截断影响
+                            .child(format!("{} 条", matched_total)),
                     )
-                    .child(
+                    .when(matched_total > records.len(), |h| {
+                        h.child(
+                            div()
+                                .text_xs()
+                                .px_1p5()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("仅显示最新 {} 条", MAX_RENDERED_MESSAGES)),
+                        )
+                    })
+                    .child({
+                        let weak = cx.weak_entity();
+                        let clear_id = self.conn_id.clone();
+                        let empty = records.is_empty();
                         Button::new(SharedString::from(format!("msg-clear-{}", self.conn_id)))
                             .icon(IconName::Eraser)
                             .label("清空")
                             .ghost()
                             .small()
+                            .disabled(empty)
                             .tooltip("清空当前连接的消息")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let id = this.conn_id.clone();
-                                this.expanded = None;
-                                if let Some(app) = this.app.upgrade() {
-                                    app.update(cx, |app, cx| {
-                                        app.messages.remove(&id);
-                                        cx.notify();
-                                    });
-                                }
-                                cx.notify();
-                            })),
-                    ),
+                            .on_click(move |_, window, cx| {
+                                // 清空不可撤销，先弹二次确认
+                                let weak = weak.clone();
+                                let clear_id = clear_id.clone();
+                                window.open_alert_dialog(cx, move |alert, _, _| {
+                                    let weak = weak.clone();
+                                    let clear_id = clear_id.clone();
+                                    alert
+                                        .title("清空消息")
+                                        .description("确定清空当前连接的全部消息吗？此操作不可撤销。")
+                                        .button_props(
+                                            DialogButtonProps::default()
+                                                .show_cancel(true)
+                                                .cancel_text("取消")
+                                                .ok_text("清空")
+                                                .ok_variant(ButtonVariant::Danger),
+                                        )
+                                        .on_ok(move |_, _, cx| {
+                                            weak.update(cx, |view, cx| {
+                                                view.expanded = None;
+                                                view.detail_owner = None;
+                                                view.detail_format = DetailFormat::Auto;
+                                                if let Some(app) = view.app.upgrade() {
+                                                    app.update(cx, |app, cx| {
+                                                        app.messages.remove(&clear_id);
+                                                        cx.notify();
+                                                    });
+                                                }
+                                                cx.notify();
+                                            })
+                                            .ok();
+                                            true
+                                        })
+                                });
+                            })
+                    }),
             )
             .child(body)
     }
@@ -1541,7 +1753,8 @@ impl ConnectionView {
                     .iter()
                     .rev()
                     .filter(|l| l.connection_id == conn)
-                    .take(2000)
+                    // 与 app.rs 的 MAX_LOGS=3000 对齐，避免渲染截断早于存储上限
+                    .take(MAX_RENDERED_LOGS)
                     .cloned()
                     .collect()
             })
@@ -1644,6 +1857,7 @@ impl ConnectionView {
 
         // 发布预设
         let presets = self.with_app(cx, |app| app.presets.clone()).unwrap_or_default();
+        let connected = self.engine.is_connected(&self.conn_id);
 
         let mut card = v_flex()
             .w_full()
@@ -1709,6 +1923,9 @@ impl ConnectionView {
                         .label("发送")
                         .primary()
                         .small()
+                        // 未连接时禁用，Ctrl+Enter 路径由 do_publish 内的前置检查兜底
+                        .disabled(!connected)
+                        .when(!connected, |b| b.tooltip("未连接，无法发送"))
                         .on_click(cx.listener(|this, _, window, cx| this.do_publish(window, cx))),
                 ),
         );
@@ -1915,24 +2132,56 @@ impl ConnectionView {
                                             );
                                             return;
                                         }
-                                        // collect 已覆盖用户属性与全部 v5 字段
+                                        // 复用 do_publish 的过期秒数校验：输入了但解析不出即拒绝
                                         let params = weak
                                             .read_with(cx, |view, cx| {
-                                                view.collect_publish_params(cx)
+                                                let expiry_raw = view
+                                                    .msg_expiry
+                                                    .read(cx)
+                                                    .value()
+                                                    .to_string();
+                                                (
+                                                    view.collect_publish_params(cx),
+                                                    expiry_raw,
+                                                )
                                             })
                                             .ok();
-                                        if let (Some(view), Some(params)) =
+                                        if let (Some(view), Some((params, expiry_raw))) =
                                             (weak.upgrade(), params)
-                                            && let Some(app) = view.read(cx).app.upgrade() {
+                                        {
+                                            if !expiry_raw.trim().is_empty()
+                                                && params.message_expiry_interval.is_none()
+                                            {
+                                                window.push_notification(
+                                                    Notification::warning(
+                                                        "消息过期须为非负整数（秒）",
+                                                    ),
+                                                    cx,
+                                                );
+                                                return;
+                                            }
+                                            if let Some(app) = view.read(cx).app.upgrade() {
+                                                // 同名即覆盖，提示语区分以明确发生了什么
+                                                let existed = app
+                                                    .read(cx)
+                                                    .presets
+                                                    .iter()
+                                                    .any(|p| p.name == name);
                                                 app.update(cx, |app, cx| {
-                                                    app.upsert_publish_preset(name, params);
+                                                    app.upsert_publish_preset(name.clone(), params);
                                                     cx.notify();
                                                 });
+                                                let msg = if existed {
+                                                    format!("已覆盖预设「{name}」")
+                                                } else {
+                                                    "预设已保存".to_string()
+                                                };
                                                 window.push_notification(
-                                                    Notification::success("预设已保存"),
+                                                    Notification::success(msg),
                                                     cx,
                                                 );
                                             }
+                                        }
                                         window.close_dialog(cx);
                                     }
                                 }),
@@ -1995,9 +2244,21 @@ impl Render for ConnectionView {
 
 // ─── 独立工具函数 ─────────────────────────────────────────────────────────────
 
-/// 色相（度）→ gpui Hsla（h 分量为 0..=1 的整圆比例）
+/// 色相（度）→ gpui Hsla（h 分量为 0..=1 的整圆比例）。
+/// 固定 L=0.52 时亮色相（黄绿）在浅色主题下过亮、暗色相（蓝靛）在深色主题下过暗，
+/// 按色相段微调明度，保证两端主题下都可辨识。
 fn hue_color(hue: f32) -> Hsla {
-    hsla(hue.rem_euclid(360.0) / 360.0, 0.72, 0.52, 1.0)
+    let h = hue.rem_euclid(360.0);
+    let l = if (30.0..=90.0).contains(&h) {
+        // 黄/黄绿本身明度感高，压低一点防刺眼
+        0.44
+    } else if (200.0..=280.0).contains(&h) {
+        // 蓝/靛本身明度感低，抬高一点防发黑
+        0.60
+    } else {
+        0.52
+    };
+    hsla(h / 360.0, 0.72, l, 1.0)
 }
 
 /// 逗号 / 空白 / 换行分隔的多主题输入 → 去重后的主题列表（批量订阅）
@@ -2104,12 +2365,39 @@ fn details_copy_text(record: &MqttRecord, show_millis: bool) -> String {
     out
 }
 
-/// 折叠态只显示单行预览；完整内容由展开详情按所选格式渲染。
+/// 折叠态只显示单行预览：换行/制表符压平成空格后截 200 字符。
+/// 含替换字符（U+FFFD）说明负载不是合法文本，提示切 Hex 查看。
 fn preview_payload(payload: &str) -> String {
-    let one_line: String = payload.chars().take(200).collect();
-    if payload.chars().count() > 200 {
-        format!("{one_line}…")
-    } else {
-        one_line
+    let flat: String = payload
+        .chars()
+        .map(|c| match c {
+            '\n' | '\r' | '\t' => ' ',
+            _ => c,
+        })
+        .collect();
+    let mut out: String = flat.chars().take(200).collect();
+    if flat.chars().count() > 200 {
+        out.push('…');
     }
+    if payload.contains('\u{FFFD}') {
+        out.push_str("（非文本，详情可切 Hex）");
+    }
+    out
+}
+
+/// 大小写不敏感子串匹配。`needle` 已由调用方 to_lowercase 一次；
+/// 先做零拷贝的字面匹配，未命中且原文含大写时才回退整串小写，
+/// 避免渲染热路径对全部记录做 to_lowercase 拷贝。
+fn contains_ignore_case(hay: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if hay.contains(needle) {
+        return true;
+    }
+    // 原文没有任何大写字符时，小写化不会改变匹配结果，直接判否
+    if !hay.chars().any(|c| c.is_uppercase()) {
+        return false;
+    }
+    hay.to_lowercase().contains(needle)
 }
