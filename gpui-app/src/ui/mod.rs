@@ -5,6 +5,7 @@ pub mod app;
 pub mod connection_form;
 pub mod connection_view;
 pub mod logo;
+pub mod presets_dialog;
 pub mod settings_dialog;
 pub mod variables_dialog;
 pub mod widgets;

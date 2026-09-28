@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::switch::Switch;
@@ -19,13 +19,13 @@ use crate::ui::IconName;
 use gpui_kit::{
     div, hsla, px, App, AppContext as _, ClipboardItem, Context, Entity, Hsla,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window,
+    StatefulInteractiveElement as _, Styled as _, Subscription as InputSubscription, Window,
 };
 use gpui_kit::component::IndexPath;
 
 use crate::model::{
-    render_template, render_will_templates, ConnectionConfig, ConnectionStatus, Direction, LogLevel, MqttRecord,
-    PayloadFormat, PublishParams, SubscribeOptions, Subscription,
+    render_template, render_will_templates, ConnectionConfig, ConnectionStatus, Direction, GlobalVariable,
+    LogLevel, MqttRecord, PayloadFormat, PublishParams, SubscribeOptions, Subscription,
 };
 use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
@@ -176,6 +176,12 @@ pub struct ConnectionView {
 
     // 预设
     preset_name: Entity<InputState>,
+
+    // 发布面板内联变量绑定
+    /// 「变量」小节展开状态（仅在提取到占位符时渲染整节）
+    show_vars: bool,
+    /// 提取到的 `{{key}}` → 值输入框与变更订阅，按提取顺序排列
+    var_rows: Vec<(String, Entity<InputState>, InputSubscription)>,
 }
 
 impl ConnectionView {
@@ -244,6 +250,8 @@ impl ConnectionView {
             msg_dir: DirFilter::All,
             detail_format: DetailFormat::Auto,
             preset_name,
+            show_vars: true,
+            var_rows: Vec::new(),
         }
     }
 
@@ -1862,11 +1870,18 @@ impl ConnectionView {
         let user_props = self.user_props.clone();
         let retain = self.retain;
         let show_props = self.show_props;
+        let show_vars = self.show_vars;
         let is_v5 = self.is_v5(cx);
 
         // 发布预设
         let presets = self.with_app(cx, |app| app.presets.clone()).unwrap_or_default();
         let connected = self.engine.is_connected(&self.conn_id);
+        // 当前提取到的占位符数量（仅用于提示，行构建在 sync_var_rows 完成）
+        let var_count = extract_placeholder_keys(
+            &self.pub_topic.read(cx).value(),
+            &self.payload.read(cx).value(),
+        )
+        .len();
 
         let mut card = v_flex()
             .w_full()
@@ -1900,6 +1915,28 @@ impl ConnectionView {
                 .child(div().w(px(92.)).child(Select::new(&pub_qos).small()))
                 .child(div().w(px(124.)).child(Select::new(&payload_format).small()))
                 .child(self.render_preset_menu(presets, cx))
+                .child({
+                    // 变量注入开关：展开/收起内联绑定面板
+                    let count = var_count;
+                    Button::new("vars-toggle")
+                        .icon(IconName::Variable)
+                        .ghost()
+                        .small()
+                        .when(show_vars, |b| b.selected(true))
+                        .tooltip(if count > 0 {
+                            format!("变量注入（{count} 个占位符）")
+                        } else {
+                            "变量注入".to_string()
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.show_vars {
+                                this.show_vars = false;
+                                cx.notify();
+                            } else {
+                                this.sync_var_rows(window, cx);
+                            }
+                        }))
+                })
                 .child(
                     h_flex()
                         .gap_1()
@@ -1960,6 +1997,11 @@ impl ConnectionView {
                 .child(Textarea::new(&payload)),
         );
 
+        // 内联变量绑定面板：仅在展开且已提取到占位符时渲染
+        if show_vars && !self.var_rows.is_empty() {
+            card = card.child(self.render_vars_panel(cx));
+        }
+
         if show_props && is_v5 {
             card = card.child(
                 v_flex()
@@ -2000,14 +2042,160 @@ impl ConnectionView {
         card
     }
 
+    /// 按当前 topic/payload 重新提取 `{{key}}`，增删变量输入行。
+    /// 输入框创建需要 Window，因此只能在按钮回调里调用（无法在 render 中同步）。
+    fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let topic = self.pub_topic.read(cx).value().to_string();
+        let payload = self.payload.read(cx).value().to_string();
+        let keys = extract_placeholder_keys(&topic, &payload);
+        if keys.is_empty() {
+            self.show_vars = false;
+            window.push_notification(
+                Notification::warning("主题/负载中没有 {{变量}} 引用"),
+                cx,
+            );
+            cx.notify();
+            return;
+        }
+        let vars = self.with_app(cx, |a| a.variables.clone()).unwrap_or_default();
+        // 移除已不存在的 key（保留仍存在的行，避免丢未保存的输入）
+        self.var_rows.retain(|(k, _, _)| keys.contains(k));
+        for key in keys {
+            if self.var_rows.iter().any(|(k, ..)| k == &key) {
+                continue;
+            }
+            let initial = vars
+                .iter()
+                .find(|v| v.key == key)
+                .map(|v| v.value.clone())
+                .unwrap_or_default();
+            let input = cx.new(|cx| {
+                let mut s = InputState::new(window, cx).placeholder("变量值");
+                // set_value 不会触发 InputEvent::Change，不会误写回
+                if !initial.is_empty() {
+                    s.set_value(initial.as_str(), window, cx);
+                }
+                s
+            });
+            // 编辑即写回全局变量（含持久化），预览与发布随之生效
+            let key_for_sub = key.clone();
+            let sub = cx.subscribe(&input, move |this, entity, ev: &InputEvent, cx| {
+                if !matches!(ev, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).value().to_string();
+                let key = key_for_sub.clone();
+                let Some(app) = this.app.upgrade() else {
+                    return;
+                };
+                app.update(cx, |a, cx| {
+                    match a.variables.iter_mut().find(|v| v.key == key) {
+                        Some(v) => {
+                            if v.value == val {
+                                return;
+                            }
+                            v.value = val;
+                        }
+                        None => a.variables.push(GlobalVariable { key, value: val }),
+                    }
+                    let snapshot = a.variables.clone();
+                    a.save_variables(snapshot);
+                    cx.notify();
+                });
+            });
+            self.var_rows.push((key, input, sub));
+        }
+        self.show_vars = true;
+        cx.notify();
+    }
+
+    /// 变量绑定面板：逐 key 编辑 + 实时渲染预览。
+    fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let vars = self.with_app(cx, |a| a.variables.clone()).unwrap_or_default();
+        let topic_raw = self.pub_topic.read(cx).value().to_string();
+        let payload_raw = self.payload.read(cx).value().to_string();
+        let topic_rendered = render_template(&topic_raw, &vars);
+        let payload_rendered = render_template(&payload_raw, &vars);
+        let payload_preview: String = payload_rendered.chars().take(80).collect();
+        let muted = cx.theme().muted_foreground;
+
+        let mut rows = v_flex().gap_1();
+        for (key, input, _) in &self.var_rows {
+            rows = rows.child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .w(px(160.))
+                            .min_w(px(0.))
+                            .text_xs()
+                            .text_color(muted)
+                            .child(format!("{{{{{key}}}}}")),
+                    )
+                    .child(div().flex_1().min_w(px(0.)).child(Input::new(input).small())),
+            );
+        }
+
+        v_flex()
+            .gap_2()
+            .w_full()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child(format!("变量（{}）", self.var_rows.len())),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("vars-refresh")
+                            .icon(IconName::RefreshCw)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("重新提取占位符")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.sync_var_rows(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("vars-collapse")
+                            .icon(IconName::ChevronUp)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("收起")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_vars = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(rows)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("内置：{{$ts}}（秒） {{$ts_ms}}（毫秒） {{$uuid}} · 发布时注入"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(format!("预览：{topic_rendered} | {payload_preview}")),
+            )
+    }
+
     /// 发布预设下拉：应用已有预设、保存当前、删除预设。
-    fn render_preset_menu(
-        &self,
+    fn render_preset_menu(        &self,
         presets: Vec<crate::model::PublishPreset>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let weak_view = cx.weak_entity();
         let preset_name = self.preset_name.clone();
+        let app_weak = self.app.clone();
         let has = !presets.is_empty();
         Button::new(SharedString::from(format!("preset-menu-{}", self.conn_id)))
             .icon(IconName::Bookmark)
@@ -2043,6 +2231,15 @@ impl ConnectionView {
                             view.update(cx, |view, cx| {
                                 view.open_save_preset_dialog(window, cx, name_input.clone());
                             });
+                        }
+                    },
+                ));
+                // 打开预设管理对话框（新建 / 编辑 / 删除）
+                let manage_app = app_weak.clone();
+                menu = menu.item(PopupMenuItem::new("管理预设…").on_click(
+                    move |_ev, window, cx| {
+                        if let Some(app) = manage_app.upgrade() {
+                            crate::ui::presets_dialog::open(app, window, cx);
                         }
                     },
                 ));
@@ -2306,6 +2503,34 @@ fn split_topic_list(raw: &str) -> Vec<String> {
     out
 }
 
+/// 从发布主题与负载中提取 `{{key}}` 占位符的 key 列表：
+/// - key 两侧空白去除（trim）；
+/// - `$` 开头的内置变量（`$ts` / `$ts_ms` / `$uuid`）不提取；
+/// - 重复 key 去重，保持首次出现顺序（主题在前、负载在后）。
+fn extract_placeholder_keys(topic: &str, payload: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for text in [topic, payload] {
+        let bytes = text.as_bytes();
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            if bytes[i] == b'{' && bytes[i + 1] == b'{' {
+                if let Some(rel_end) = text[i + 2..].find("}}") {
+                    let key = text[i + 2..i + 2 + rel_end].trim();
+                    if !key.is_empty() && !key.starts_with('$') && !out.iter().any(|k| k == key) {
+                        out.push(key.to_string());
+                    }
+                    i = i + 2 + rel_end + 2;
+                    continue;
+                }
+            }
+            // 按字符推进，避免把多字节 UTF-8 拆开
+            let ch = text[i..].chars().next().unwrap();
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 /// MQTT 主题过滤器匹配：`+` 匹配单层，`#` 匹配本层及以下（可匹配父级本身）。
 fn topic_matches(filter: &str, topic: &str) -> bool {
     let f: Vec<&str> = filter.split('/').collect();
@@ -2433,4 +2658,31 @@ fn contains_ignore_case(hay: &str, needle: &str) -> bool {
         return false;
     }
     hay.to_lowercase().contains(needle)
+}
+
+// ─── 单元测试 ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::extract_placeholder_keys;
+
+    // 修复回归：提取须 trim、排除内置变量、去重且保持首次出现顺序
+    #[test]
+    fn extract_keys_trims_excludes_builtin_and_dedups() {
+        let keys = extract_placeholder_keys(
+            "sensor/{{ device }}/state",
+            "{\"v\":{{value}},\"t\":{{ $ts }},\"u\":{{uuid}}}",
+        );
+        assert_eq!(keys, vec!["device", "value", "uuid"], "实际: {keys:?}");
+    }
+
+    #[test]
+    fn extract_keys_empty_and_multibyte_safe() {
+        assert!(extract_placeholder_keys("", "").is_empty());
+        assert!(extract_placeholder_keys("no placeholders here", "纯文本").is_empty());
+        // 未闭合的 {{ 不提取、不越界
+        assert!(extract_placeholder_keys("a{{b", "c}}d").is_empty());
+        let keys = extract_placeholder_keys("温度{{名称}}", "");
+        assert_eq!(keys, vec!["名称"]);
+    }
 }
