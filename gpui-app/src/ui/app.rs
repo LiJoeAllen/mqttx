@@ -128,21 +128,54 @@ impl MqttXApp {
             }
         });
 
-        // OTA：清理上次自更新遗留文件；开启自动检查则后台查一次新版本
+        // OTA：清理上次自更新遗留文件；开启自动检查则后台静默检查并下载，
+        // 下载完成后弹对话框征得同意再安装（不自动重启）。
         update::cleanup_old();
         if settings.auto_check_update {
-            let rx = engine.run_blocking(update::check_latest);
+            let rx = engine.run_blocking(update::check_and_download);
             let weak = cx.entity().downgrade();
             cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
-                if let Ok(Ok(Some(info))) = rx.recv().await {
+                if let Ok(Ok(Some(staged))) = rx.recv().await {
                     weak.update_in(cx, |_app, window, cx| {
-                        window.push_notification(
-                            Notification::info(format!(
-                                "发现新版本 v{}，可在 设置 → 关于 中更新",
-                                info.version
-                            )),
-                            cx,
-                        );
+                        window.open_dialog(cx, move |dialog, _, _cx| {
+                            let staged = staged.clone();
+                            dialog
+                                .w(px(440.))
+                                .title("更新就绪")
+                                .child(
+                                    v_flex().gap_2().child(
+                                        div().text_sm().child(format!(
+                                            "新版本 v{} 已下载完成（已通过 sha256 校验）。",
+                                            staged.version
+                                        )),
+                                    ),
+                                )
+                                .footer(
+                                    h_flex()
+                                        .gap_2()
+                                        .justify_end()
+                                        .w_full()
+                                        .child(
+                                            Button::new("upd-later")
+                                                .label("下次启动安装")
+                                                .outline()
+                                                .on_click(|_, window, cx| {
+                                                    window.close_dialog(cx)
+                                                }),
+                                        )
+                                        .child(
+                                            Button::new("upd-now")
+                                                .label("立即安装")
+                                                .primary()
+                                                .on_click(move |_, window, cx| {
+                                                    window.close_dialog(cx);
+                                                    if update::install_staged(&staged).is_ok() {
+                                                        cx.quit();
+                                                    }
+                                                }),
+                                        ),
+                                )
+                        });
                     })
                     .ok();
                 }

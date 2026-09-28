@@ -5,7 +5,7 @@
 //! （改名自替换后拉起新进程）。全程 HTTPS + sha256 校验。
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use sha2::Digest as _;
 
@@ -164,19 +164,49 @@ pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
     }))
 }
 
-/// 下载并校验到 exe 同目录的临时文件，返回临时文件路径。
+/// 已下载并校验、等待安装的更新包（存放在数据目录的暂存区）。
+#[derive(Debug, Clone)]
+pub struct StagedUpdate {
+    pub version: String,
+    pub path: PathBuf,
+}
+
+/// 暂存目录：数据目录下的 `updates/`，重启不丢失。
+fn stage_dir() -> Result<PathBuf, String> {
+    let dir = dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("MQTTX-GPUI")
+        .join("updates");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建暂存目录失败: {e}"))?;
+    Ok(dir)
+}
+
+/// 检查更新并静默下载到暂存区（供启动自动检查使用）。
+/// 返回 Ok(None) 表示已是最新；错误仅记录、不打扰用户。
+pub fn check_and_download() -> Result<Option<StagedUpdate>, String> {
+    let Some(info) = check_latest()? else {
+        return Ok(None);
+    };
+    // 已暂存同版本则不重复下载
+    if let Some(staged) = load_staged()
+        && staged.version == info.version
+    {
+        return Ok(Some(staged));
+    }
+    download_and_stage(&info, &|_, _| {}).map(Some)
+}
+
+/// 下载并校验到暂存区，返回待安装的更新。
 ///
-/// `on_progress(downloaded, total)` 在阻塞线程上回调，total 为 0 时表示未知。
-pub fn download_and_verify(
+/// `on_progress(downloaded, total)` 在阻塞线程上回调，total 为 0 表示未知。
+pub fn download_and_stage(
     info: &UpdateInfo,
     on_progress: &dyn Fn(u64, u64),
-) -> Result<PathBuf, String> {
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| format!("无法定位自身: {e}"))?
-        .parent()
-        .ok_or("无法定位安装目录")?
-        .to_path_buf();
-    let tmp = exe_dir.join(format!("mqttx.update.{}.tmp", std::process::id()));
+) -> Result<StagedUpdate, String> {
+    let dir = stage_dir()?;
+    let final_name = asset_name_for(&info.version);
+    let tmp = dir.join(format!("{}.{}.tmp", final_name, std::process::id()));
+    let dst = dir.join(&final_name);
 
     let resp = agent()
         .get(&info.asset_url)
@@ -214,7 +244,13 @@ pub fn download_and_verify(
         }
     }
 
-    Ok(tmp)
+    // 覆盖旧暂存（不同版本重名时以新版本为准）
+    let _ = std::fs::remove_file(&dst);
+    std::fs::rename(&tmp, &dst).map_err(|e| format!("暂存失败: {e}"))?;
+    Ok(StagedUpdate {
+        version: info.version.clone(),
+        path: dst,
+    })
 }
 
 /// 读取 `.sha256` 侧车内容，返回其中的哈希值。没有侧车时返回 None。
@@ -241,9 +277,37 @@ fn fetch_expected_sha256(info: &UpdateInfo) -> Result<Option<String>, String> {
     }
 }
 
-/// 安装：把临时文件替换为自身，并拉起新进程（旧文件改名为 `.old`，
-/// 下次启动由 [`cleanup_old`] 清理）。成功后调用方应立即退出进程。
-pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
+/// 扫描暂存区，返回待安装的更新（文件存在且比当前版本新才算）。
+pub fn load_staged() -> Option<StagedUpdate> {
+    let dir = stage_dir().ok()?;
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let triple = platform_triple();
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy().to_string();
+        // 命名：mqttx-v<ver>-<triple>-mqttx[.exe]
+        let Some(rest) = name.strip_prefix("mqttx-v") else {
+            continue;
+        };
+        if !(name.ends_with(ext) && name.contains(triple)) || name.contains(".tmp") {
+            continue;
+        }
+        let version = rest
+            .trim_end_matches(ext)
+            .split('-')
+            .next()?
+            .to_string();
+        if !is_newer(&version, current_version()) {
+            continue;
+        }
+        return Some(StagedUpdate { version, path: e.path() });
+    }
+    None
+}
+
+/// 安装暂存的更新：替换自身并拉起新进程（旧文件改名 `.old`，
+/// 新进程启动时由 [`cleanup_old`] 清理）。成功后调用方应退出当前进程。
+pub fn install_staged(staged: &StagedUpdate) -> Result<(), String> {
     let cur = std::env::current_exe().map_err(|e| format!("无法定位自身: {e}"))?;
     let mut old_name = cur.clone().into_os_string();
     old_name.push(".old");
@@ -251,7 +315,7 @@ pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
     // 旧残留先清掉，避免改名失败
     let _ = std::fs::remove_file(&old);
     std::fs::rename(&cur, &old).map_err(|e| format!("替换失败（可能无写入权限）: {e}"))?;
-    if let Err(e) = std::fs::rename(new_exe, &cur) {
+    if let Err(e) = std::fs::rename(&staged.path, &cur) {
         // 回滚，尽量保住当前可执行文件
         let _ = std::fs::rename(&old, &cur);
         return Err(format!("替换失败: {e}"));
@@ -262,24 +326,31 @@ pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 启动时清理上次更新遗留的旧文件（改名失败的 `.old`、异常退出的 `.tmp`）。
+/// 启动时清理上次更新遗留的旧文件（改名失败的 `.old`、中断的 `.tmp`）。
 pub fn cleanup_old() {
-    let Ok(cur) = std::env::current_exe() else {
-        return;
-    };
-    let Some(dir) = cur.parent() else {
-        return;
-    };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let name = e.file_name();
-        let name = name.to_string_lossy();
-        if (name.ends_with(".old") && name.starts_with("mqttx"))
-            || name.ends_with(".update.tmp")
-        {
-            let _ = std::fs::remove_file(e.path());
+    if let Ok(cur) = std::env::current_exe()
+        && let Some(dir) = cur.parent()
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        for e in entries.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if (name.ends_with(".old") && name.starts_with("mqttx"))
+                || name.ends_with(".update.tmp")
+            {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    // 暂存目录里中断的 .tmp
+    if let Ok(dir) = stage_dir()
+        && let Ok(entries) = std::fs::read_dir(&dir)
+    {
+        for e in entries.flatten() {
+            let name = e.file_name();
+            if name.to_string_lossy().ends_with(".tmp") {
+                let _ = std::fs::remove_file(e.path());
+            }
         }
     }
 }

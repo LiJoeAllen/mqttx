@@ -38,3 +38,6 @@ src-tauri/target_d
 *.pdb
 /.v2c
 /.video_agent
+
+# 发布产物暂存目录
+/dist-publish

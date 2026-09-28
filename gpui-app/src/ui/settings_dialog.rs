@@ -41,6 +41,8 @@ enum UpdateUi {
     UpToDate,
     Available(Box<UpdateInfo>),
     Downloading { downloaded: u64, total: u64 },
+    /// 已下载到暂存区，等待用户选择安装时机
+    ReadyToInstall(Box<update::StagedUpdate>),
     Failed(String),
 }
 
@@ -107,20 +109,12 @@ impl SettingsDialog {
         cx.notify();
         let (prog_tx, prog_rx) = smol::channel::unbounded();
         let info = info.clone();
-        let rx: smol::channel::Receiver<Result<(), String>> =
+        let rx: smol::channel::Receiver<Result<update::StagedUpdate, String>> =
             self.engine.run_blocking(move || {
-            let result = update::download_and_verify(&info, &|d, t| {
-                let _ = prog_tx.try_send((d, t));
+                update::download_and_stage(&info, &|d, t| {
+                    let _ = prog_tx.try_send((d, t));
+                })
             });
-            match result {
-                Ok(tmp) => match update::install_and_restart(&tmp) {
-                    // 新进程已拉起并接管，旧进程直接退出（设置均为即时落盘）
-                    Ok(()) => std::process::exit(0),
-                    Err(e) => Err(e),
-                },
-                Err(e) => Err(e),
-            }
-        });
         cx.spawn_in(window, async move |this, cx| {
             while let Ok((downloaded, total)) = prog_rx.recv().await {
                 this.update_in(cx, |s, _window, cx| {
@@ -129,13 +123,14 @@ impl SettingsDialog {
                 })
                 .ok();
             }
-            // 进度通道关闭：要么安装成功（进程已退出），要么拿到最终结果
+            // 进度通道关闭：拿到最终结果
             let result = rx.recv().await.unwrap_or(Err("任务丢失".into()));
             this.update_in(cx, |s, _window, cx| {
-                if let Err(e) = result {
-                    s.update = UpdateUi::Failed(e);
-                    cx.notify();
-                }
+                s.update = match result {
+                    Ok(staged) => UpdateUi::ReadyToInstall(Box::new(staged)),
+                    Err(e) => UpdateUi::Failed(e),
+                };
+                cx.notify();
             })
             .ok();
         })
@@ -214,6 +209,59 @@ impl SettingsDialog {
                     format!("发现新版本 v{}，下载后自动替换重启", ver).into_any_element(),
                     true,
                 )
+            }
+            UpdateUi::ReadyToInstall(staged) => {
+                let ver = staged.version.clone();
+                let staged_now = staged.clone();
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().accent)
+                            .child(format!(
+                                "新版本 v{} 已下载并通过校验，等待安装",
+                                ver
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1p5()
+                            .child(
+                                Button::new("upd-now")
+                                    .label("立即安装")
+                                    .primary()
+                                    .xsmall()
+                                    .on_click(move |_, window, cx| {
+                                        if update::install_staged(&staged_now).is_ok() {
+                                            cx.quit();
+                                        } else {
+                                            window.push_notification(
+                                                Notification::error(
+                                                    "安装失败，请重试",
+                                                ),
+                                                cx,
+                                            );
+                                        }
+                                    }),
+                            )
+                            .child(
+                                Button::new("upd-later")
+                                    .label("下次启动安装")
+                                    .outline()
+                                    .xsmall()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.update = UpdateUi::Idle;
+                                        window.push_notification(
+                                            Notification::info(
+                                                "已暂存，下次启动时将自动安装",
+                                            ),
+                                            cx,
+                                        );
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
             }
             UpdateUi::Downloading { downloaded, total } => {
                 let pct = if *total > 0 {
