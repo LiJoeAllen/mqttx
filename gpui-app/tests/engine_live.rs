@@ -108,7 +108,7 @@ fn wait_subscribe(rx: &smol::channel::Receiver<EngineEvent>, topic: &str) -> boo
 
 fn wait_message(rx: &smol::channel::Receiver<EngineEvent>, topic: &str) -> bool {
     pump(rx, Duration::from_secs(10), |ev| match ev {
-        EngineEvent::Message(m) => m.topic == topic && m.payload == "hello-gpui",
+        EngineEvent::Message(m) => &*m.topic == topic && &*m.payload == "hello-gpui",
         _ => false,
     })
 }

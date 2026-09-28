@@ -2,6 +2,8 @@
 //!
 //! 本层不依赖 GPUI，可被持久化层与 MQTT 引擎共用。
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 // ─── 连接配置 ────────────────────────────────────────────────────────────────
@@ -410,13 +412,17 @@ impl PayloadFormat {
 
 
 /// 一条收到/发出的消息记录。payload 以 UTF-8 文本保存（非文本按 lossy 显示）。
+///
+/// 内存优化：`connection_id`/`topic` 用 `Arc<str>`——同一连接内主题高度重复，
+/// 驻留后数千条记录只保留一份字符串。
 #[derive(Debug, Clone)]
 pub struct MqttRecord {
     pub seq: u64,
-    pub connection_id: String,
+    pub connection_id: Arc<str>,
     pub direction: Direction,
-    pub topic: String,
-    pub payload: String,
+    pub topic: Arc<str>,
+    /// Arc 共享：消息列表渲染每帧克隆最多数百条记录，零拷贝
+    pub payload: Arc<str>,
     pub qos: u8,
     pub retain: bool,
     /// unix 毫秒
@@ -427,6 +433,29 @@ pub struct MqttRecord {
     pub correlation_data: Option<String>,
     pub message_expiry_interval: Option<u32>,
     pub subscription_identifier: Option<u32>,
+    /// payload 超过 [`MAX_PAYLOAD_RETAIN`] 被截断
+    pub payload_truncated: bool,
+}
+
+/// 消息历史中单条 payload 的保留上限。超限截断，避免个别大报文
+/// 长期占据历史缓冲（MQTTX 亦有类似限制）。
+pub const MAX_PAYLOAD_RETAIN: usize = 256 * 1024;
+
+/// 把原始 payload 字节转成用于历史记录的共享文本，超限截断。
+/// 返回 (Arc<str>, 是否截断)。截断时回退到 UTF-8 字符边界。
+pub fn retained_payload(raw: &[u8]) -> (Arc<str>, bool) {
+    if raw.len() <= MAX_PAYLOAD_RETAIN {
+        (Arc::from(String::from_utf8_lossy(raw).as_ref()), false)
+    } else {
+        let mut end = MAX_PAYLOAD_RETAIN;
+        while end > 0 && (raw[end] & 0xC0) == 0x80 {
+            end -= 1;
+        }
+        (
+            Arc::from(String::from_utf8_lossy(&raw[..end]).as_ref()),
+            true,
+        )
+    }
 }
 
 // ─── 发布参数 / 发布预设 ──────────────────────────────────────────────────────
@@ -862,5 +891,30 @@ mod tests {
         assert_eq!(s.retain_handling, 0);
         // Subscription::new 同样产出默认启用的订阅
         assert!(Subscription::new("c1", "t", 0).enabled);
+    }
+
+    // payload 截断：上限内不截断；超出时截断且不切坏 UTF-8 字符
+    #[test]
+    fn retained_payload_caps_and_preserves_utf8() {
+        let small = b"hello";
+        let (p, trunc) = retained_payload(small);
+        assert_eq!(&*p, "hello");
+        assert!(!trunc);
+
+        // 中文每字符 3 字节，让上限落在字符中间（256K 不是 3 的倍数）
+        let big: Vec<u8> = "中".repeat(MAX_PAYLOAD_RETAIN).into_bytes();
+        let (p, trunc) = retained_payload(&big);
+        assert!(trunc, "超过上限必须截断");
+        assert!(p.len() <= MAX_PAYLOAD_RETAIN);
+        assert_eq!(p.chars().last(), Some('中'), "不能切坏 UTF-8 字符");
+        assert!(
+            big.starts_with(p.as_bytes()),
+            "截断内容必须是原数据前缀"
+        );
+
+        // 恰好上限不截断
+        let exact = vec![b'a'; MAX_PAYLOAD_RETAIN];
+        let (_, trunc) = retained_payload(&exact);
+        assert!(!trunc);
     }
 }

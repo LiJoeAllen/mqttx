@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _, ButtonVariant};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -24,7 +25,7 @@ use crate::aliyun::AliyunPreset;
 use crate::model::{
     AppSettings, ConnectionConfig, ConnectionStatus, Direction, GlobalVariable, LogEntry,
     LogLevel, MqttRecord, PublishParams, PublishPreset, SubscribeOptions, Subscription,
-    ThemeModePref,
+    ThemeModePref, retained_payload,
 };
 use crate::mqtt::{EngineEvent, MqttEngine};
 use crate::store::Storage;
@@ -83,7 +84,8 @@ pub struct MqttXApp {
     // ── 运行时状态 ──
     pub statuses: HashMap<String, ConnectionStatus>,
     pub errors: HashMap<String, String>,
-    pub messages: HashMap<String, Vec<MqttRecord>>,
+    /// 每连接消息环形缓冲：键为驻留后的连接 ID，容量受 max_messages 约束
+    pub messages: HashMap<Arc<str>, VecDeque<MqttRecord>>,
     pub logs: VecDeque<LogEntry>,
     pub seq: u64,
 
@@ -308,7 +310,7 @@ impl MqttXApp {
                 let id = record.connection_id.clone();
                 record.seq = self.next_seq();
                 self.push_message(id.clone(), record);
-                if let Some(view) = self.views.get(&id) {
+                if let Some(view) = self.views.get(id.as_ref()) {
                     view.update(cx, |_, cx| cx.notify());
                 }
             }
@@ -321,11 +323,12 @@ impl MqttXApp {
                 content_type,
                 user_properties,
             } => {
+                let (payload, payload_truncated) = retained_payload(&payload);
                 let record = MqttRecord {
                     seq: self.next_seq(),
-                    connection_id: connection_id.clone(),
+                    connection_id: Arc::from(connection_id.as_str()),
                     direction: Direction::Published,
-                    topic,
+                    topic: Arc::from(topic.as_str()),
                     payload,
                     qos,
                     retain,
@@ -336,9 +339,10 @@ impl MqttXApp {
                     correlation_data: None,
                     message_expiry_interval: None,
                     subscription_identifier: None,
+                    payload_truncated,
                 };
-                self.push_message(connection_id.clone(), record);
-                if let Some(view) = self.views.get(&connection_id) {
+                self.push_message(Arc::from(connection_id.as_str()), record);
+                if let Some(view) = self.views.get(connection_id.as_str()) {
                     view.update(cx, |_, cx| cx.notify());
                 }
             }
@@ -400,14 +404,17 @@ impl MqttXApp {
         self.seq
     }
 
-    fn push_message(&mut self, connection_id: String, record: MqttRecord) {
+    fn push_message(&mut self, connection_id: Arc<str>, record: MqttRecord) {
         let cap = self.settings.max_messages.max(100);
-        let list = self.messages.entry(connection_id).or_default();
-        if list.len() >= cap {
-            let drop_n = list.len() - cap + 1;
-            list.drain(0..drop_n);
+        let list = self
+            .messages
+            .entry(connection_id)
+            .or_insert_with(|| VecDeque::with_capacity(cap));
+        // 环形缓冲：满则丢最旧，均摊 O(1)（原来的 Vec::drain 是 O(n) 搬移）
+        while list.len() >= cap {
+            list.pop_front();
         }
-        list.push(record);
+        list.push_back(record);
     }
 
     fn push_log(&mut self, entry: LogEntry) {

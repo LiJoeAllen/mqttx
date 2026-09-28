@@ -37,11 +37,11 @@ pub enum EngineEvent {
     },
     /// 收到消息
     Message(MqttRecord),
-    /// 一条本地发出的消息（已成功交给客户端）
+    /// 一条本地发出的消息（已成功交给客户端）。payload 为实际发送的字节。
     Published {
         connection_id: String,
         topic: String,
-        payload: String,
+        payload: Vec<u8>,
         qos: u8,
         retain: bool,
         content_type: Option<String>,
@@ -77,6 +77,8 @@ struct ConnHandle {
 pub struct MqttEngine {
     runtime: tokio::runtime::Runtime,
     conns: Mutex<HashMap<String, ConnHandle>>,
+    /// 主题/连接 ID 驻留缓存：同一连接内主题高度重复，驻留让消息记录共享字符串
+    topics: Mutex<HashMap<String, Arc<str>>>,
     tx: EventSender,
     seq: Arc<AtomicU64>,
 }
@@ -96,6 +98,7 @@ impl MqttEngine {
         Arc::new(Self {
             runtime,
             conns: Mutex::new(HashMap::new()),
+            topics: Mutex::new(HashMap::new()),
             tx,
             seq: Arc::new(AtomicU64::new(1)),
         })
@@ -272,6 +275,8 @@ impl MqttEngine {
                 .raw_bytes
                 .clone()
                 .unwrap_or_else(|| params.payload.as_bytes().to_vec());
+            // 实际发送的字节留给 Published 事件（记录需要真实内容）
+            let sent_payload = payload.clone();
             // v5 与 v4 两个 crate 各自定义 ClientError，统一归一化为 String。
             let result: Result<(), String> = match &client {
                 ClientKind::V5(client) => {
@@ -318,7 +323,7 @@ impl MqttEngine {
                     engine.emit(EngineEvent::Published {
                         connection_id,
                         topic: params.topic,
-                        payload: params.payload,
+                        payload: sent_payload,
                         qos: params.qos,
                         retain: params.retain,
                         content_type: params.content_type,
@@ -488,6 +493,22 @@ impl MqttEngine {
             }
         });
         rx
+    }
+
+    /// 驻留字符串（主题/连接 ID）：同一内容全进程只保留一份 `Arc<str>`。
+    /// 缓存有上限，异常流量下整体清空重建，避免无限增长。
+    pub(crate) fn intern(&self, s: &str) -> Arc<str> {
+        const INTERN_CAP: usize = 10_000;
+        let mut cache = self.topics.lock().unwrap();
+        if let Some(arc) = cache.get(s) {
+            return arc.clone();
+        }
+        if cache.len() >= INTERN_CAP {
+            cache.clear();
+        }
+        let arc: Arc<str> = Arc::from(s);
+        cache.insert(s.to_string(), arc.clone());
+        arc
     }
 
     pub fn test_connection(
@@ -942,14 +963,15 @@ async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), String> {
 
 // ─── 事件循环 ────────────────────────────────────────────────────────────────
 
-fn v5_record(seq: u64, conn_id: &str, p: &V5Publish) -> MqttRecord {
+fn v5_record(engine: &MqttEngine, seq: u64, conn_id: &str, p: &V5Publish) -> MqttRecord {
     let props = p.properties.as_ref();
+    let (payload, payload_truncated) = crate::model::retained_payload(&p.payload);
     MqttRecord {
         seq,
-        connection_id: conn_id.to_string(),
+        connection_id: engine.intern(conn_id),
         direction: Direction::Received,
-        topic: String::from_utf8_lossy(&p.topic).to_string(),
-        payload: String::from_utf8_lossy(&p.payload).to_string(),
+        topic: engine.intern(&String::from_utf8_lossy(&p.topic)),
+        payload,
         qos: v5_qos_u8(p.qos),
         retain: p.retain,
         timestamp: now_ms(),
@@ -966,6 +988,7 @@ fn v5_record(seq: u64, conn_id: &str, p: &V5Publish) -> MqttRecord {
         message_expiry_interval: props.and_then(|p| p.message_expiry_interval),
         subscription_identifier: props
             .and_then(|p| p.subscription_identifiers.first().map(|v| *v as u32)),
+        payload_truncated,
     }
 }
 
@@ -997,7 +1020,7 @@ fn spawn_v5_loop(
                     match event {
                         Ok(V5Event::Incoming(V5Packet::Publish(p))) => {
                             let topic = String::from_utf8_lossy(&p.topic).to_string();
-                            let record = v5_record(engine.next_seq(), &id, &p);
+                            let record = v5_record(&engine, engine.next_seq(), &id, &p);
                             engine.log(
                                 &id,
                                 LogLevel::Info,
@@ -1158,12 +1181,14 @@ fn spawn_v4_loop(
                 event = eventloop.poll() => {
                     match event {
                         Ok(rv4::Event::Incoming(rv4::Packet::Publish(p))) => {
+                            let (payload, payload_truncated) =
+                                crate::model::retained_payload(&p.payload);
                             let record = MqttRecord {
                                 seq: engine.next_seq(),
-                                connection_id: id.clone(),
+                                connection_id: engine.intern(&id),
                                 direction: Direction::Received,
-                                topic: String::from_utf8_lossy(&p.topic).to_string(),
-                                payload: String::from_utf8_lossy(&p.payload).to_string(),
+                                topic: engine.intern(&String::from_utf8_lossy(&p.topic)),
+                                payload,
                                 qos: match p.qos {
                                     rv4::QoS::AtMostOnce => 0,
                                     rv4::QoS::AtLeastOnce => 1,
@@ -1177,6 +1202,7 @@ fn spawn_v4_loop(
                                 correlation_data: None,
                                 message_expiry_interval: None,
                                 subscription_identifier: None,
+                                payload_truncated,
                             };
                             engine.log(
                                 &id, LogLevel::Info, "publish_received",

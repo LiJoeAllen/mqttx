@@ -24,8 +24,9 @@ use gpui_kit::{
 use gpui_kit::component::IndexPath;
 
 use crate::model::{
-    render_template, render_will_templates, ConnectionConfig, ConnectionStatus, Direction, GlobalVariable,
-    LogLevel, MqttRecord, PayloadFormat, PublishParams, SubscribeOptions, Subscription,
+    render_template, render_will_templates, ConnectionConfig, ConnectionStatus, Direction,
+    GlobalVariable, LogLevel, MqttRecord, PayloadFormat, PublishParams, SubscribeOptions,
+    Subscription, MAX_PAYLOAD_RETAIN,
 };
 use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
@@ -1285,7 +1286,7 @@ impl ConnectionView {
                     .font_family(mono.clone())
                     // 匹配到订阅色时主题文字着色，否则保持默认前景色
                     .when_some(sub_color, |t, hue| t.text_color(hue_color(hue)))
-                    .child(record.topic.clone()),
+                    .child(record.topic.to_string()),
             )
             .child(
                 div()
@@ -1313,6 +1314,17 @@ impl ConnectionView {
                         .bg(cx.theme().warning.alpha(0.15))
                         .text_color(cx.theme().warning)
                         .child("retain"),
+                )
+            })
+            .when(record.payload_truncated, |t| {
+                t.child(
+                    div()
+                        .text_xs()
+                        .px_1()
+                        .rounded_sm()
+                        .bg(cx.theme().warning.alpha(0.15))
+                        .text_color(cx.theme().warning)
+                        .child(format!("已截断 {}KB", MAX_PAYLOAD_RETAIN / 1024)),
                 )
             })
             .child(
@@ -1385,7 +1397,7 @@ impl ConnectionView {
                         .tooltip("复制主题")
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_topic.clone()));
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_topic.to_string()));
                             window.push_notification(Notification::success("已复制主题"), cx);
                         }),
                 )
@@ -1398,7 +1410,7 @@ impl ConnectionView {
                         .tooltip("复制负载原文")
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.clone()));
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.to_string()));
                             window.push_notification(Notification::success("已复制负载"), cx);
                         }),
                 )
@@ -1533,7 +1545,7 @@ impl ConnectionView {
                     .collect();
                 let mut matched = 0usize;
                 let mut records: Vec<MqttRecord> = Vec::new();
-                if let Some(m) = app.messages.get(&conn) {
+                if let Some(m) = app.messages.get(conn.as_str()) {
                     for r in m.iter().rev() {
                         // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
                         let dir_ok = match dir {
@@ -1742,7 +1754,7 @@ impl ConnectionView {
                                                 view.detail_format = DetailFormat::Auto;
                                                 if let Some(app) = view.app.upgrade() {
                                                     app.update(cx, |app, cx| {
-                                                        app.messages.remove(&clear_id);
+                                                        app.messages.remove(clear_id.as_str());
                                                         cx.notify();
                                                     });
                                                 }
