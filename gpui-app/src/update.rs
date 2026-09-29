@@ -23,6 +23,8 @@ pub struct UpdateInfo {
     pub version: String,
     /// Release 说明（Markdown 原文）
     pub notes: String,
+    /// 附件名（判断 7z 压缩包 / 裸二进制）
+    pub asset_name: String,
     /// 平台对应产物下载地址
     pub asset_url: String,
     /// sha256 校验文件地址（若 Release 提供了 `.sha256` 侧车）
@@ -52,10 +54,15 @@ pub fn platform_triple() -> &'static str {
     }
 }
 
-/// 某版本的产物文件名（与 CI 的命名约定 `mqttx-<ver>-<triple>-mqttx[.exe]` 一致）。
-pub fn asset_name_for(version: &str) -> String {
+/// 某版本解压后二进制的暂存名（与 CI 的命名约定 `mqttx-v<ver>-<triple>-mqttx[.exe]` 一致）。
+pub fn binary_name_for(version: &str) -> String {
     let ext = if cfg!(windows) { ".exe" } else { "" };
     format!("mqttx-v{}-{}-mqttx{}", version, platform_triple(), ext)
+}
+
+/// 某版本的 7z 压缩附件名（打包端与此约定一致；内部为 [`binary_name_for`]）。
+pub fn asset_name_for(version: &str) -> String {
+    format!("{}.7z", binary_name_for(version))
 }
 
 fn agent() -> ureq::Agent {
@@ -108,32 +115,46 @@ pub fn is_newer(a: &str, b: &str) -> bool {
 }
 
 /// 从 Release JSON 里挑选当前平台的产物与 sha256 侧车。
+/// 优先 7z 压缩包（体积小、下载快）；Release 未提供 7z 时回退裸二进制
+/// （兼容旧发布方式）。
 pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Option<String>)> {
     let assets = rel.get("assets")?.as_array()?;
     let want_ext = if cfg!(windows) { ".exe" } else { "" };
     let triple = platform_triple();
-    for a in assets {
-        let Some(name) = a.get("name").and_then(|n| n.as_str()) else {
-            continue;
-        };
-        if !name.contains(triple) || !name.ends_with(want_ext) || name.ends_with(".sha256") {
-            continue;
+
+    // (后缀过滤器, 说明)：第一轮 7z，第二轮裸二进制
+    for suffix in [".7z", want_ext] {
+        for a in assets {
+            let Some(name) = a.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            if !name.contains(triple)
+                || !name.ends_with(suffix)
+                || name.ends_with(".sha256")
+            {
+                continue;
+            }
+            // 7z 轮要排除裸二进制（windows 裸 exe 不以 .7z 结尾，天然互斥）
+            if suffix == ".7z" && !name.ends_with(&format!("{want_ext}.7z")) && !want_ext.is_empty()
+            {
+                continue;
+            }
+            let Some(url) = a.get("browser_download_url").and_then(|u| u.as_str()) else {
+                continue;
+            };
+            let url = url.to_string();
+            let size = a.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+            // 侧车命名：<asset>.sha256
+            let sha = assets
+                .iter()
+                .find(|b| {
+                    b.get("name").and_then(|n| n.as_str()) == Some(&format!("{name}.sha256"))
+                })
+                .and_then(|b| b.get("browser_download_url"))
+                .and_then(|u| u.as_str())
+                .map(|s| s.to_string());
+            return Some((name.to_string(), url, size, sha));
         }
-        let Some(url) = a.get("browser_download_url").and_then(|u| u.as_str()) else {
-            continue;
-        };
-        let url = url.to_string();
-        let size = a.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
-        // 侧车命名：<asset>.sha256
-        let sha = assets
-            .iter()
-            .find(|b| {
-                b.get("name").and_then(|n| n.as_str()) == Some(&format!("{name}.sha256"))
-            })
-            .and_then(|b| b.get("browser_download_url"))
-            .and_then(|u| u.as_str())
-            .map(|s| s.to_string());
-        return Some((name.to_string(), url, size, sha));
     }
     None
 }
@@ -164,7 +185,7 @@ pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
     if !is_newer(tag, current_version()) {
         return Ok(None);
     }
-    let Some((_, url, size, sha)) = pick_assets(&rel) else {
+    let Some((name, url, size, sha)) = pick_assets(&rel) else {
         return Err(format!("Release {tag} 没有当前平台（{}）的产物", platform_triple()));
     };
     Ok(Some(UpdateInfo {
@@ -174,6 +195,7 @@ pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
             .and_then(|b| b.as_str())
             .unwrap_or_default()
             .to_string(),
+        asset_name: name,
         asset_url: url,
         sha256_url: sha,
         size,
@@ -214,13 +236,21 @@ pub fn check_and_download() -> Result<Option<StagedUpdate>, String> {
 
 /// 下载并校验到暂存区，返回待安装的更新。
 ///
+/// 附件为 7z 压缩包：下载 → 校验 → 解压出二进制暂存（压缩包随即删除）。
+/// 回退路径（裸二进制附件）直接校验暂存。
 /// `on_progress(downloaded, total)` 在阻塞线程上回调，total 为 0 表示未知。
 pub fn download_and_stage(
     info: &UpdateInfo,
     on_progress: &dyn Fn(u64, u64),
 ) -> Result<StagedUpdate, String> {
     let dir = stage_dir()?;
-    let final_name = asset_name_for(&info.version);
+    let binary_name = binary_name_for(&info.version);
+    let is_7z = info.asset_name.ends_with(".7z");
+    let final_name = if is_7z {
+        asset_name_for(&info.version)
+    } else {
+        binary_name.clone()
+    };
     // tmp 名加入毫秒时间戳：同 pid 并发下载不共用文件
     let tmp = dir.join(format!(
         "{}.{}.{}.tmp",
@@ -240,11 +270,31 @@ pub fn download_and_stage(
     }
 
     // 清掉其他版本的残留暂存文件，避免堆积与误装旧版
-    remove_other_staged(&dir, &dst);
-    std::fs::rename(&tmp, &dst).map_err(|e| format!("暂存失败: {e}"))?;
+    let staged_path = if is_7z {
+        // 解压到暂存目录，取出二进制后删掉压缩包
+        if let Err(e) = sevenz_rust::decompress_file(&tmp, &dir) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("解压更新包失败: {e}"));
+        }
+        let _ = std::fs::remove_file(&tmp);
+        let extracted = dir.join(&binary_name);
+        if !extracted.exists() {
+            return Err(format!(
+                "更新包内缺少 {}，压缩包内容异常",
+                binary_name
+            ));
+        }
+        // 确认解压产物后再清理其他版本，最后返回二进制路径
+        remove_other_staged(&dir, &extracted);
+        extracted
+    } else {
+        remove_other_staged(&dir, &dst);
+        std::fs::rename(&tmp, &dst).map_err(|e| format!("暂存失败: {e}"))?;
+        dst
+    };
     Ok(StagedUpdate {
         version: info.version.clone(),
-        path: dst,
+        path: staged_path,
     })
 }
 
@@ -307,6 +357,7 @@ fn remove_other_staged(dir: &std::path::Path, keep: &std::path::Path) {
                 && name.contains(platform_triple())
                 && !name.ends_with(".tmp")
                 && !name.ends_with(".sha256")
+                && !name.ends_with(".7z")
             {
                 let _ = std::fs::remove_file(&p);
             }
@@ -538,36 +589,56 @@ mod tests {
 
     #[test]
     fn asset_naming_matches_ci_convention() {
+        let ext = if cfg!(windows) { ".exe" } else { "" };
+        // 附件为 7z 压缩包；解压出的二进制保留原命名
         assert_eq!(
             asset_name_for("1.0.1"),
-            format!("mqttx-v1.0.1-{}-mqttx{}", platform_triple(), if cfg!(windows) { ".exe" } else { "" })
+            format!("mqttx-v1.0.1-{triple}-mqttx{ext}.7z", triple = platform_triple())
+        );
+        assert_eq!(
+            binary_name_for("1.0.1"),
+            format!("mqttx-v1.0.1-{triple}-mqttx{ext}", triple = platform_triple())
         );
     }
 
     #[test]
-    fn pick_assets_selects_platform_and_sidecar() {
+    fn pick_assets_prefers_7z_over_raw_binary() {
         let rel: serde_json::Value = serde_json::json!({
             "tag_name": "v1.0.1",
             "assets": [
-                {"name": "mqttx-v1.0.1-x86_64-unknown-linux-gnu-mqttx", "size": 1,
-                 "browser_download_url": "https://x/linux"},
+                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe", "size": 21000000,
+                 "browser_download_url": "https://x/win.exe"},
+                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.sha256", "size": 65,
+                 "browser_download_url": "https://x/win.exe.sha256"},
+                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.7z", "size": 9000000,
+                 "browser_download_url": "https://x/win.7z"},
+                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.7z.sha256", "size": 65,
+                 "browser_download_url": "https://x/win.7z.sha256"}
+            ]
+        });
+        let (name, url, size, sha) = pick_assets(&rel).expect("应选中 7z");
+        assert!(name.ends_with(".7z"), "应优先 7z 压缩包，实际 {name}");
+        assert_eq!(url, "https://x/win.7z");
+        assert_eq!(size, 9000000);
+        assert_eq!(sha.as_deref(), Some("https://x/win.7z.sha256"));
+    }
+
+    #[test]
+    fn pick_assets_falls_back_to_raw_binary() {
+        // 旧发布方式只有裸二进制：仍可被选中
+        let rel: serde_json::Value = serde_json::json!({
+            "tag_name": "v1.0.1",
+            "assets": [
                 {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe", "size": 19132928,
                  "browser_download_url": "https://x/win"},
                 {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.sha256", "size": 65,
                  "browser_download_url": "https://x/win.sha256"}
             ]
         });
-        let (name, url, size, sha) = pick_assets(&rel).expect("应选中平台产物");
-        if cfg!(windows) {
-            assert_eq!(name, "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe");
-            assert_eq!(url, "https://x/win");
-            assert_eq!(size, 19132928);
-            assert_eq!(sha.as_deref(), Some("https://x/win.sha256"));
-        } else {
-            assert_eq!(name, "mqttx-v1.0.1-x86_64-unknown-linux-gnu-mqttx");
-            assert_eq!(url, "https://x/linux");
-            assert_eq!(sha, None);
-        }
+        let (name, url, _size, sha) = pick_assets(&rel).expect("应回退裸二进制");
+        assert!(name.ends_with(".exe"));
+        assert_eq!(url, "https://x/win");
+        assert_eq!(sha.as_deref(), Some("https://x/win.sha256"));
     }
 
     #[test]

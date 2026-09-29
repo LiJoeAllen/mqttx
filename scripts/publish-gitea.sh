@@ -193,6 +193,37 @@ for f in "${FILES[@]}"; do
     *.exe) asset="mqttx-v${VER_NUM}-${TRIPLE}-mqttx.exe" ;;
     *)     asset="mqttx-v${VER_NUM}-${TRIPLE}-mqttx" ;;
   esac
+
+  # ── 7z 压缩附件（OTA 主通道）：内部文件名 = $asset（应用解压后按此名安装）──
+  SEVENZIP="$(command -v 7z 7za 2>/dev/null | head -1)"
+  [ -z "$SEVENZIP" ] && [ -x "/c/Program Files/7-Zip/7z.exe" ] && SEVENZIP="/c/Program Files/7-Zip/7z.exe"
+  if [ -n "$SEVENZIP" ]; then
+    "$SEVENZIP" a -y -mx=9 "$STAGE/$asset.7z" "$f" >/dev/null
+    # 归档内的文件名需为 $asset：7z 存的是源文件名，先复制改名再压
+    rm -f "$STAGE/$asset.7z"
+    cp -f "$f" "$STAGE/$asset"
+    "$SEVENZIP" a -y -mx=9 "$STAGE/$asset.7z" "$STAGE/$asset" >/dev/null
+    if [ -f "$STAGE/$asset.7z" ]; then
+      printf '%s  %s\n' "$(sha256 "$STAGE/$asset.7z")" "$asset.7z" > "$STAGE/$asset.7z.sha256"
+      for a in "$asset.7z" "$asset.7z.sha256"; do
+        code="$(curl -sS -o "$STAGE/up.json" -w '%{http_code}' \
+          -X POST \
+          -H "Authorization: token ${GITEA_TOKEN}" \
+          -F "attachment=@${STAGE}/${a}" \
+          "${API}/releases/${RELEASE_ID}/assets?name=${a}")"
+        case "$code" in
+          201) echo "  ✓ Release 附件 $a" ;;
+          *)   echo "  ! Release 附件 $a 上传失败 (HTTP $code)" >&2; cat "$STAGE/up.json" >&2 || true ;;
+        esac
+      done
+    else
+      echo "  ! 7z 打包失败，跳过压缩附件" >&2
+    fi
+  else
+    echo "  ! 未找到 7z/7za，跳过 7z 附件（仅上传裸二进制）" >&2
+  fi
+
+  # ── 裸二进制附件：v1.0.3 及更早客户端不认识 7z，需要它升级 ──
   cp -f "$f" "$STAGE/$asset"
   printf '%s  %s\n' "$(sha256 "$f")" "$asset" > "$STAGE/$asset.sha256"
   for a in "$asset" "$asset.sha256"; do

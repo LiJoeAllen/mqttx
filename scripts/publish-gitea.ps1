@@ -237,6 +237,41 @@ foreach ($f in $Files) {
     if ($name -match "^mqttx-v.*-mqttx(\.exe)?$") { $asset = $name }
     elseif ($name.EndsWith(".exe")) { $asset = "mqttx-v$VerNum-$Triple-mqttx.exe" }
     else { $asset = "mqttx-v$VerNum-$Triple-mqttx" }
+
+    # ── 7z 压缩附件（OTA 主通道：体积小、下载快）──
+    # 内部文件名 = $asset（应用解压后按此名暂存安装）
+    $SevenZip = @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $SevenZip) { $SevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source }
+    if ($SevenZip) {
+        $packDir = Join-Path $env:TEMP ("mqttx-pack-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $packDir | Out-Null
+        Copy-Item $f (Join-Path $packDir $asset)
+        $archive = Join-Path $env:TEMP "$asset.7z"
+        & $SevenZip a -y -mx=9 $archive (Join-Path $packDir $asset) | Out-Null
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $archive)) {
+            $asum = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+            "$asum  $asset.7z" | Set-Content -NoNewline -Encoding ascii "$archive.sha256"
+            foreach ($a in @("$asset.7z", "$asset.7z.sha256")) {
+                $code = Upload-ReleaseAsset "$Api/releases/$releaseId/assets?name=$a" (Join-Path $env:TEMP $a)
+                if ($code -eq 201) {
+                    Write-Host "  ✓ Release 附件 $a" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "  ! Release 附件 $a 上传失败 (HTTP $code)" -ForegroundColor Yellow
+                }
+            }
+        }
+        else {
+            Write-Host "  ! 7z 打包失败（exit=$LASTEXITCODE），跳过压缩附件" -ForegroundColor Yellow
+        }
+        Remove-Item $packDir, $archive, "$archive.sha256" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    else {
+        Write-Host "  ! 未找到 7-Zip，跳过 7z 附件（仅上传裸二进制）" -ForegroundColor Yellow
+    }
+
+    # ── 裸二进制附件：v1.0.3 及更早客户端不认识 7z，需要它升级 ──
     $tmp = Join-Path $env:TEMP $asset
     Copy-Item $f $tmp -Force
     $sum = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
