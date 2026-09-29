@@ -38,6 +38,7 @@ pub enum EngineEvent {
     /// 收到消息
     Message(MqttRecord),
     /// 一条本地发出的消息（已成功交给客户端）。payload 为实际发送的字节。
+    /// 属性与接收记录对齐，本地发送记录可完整回显。
     Published {
         connection_id: String,
         topic: String,
@@ -46,6 +47,9 @@ pub enum EngineEvent {
         retain: bool,
         content_type: Option<String>,
         user_properties: Vec<(String, String)>,
+        response_topic: Option<String>,
+        correlation_data: Option<String>,
+        message_expiry_interval: Option<u32>,
     },
     /// 订阅请求结果（tracked，等待 SUBACK）
     SubscribeResult {
@@ -69,14 +73,20 @@ enum ClientKind {
 }
 
 struct ConnHandle {
-    client: ClientKind,
+    /// `None` 表示仍在建立中（占位）。建连完成后由 connect 的任务升级为 Some。
+    client: Option<ClientKind>,
     cancel_tx: watch::Sender<bool>,
     connected: Arc<AtomicBool>,
+    /// 连接代数：同一 id 的第几次 connect。事件循环退出清理时只在
+    /// map 中仍是自己这一代时才移除，避免误删重连后的新句柄。
+    generation: u64,
 }
 
 pub struct MqttEngine {
     runtime: tokio::runtime::Runtime,
     conns: Mutex<HashMap<String, ConnHandle>>,
+    /// 下一次 connect 使用的代数
+    next_generation: AtomicU64,
     /// 主题/连接 ID 驻留缓存：同一连接内主题高度重复，驻留让消息记录共享字符串
     topics: Mutex<HashMap<String, Arc<str>>>,
     tx: EventSender,
@@ -98,6 +108,7 @@ impl MqttEngine {
         Arc::new(Self {
             runtime,
             conns: Mutex::new(HashMap::new()),
+            next_generation: AtomicU64::new(1),
             topics: Mutex::new(HashMap::new()),
             tx,
             seq: Arc::new(AtomicU64::new(1)),
@@ -139,6 +150,21 @@ impl MqttEngine {
         self.close(&cfg.id, false);
 
         let id = cfg.id.clone();
+        let generation = self.next_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let connected = Arc::new(AtomicBool::new(false));
+        // 同步占位（client=None）：建连期间 close() 也能取消本次连接，
+        // 且 is_connected() 在建连完成前保持 false。
+        self.conns.lock().unwrap().insert(
+            id.clone(),
+            ConnHandle {
+                client: None,
+                cancel_tx,
+                connected: connected.clone(),
+                generation,
+            },
+        );
+
         self.emit(EngineEvent::Status {
             connection_id: id.clone(),
             status: ConnectionStatus::Connecting,
@@ -162,41 +188,58 @@ impl MqttEngine {
 
         let engine = Arc::clone(self);
         self.runtime.spawn(async move {
-            let build = if cfg.protocol.is_v5() {
-                build_v5(&cfg)
-                    .map(|(client, el)| (ClientKind::V5(client), EventLoopKind::V5(Box::new(el))))
-            } else {
-                build_v4(&cfg)
-                    .map(|(client, el)| (ClientKind::V4(client), EventLoopKind::V4(Box::new(el))))
-            };
+            let auto_reconnect = cfg.auto_reconnect;
+            let max_reconnect_times = cfg.max_reconnect_times;
+            // build 含证书/CA 文件读取等阻塞 IO，放 spawn_blocking，
+            // 避免慢盘上卡住 2 线程 runtime 里其他连接的调度
+            let build = tokio::task::spawn_blocking(move || {
+                if cfg.protocol.is_v5() {
+                    build_v5(&cfg).map(|(client, el)| {
+                        (ClientKind::V5(client), EventLoopKind::V5(Box::new(el)))
+                    })
+                } else {
+                    build_v4(&cfg).map(|(client, el)| {
+                        (ClientKind::V4(client), EventLoopKind::V4(Box::new(el)))
+                    })
+                }
+            })
+            .await;
 
+            let build_error = |engine: &Arc<MqttEngine>, id: &str, generation: u64, e: String| {
+                engine.remove_handle_if(id, generation);
+                engine.emit(EngineEvent::Status {
+                    connection_id: id.to_string(),
+                    status: ConnectionStatus::Error,
+                    error: Some(e.clone()),
+                    reason_code: None,
+                    session_present: None,
+                });
+                engine.log(id, LogLevel::Error, "connect_error", format!("连接失败: {e}"), None);
+            };
             let (client, eventloop) = match build {
-                Ok(pair) => pair,
-                Err(e) => {
-                    engine.emit(EngineEvent::Status {
-                        connection_id: id.clone(),
-                        status: ConnectionStatus::Error,
-                        error: Some(e.clone()),
-                        reason_code: None,
-                        session_present: None,
-                    });
-                    engine.log(&id, LogLevel::Error, "connect_error", format!("连接失败: {e}"), None);
+                Ok(Ok(pair)) => pair,
+                Ok(Err(e)) => {
+                    build_error(&engine, &id, generation, e);
+                    return;
+                }
+                Err(j) => {
+                    build_error(&engine, &id, generation, format!("内部任务失败: {j}"));
                     return;
                 }
             };
 
-            let connected = Arc::new(AtomicBool::new(false));
-            let (cancel_tx, cancel_rx) = watch::channel(false);
-            let handle = ConnHandle {
-                client,
-                cancel_tx,
-                connected: connected.clone(),
-            };
-            engine
-                .conns
-                .lock()
-                .unwrap()
-                .insert(id.clone(), handle);
+            // 建连期间该连接可能已被 close 或更新的 connect 顶掉：
+            // 仅当占位句柄仍是本代时才升级为可用客户端，否则丢弃本次建连。
+            {
+                let mut map = match engine.conns.lock() {
+                    Ok(m) => m,
+                    Err(_) => return,
+                };
+                match map.get_mut(&id) {
+                    Some(h) if h.generation == generation => h.client = Some(client),
+                    _ => return,
+                }
+            }
 
             match eventloop {
                 EventLoopKind::V5(el) => {
@@ -206,8 +249,9 @@ impl MqttEngine {
                         *el,
                         cancel_rx,
                         connected,
-                        cfg.auto_reconnect,
-                        cfg.max_reconnect_times,
+                        generation,
+                        auto_reconnect,
+                        max_reconnect_times,
                     );
                 }
                 EventLoopKind::V4(el) => {
@@ -217,8 +261,9 @@ impl MqttEngine {
                         *el,
                         cancel_rx,
                         connected,
-                        cfg.auto_reconnect,
-                        cfg.max_reconnect_times,
+                        generation,
+                        auto_reconnect,
+                        max_reconnect_times,
                     );
                 }
             }
@@ -231,15 +276,16 @@ impl MqttEngine {
         if let Some(h) = handle {
             let _ = h.cancel_tx.send(true);
             let connected = h.connected.clone();
-            // 发送 MQTT DISCONNECT 报文后丢弃客户端
+            // 发送 MQTT DISCONNECT 报文后丢弃客户端（建连未完成时无需发送）
             self.runtime.spawn(async move {
                 match h.client {
-                    ClientKind::V5(c) => {
+                    Some(ClientKind::V5(c)) => {
                         let _ = c.disconnect().await;
                     }
-                    ClientKind::V4(c) => {
+                    Some(ClientKind::V4(c)) => {
                         let _ = c.disconnect().await;
                     }
+                    None => {}
                 }
                 connected.store(false, Ordering::SeqCst);
             });
@@ -328,6 +374,9 @@ impl MqttEngine {
                         retain: params.retain,
                         content_type: params.content_type,
                         user_properties: params.user_properties,
+                        response_topic: params.response_topic,
+                        correlation_data: params.correlation_data,
+                        message_expiry_interval: params.message_expiry_interval,
                     });
                 }
                 Err(e) => {
@@ -537,13 +586,25 @@ impl MqttEngine {
 
     /// 克隆一个连接的异步客户端用于发命令。
     /// 不持有 std Mutex 守卫跨 await，避免与 tokio runtime 的 Send 要求冲突。
+    /// 占位句柄（建连未完成）视为不存在。
     fn client_of(&self, id: &str) -> Option<ClientKind> {
         let map = self.conns.lock().ok()?;
-        let h = map.get(id)?;
-        Some(match &h.client {
+        let client = map.get(id)?.client.as_ref()?;
+        Some(match client {
             ClientKind::V5(c) => ClientKind::V5(c.clone()),
             ClientKind::V4(c) => ClientKind::V4(c.clone()),
         })
+    }
+
+    /// 仅当 map 中该 id 的句柄仍是 `generation` 这一代时才移除。
+    /// 事件循环退出清理必须走这里：无条件按 id 删除会把重连后的
+    /// 新句柄误删，导致连接无法再从 UI 断开。
+    fn remove_handle_if(&self, id: &str, generation: u64) {
+        if let Ok(mut map) = self.conns.lock()
+            && map.get(id).map(|h| h.generation) == Some(generation)
+        {
+            map.remove(id);
+        }
     }
 }
 
@@ -927,8 +988,15 @@ async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), String> {
             match eventloop.poll().await {
                 Ok(V5Event::Incoming(V5Packet::ConnAck(ack))) => {
                     if ack.code == V5ReturnCode::Success {
-                        // 测试完成，主动断开避免在 broker 侧残留会话
+                        // 测试完成，主动断开避免在 broker 侧残留会话。
+                        // disconnect() 只是把请求入队，需再 poll 才会把
+                        // DISCONNECT 真正写上网络。
                         let _ = client.disconnect().await;
+                        for _ in 0..3 {
+                            if eventloop.poll().await.is_err() {
+                                break;
+                            }
+                        }
                         return Ok(());
                     }
                     return Err(format!("连接被拒绝: {:?}", ack.code));
@@ -946,7 +1014,13 @@ async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), String> {
             match eventloop.poll().await {
                 Ok(rv4::Event::Incoming(rv4::Packet::ConnAck(ack))) => {
                     if ack.code == rv4::ConnectReturnCode::Success {
+                        // 同 v5：disconnect() 只入队，需 poll 把报文冲出
                         let _ = client.disconnect().await;
+                        for _ in 0..3 {
+                            if eventloop.poll().await.is_err() {
+                                break;
+                            }
+                        }
                         return Ok(());
                     }
                     return Err(format!("连接被拒绝: {:?}", ack.code));
@@ -965,7 +1039,7 @@ async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), String> {
 
 fn v5_record(engine: &MqttEngine, seq: u64, conn_id: &str, p: &V5Publish) -> MqttRecord {
     let props = p.properties.as_ref();
-    let (payload, payload_truncated) = crate::model::retained_payload(&p.payload);
+    let (payload, raw_bytes, payload_truncated) = crate::model::retained_payload(&p.payload);
     MqttRecord {
         seq,
         connection_id: engine.intern(conn_id),
@@ -983,12 +1057,23 @@ fn v5_record(engine: &MqttEngine, seq: u64, conn_id: &str, p: &V5Publish) -> Mqt
         correlation_data: props.and_then(|p| {
             p.correlation_data
                 .as_ref()
-                .map(|d| d.iter().map(|b| format!("{b:02x}")).collect())
+                .map(|d| correlation_display(d))
         }),
         message_expiry_interval: props.and_then(|p| p.message_expiry_interval),
         subscription_identifier: props
             .and_then(|p| p.subscription_identifiers.first().map(|v| *v as u32)),
         payload_truncated,
+        raw_bytes,
+    }
+}
+
+/// correlation data 的可读表示：优先按 UTF-8 文本展示，非文本回退 hex。
+/// 发送端把字符串按字节原样发出，两侧展示保持对称（此前收端一律 hex、
+/// 发端保留原文，同一条数据两侧对不上）。
+fn correlation_display(data: &[u8]) -> String {
+    match std::str::from_utf8(data) {
+        Ok(s) => s.to_string(),
+        Err(_) => data.iter().map(|b| format!("{b:02x}")).collect(),
     }
 }
 
@@ -1006,9 +1091,11 @@ fn spawn_v5_loop(
     mut eventloop: V5EventLoop,
     mut cancel_rx: watch::Receiver<bool>,
     connected: Arc<AtomicBool>,
+    generation: u64,
     auto_reconnect: bool,
     max_reconnect_times: u32,
 ) {
+    #![allow(clippy::too_many_arguments)]
     let runtime = engine.runtime.handle().clone();
     runtime.spawn(async move {
         let mut first_connect = true;
@@ -1035,6 +1122,9 @@ fn spawn_v5_loop(
                             connected.store(ack.code == V5ReturnCode::Success, Ordering::SeqCst);
                             if ack.code == V5ReturnCode::Success {
                                 first_connect = false;
+                                // 重连成功后清零计数：max_reconnect_times 限流的是
+                                // 「连续失败次数」，不能把历史错误累计进来
+                                reconnect_attempts = 0;
                                 engine.log(
                                     &id,
                                     LogLevel::Info,
@@ -1148,7 +1238,12 @@ fn spawn_v5_loop(
                             reconnect_attempts += 1;
                             engine.log(&id, LogLevel::Warn, "connection_error",
                                 format!("连接错误，2 秒后重连（第 {reconnect_attempts} 次）: {e}"), None);
-                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            // 退避等待也必须可取消：否则 close() 的取消信号最长
+                            // 2 秒不可见，期间会对用户已关闭的连接继续重连。
+                            tokio::select! {
+                                _ = cancel_rx.changed() => break,
+                                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                            }
                         }
                     }
                 }
@@ -1158,7 +1253,8 @@ fn spawn_v5_loop(
                 }
             }
         }
-        engine.conns.lock().ok().and_then(|mut m| m.remove(&id));
+        // 仅当 map 中仍是本代句柄时才移除，避免误删重连后的新句柄
+        engine.remove_handle_if(&id, generation);
     });
 }
 
@@ -1168,9 +1264,11 @@ fn spawn_v4_loop(
     mut eventloop: rv4::EventLoop,
     mut cancel_rx: watch::Receiver<bool>,
     connected: Arc<AtomicBool>,
+    generation: u64,
     auto_reconnect: bool,
     max_reconnect_times: u32,
 ) {
+    #![allow(clippy::too_many_arguments)]
     let runtime = engine.runtime.handle().clone();
     runtime.spawn(async move {
         let mut first_connect = true;
@@ -1181,7 +1279,7 @@ fn spawn_v4_loop(
                 event = eventloop.poll() => {
                     match event {
                         Ok(rv4::Event::Incoming(rv4::Packet::Publish(p))) => {
-                            let (payload, payload_truncated) =
+                            let (payload, raw_bytes, payload_truncated) =
                                 crate::model::retained_payload(&p.payload);
                             let record = MqttRecord {
                                 seq: engine.next_seq(),
@@ -1203,6 +1301,7 @@ fn spawn_v4_loop(
                                 message_expiry_interval: None,
                                 subscription_identifier: None,
                                 payload_truncated,
+                                raw_bytes,
                             };
                             engine.log(
                                 &id, LogLevel::Info, "publish_received",
@@ -1213,6 +1312,9 @@ fn spawn_v4_loop(
                             connected.store(ack.code == rv4::ConnectReturnCode::Success, Ordering::SeqCst);
                             if ack.code == rv4::ConnectReturnCode::Success {
                                 first_connect = false;
+                                // 重连成功后清零计数：max_reconnect_times 限流的是
+                                // 「连续失败次数」，不能把历史错误累计进来
+                                reconnect_attempts = 0;
                                 engine.log(&id, LogLevel::Info, "connack",
                                     format!("连接成功 (session_present: {})", ack.session_present), None);
                                 engine.emit(EngineEvent::Status {
@@ -1229,7 +1331,8 @@ fn spawn_v4_loop(
                                     connection_id: id.clone(),
                                     status: ConnectionStatus::Error,
                                     error: Some(format!("{:?}", ack.code)),
-                                    reason_code: Some(1),
+                                    // 上报真实的 CONNACK 拒绝码，不再硬编码为 1
+                                    reason_code: Some(ack.code as u8),
                                     session_present: Some(ack.session_present),
                                 });
                                 break;
@@ -1294,7 +1397,12 @@ fn spawn_v4_loop(
                             reconnect_attempts += 1;
                             engine.log(&id, LogLevel::Warn, "connection_error",
                                 format!("连接错误，2 秒后重连（第 {reconnect_attempts} 次）: {e}"), None);
-                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            // 退避等待也必须可取消：否则 close() 的取消信号最长
+                            // 2 秒不可见，期间会对用户已关闭的连接继续重连。
+                            tokio::select! {
+                                _ = cancel_rx.changed() => break,
+                                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                            }
                         }
                     }
                 }
@@ -1304,6 +1412,7 @@ fn spawn_v4_loop(
                 }
             }
         }
-        engine.conns.lock().ok().and_then(|mut m| m.remove(&id));
+        // 仅当 map 中仍是本代句柄时才移除，避免误删重连后的新句柄
+        engine.remove_handle_if(&id, generation);
     });
 }

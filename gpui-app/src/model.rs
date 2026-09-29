@@ -84,7 +84,7 @@ impl TransportKind {
 
 
 /// MQTT 5 遗嘱消息（3.1.1 下忽略 v5 专属属性）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LastWill {
     pub topic: String,
     pub payload: String,
@@ -97,7 +97,7 @@ pub struct LastWill {
 }
 
 /// SSL/TLS 自定义配置（CA、双向认证、跳过校验）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SslConfig {
     /// 自定义 CA 文件路径（PEM），作为系统根证书的补充
     #[serde(default)]
@@ -250,15 +250,21 @@ impl ConnectionConfig {
 
     /// 与另一份配置相比，影响 broker 会话建立的关键参数是否变化。
     /// 这些字段改动只有在重新建立连接后才会生效，用于提示用户重连。
+    /// WS 路径、遗嘱、TLS 配置、keep_alive 同样随 CONNECT 报文一次性生效，
+    /// 必须纳入比较。
     pub fn session_params_changed(&self, other: &ConnectionConfig) -> bool {
         self.host != other.host
             || self.port != other.port
+            || self.path != other.path
             || self.transport != other.transport
             || self.protocol != other.protocol
             || self.client_id != other.client_id
             || self.username != other.username
             || self.password != other.password
             || self.clean_start != other.clean_start
+            || self.keep_alive != other.keep_alive
+            || self.last_will != other.last_will
+            || self.ssl != other.ssl
     }
 }
 
@@ -398,6 +404,11 @@ impl PayloadFormat {
                 if !cleaned.len().is_multiple_of(2) {
                     return Err("Hex 长度必须为偶数（每两个字符一个字节）".into());
                 }
+                // 必须先做全字节校验：长度检查按字节计数，多字节字符（如中文）
+                // 可凑成偶数字节，直接按字节索引切片会落在字符边界内而 panic。
+                if !cleaned.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err("Hex 解码失败: 含非十六进制字符".into());
+                }
                 (0..cleaned.len())
                     .step_by(2)
                     .map(|i| {
@@ -435,6 +446,9 @@ pub struct MqttRecord {
     pub subscription_identifier: Option<u32>,
     /// payload 超过 [`MAX_PAYLOAD_RETAIN`] 被截断
     pub payload_truncated: bool,
+    /// 非文本负载的原始字节（合法 UTF-8 时为 None）。文本化会失真
+    /// （非法字节被替换为 U+FFFD），详情面板的 Hex/Base64 需要真实报文。
+    pub raw_bytes: Option<Arc<[u8]>>,
 }
 
 /// 消息历史中单条 payload 的保留上限。超限截断，避免个别大报文
@@ -442,20 +456,27 @@ pub struct MqttRecord {
 pub const MAX_PAYLOAD_RETAIN: usize = 256 * 1024;
 
 /// 把原始 payload 字节转成用于历史记录的共享文本，超限截断。
-/// 返回 (Arc<str>, 是否截断)。截断时回退到 UTF-8 字符边界。
-pub fn retained_payload(raw: &[u8]) -> (Arc<str>, bool) {
-    if raw.len() <= MAX_PAYLOAD_RETAIN {
-        (Arc::from(String::from_utf8_lossy(raw).as_ref()), false)
-    } else {
+/// 返回 (文本, 非文本时的原始字节, 是否截断)。截断时回退到 UTF-8 字符边界。
+///
+/// 仅当文本化会失真（非合法 UTF-8，字节被替换为 U+FFFD）时才保留原始
+/// 字节（同样受 [`MAX_PAYLOAD_RETAIN`] 限制）；纯文本负载零额外开销。
+pub fn retained_payload(raw: &[u8]) -> (Arc<str>, Option<Arc<[u8]>>, bool) {
+    let truncated = raw.len() > MAX_PAYLOAD_RETAIN;
+    let text_part = if truncated {
         let mut end = MAX_PAYLOAD_RETAIN;
         while end > 0 && (raw[end] & 0xC0) == 0x80 {
             end -= 1;
         }
-        (
-            Arc::from(String::from_utf8_lossy(&raw[..end]).as_ref()),
-            true,
-        )
-    }
+        &raw[..end]
+    } else {
+        raw
+    };
+    let raw_bytes = match std::str::from_utf8(text_part) {
+        Ok(_) => None,
+        Err(_) => Some(Arc::from(text_part.to_vec())),
+    };
+    let text: Arc<str> = Arc::from(String::from_utf8_lossy(text_part).as_ref());
+    (text, raw_bytes, truncated)
 }
 
 // ─── 发布参数 / 发布预设 ──────────────────────────────────────────────────────
@@ -897,13 +918,14 @@ mod tests {
     #[test]
     fn retained_payload_caps_and_preserves_utf8() {
         let small = b"hello";
-        let (p, trunc) = retained_payload(small);
+        let (p, raw, trunc) = retained_payload(small);
         assert_eq!(&*p, "hello");
+        assert!(raw.is_none(), "合法 UTF-8 不保留原始字节");
         assert!(!trunc);
 
         // 中文每字符 3 字节，让上限落在字符中间（256K 不是 3 的倍数）
         let big: Vec<u8> = "中".repeat(MAX_PAYLOAD_RETAIN).into_bytes();
-        let (p, trunc) = retained_payload(&big);
+        let (p, _, trunc) = retained_payload(&big);
         assert!(trunc, "超过上限必须截断");
         assert!(p.len() <= MAX_PAYLOAD_RETAIN);
         assert_eq!(p.chars().last(), Some('中'), "不能切坏 UTF-8 字符");
@@ -914,7 +936,53 @@ mod tests {
 
         // 恰好上限不截断
         let exact = vec![b'a'; MAX_PAYLOAD_RETAIN];
-        let (_, trunc) = retained_payload(&exact);
+        let (_, raw, trunc) = retained_payload(&exact);
         assert!(!trunc);
+        assert!(raw.is_none());
+    }
+
+    // 非文本负载：保留原始字节供 Hex/Base64 详情，文本侧 lossy 展示
+    #[test]
+    fn retained_payload_keeps_raw_bytes_for_binary() {
+        let binary = vec![0x00, 0xff, 0xfe, 0x01];
+        let (p, raw, trunc) = retained_payload(&binary);
+        assert!(!trunc);
+        assert_eq!(&*p, String::from_utf8_lossy(&binary));
+        let raw = raw.expect("非法 UTF-8 必须保留原始字节");
+        assert_eq!(&*raw, &binary);
+    }
+
+    // Hex 编码：多字节字符不得 panic（曾按字节切片落入字符边界内而崩溃）
+    #[test]
+    fn hex_encode_rejects_non_hex_without_panic() {
+        assert!(PayloadFormat::Hex.encode("deadBEEF").is_ok());
+        assert!(PayloadFormat::Hex.encode("de ad be ef").is_ok());
+        assert!(PayloadFormat::Hex.encode("abc").is_err(), "奇数长度报错");
+        assert!(PayloadFormat::Hex.encode("zz").is_err(), "非法字符报错");
+        // 偶数字节长度的多字节字符：修复前此处在字符边界内切片 panic
+        assert!(PayloadFormat::Hex.encode("中文").is_err());
+        assert!(PayloadFormat::Hex.encode("😀").is_err());
+    }
+
+    // 会话参数比较必须覆盖所有随 CONNECT 报文一次性生效的字段
+    #[test]
+    fn session_params_changed_covers_connect_time_fields() {
+        let a = ConnectionConfig::default();
+        let mut b = a.clone();
+        assert!(!a.session_params_changed(&b));
+
+        b.keep_alive = a.keep_alive + 1;
+        assert!(a.session_params_changed(&b), "keep_alive 改动应触发重连提示");
+        b = a.clone();
+
+        b.last_will = Some(LastWill {
+            topic: "w/t".into(),
+            ..Default::default()
+        });
+        assert!(a.session_params_changed(&b), "遗嘱改动应触发重连提示");
+        b = a.clone();
+
+        b.ssl.ca_file = "/tmp/ca.pem".into();
+        assert!(a.session_params_changed(&b), "TLS 配置改动应触发重连提示");
     }
 }

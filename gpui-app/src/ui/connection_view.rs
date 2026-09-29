@@ -699,6 +699,9 @@ impl ConnectionView {
             s.set_selected_index(Some(IndexPath::new(fmt_idx)), window, cx)
         });
         self.retain = params.retain;
+        // 同步模板变量面板：预设替换了模板，旧占位符行必须随之清理，
+        // 否则残留行仍会写回全局变量
+        self.sync_var_rows(window, cx);
         cx.notify();
     }
 }
@@ -1352,7 +1355,7 @@ impl ConnectionView {
 
         if expanded {
             let fmt = self.detail_format;
-            let detail_text = format_payload_detail(&record.payload, fmt);
+            let detail_text = format_payload_detail(&record.payload, record.raw_bytes.as_deref(), fmt);
             let mut details = v_flex().gap_1p5().pt_1();
 
             // 格式切换 + 复制按钮；stop_propagation 避免点击时又收起整行
@@ -1535,7 +1538,12 @@ impl ConnectionView {
         let dir = self.msg_dir;
         let sub_filter = self.sub_filter.clone();
         // 引用过滤 + 计数命中总数，仅克隆前 MAX_RENDERED_MESSAGES 条，避免全量拷贝
-        let (records, subs, matched_total): (Vec<MqttRecord>, Vec<Subscription>, usize) = self
+        let (records, subs, matched_total, total): (
+            Vec<MqttRecord>,
+            Vec<Subscription>,
+            usize,
+            usize,
+        ) = self
             .with_app(cx, |app| {
                 let subs: Vec<Subscription> = app
                     .subscriptions
@@ -1545,6 +1553,7 @@ impl ConnectionView {
                     .collect();
                 let mut matched = 0usize;
                 let mut records: Vec<MqttRecord> = Vec::new();
+                let total = app.messages.get(conn.as_str()).map_or(0, |m| m.len());
                 if let Some(m) = app.messages.get(conn.as_str()) {
                     for r in m.iter().rev() {
                         // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
@@ -1567,7 +1576,7 @@ impl ConnectionView {
                         }
                     }
                 }
-                (records, subs, matched)
+                (records, subs, matched, total)
             })
             .unwrap_or_default();
 
@@ -1722,7 +1731,9 @@ impl ConnectionView {
                     .child({
                         let weak = cx.weak_entity();
                         let clear_id = self.conn_id.clone();
-                        let empty = records.is_empty();
+                        // 清空针对连接的全部消息（非过滤结果）：
+                        // 禁用与否依据总数，过滤命中 0 条不应禁用
+                        let empty = total == 0;
                         Button::new(SharedString::from(format!("msg-clear-{}", self.conn_id)))
                             .icon(IconName::Eraser)
                             .label("清空")
@@ -2577,22 +2588,24 @@ fn pick_subscription_color(subs: &[Subscription], topic: &str) -> Option<f32> {
 }
 
 /// 展开详情里的 payload 渲染：自动 = 合法 JSON 美化，否则原文。
-fn format_payload_detail(payload: &str, format: DetailFormat) -> String {
+/// Hex/Base64 优先使用入库保留的原始字节——非文本负载的 lossy 文本
+/// 已把非法字节替换为 U+FFFD，按文本字节展示会与线上报文不符。
+fn format_payload_detail(payload: &str, raw: Option<&[u8]>, format: DetailFormat) -> String {
     match format {
         DetailFormat::Auto => serde_json::from_str::<serde_json::Value>(payload)
             .ok()
             .and_then(|v| serde_json::to_string_pretty(&v).ok())
             .unwrap_or_else(|| payload.to_string()),
         DetailFormat::Text => payload.to_string(),
-        DetailFormat::Hex => payload
-            .as_bytes()
+        DetailFormat::Hex => raw
+            .unwrap_or(payload.as_bytes())
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
             .join(" "),
         DetailFormat::Base64 => {
             use base64::Engine as _;
-            base64::engine::general_purpose::STANDARD.encode(payload.as_bytes())
+            base64::engine::general_purpose::STANDARD.encode(raw.unwrap_or(payload.as_bytes()))
         }
     }
 }
@@ -2663,8 +2676,13 @@ fn contains_ignore_case(hay: &str, needle: &str) -> bool {
     if hay.contains(needle) {
         return true;
     }
-    // 原文没有任何大写字符时，小写化不会改变匹配结果，直接判否
-    if !hay.chars().any(|c| c.is_uppercase()) {
+    // 纯 ASCII 快速路径：双方均为 ASCII 且原文无 ASCII 大写时，
+    // 小写化恒等，可直接判否。不能用 is_uppercase 判断——个别
+    // 小写字符（如 U+1E9B）的小写映射并不等于自身。
+    if needle.is_ascii()
+        && hay.is_ascii()
+        && !hay.bytes().any(|b| b.is_ascii_uppercase())
+    {
         return false;
     }
     hay.to_lowercase().contains(needle)

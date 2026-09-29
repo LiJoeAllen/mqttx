@@ -100,7 +100,7 @@ pub struct MqttXApp {
     /// 原生文件对话框进行中标记（对话框阻塞后台线程，防止重复弹出）
     file_dialog_open: bool,
     /// 按日期缓存的日志文件句柄（日期, 文件），避免每条日志都重新打开文件
-    log_file: Option<(String, std::fs::File)>,
+    log_file: Option<(String, std::io::BufWriter<std::fs::File>)>,
     /// 系统外观变化订阅：设置为「跟随系统」时重应用主题，随实体存活
     _appearance_obs: gpui_kit::Subscription,
 }
@@ -137,49 +137,85 @@ impl MqttXApp {
             let rx = engine.run_blocking(update::check_and_download);
             let weak = cx.entity().downgrade();
             cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
-                if let Ok(Ok(Some(staged))) = rx.recv().await {
-                    weak.update_in(cx, |_app, window, cx| {
+                match rx.recv().await {
+                    Ok(Ok(Some(staged))) => {
+                        weak.update_in(cx, |_app, window, cx| {
                         window.open_dialog(cx, move |dialog, _, _cx| {
                             let staged = staged.clone();
+                            let staged_skip = staged.clone();
+                            let ver = staged.version.clone();
                             dialog
-                                .w(px(440.))
-                                .title("更新就绪")
-                                .child(
-                                    v_flex().gap_2().child(
-                                        div().text_sm().child(format!(
-                                            "新版本 v{} 已下载完成（已通过 sha256 校验）。",
-                                            staged.version
-                                        )),
-                                    ),
-                                )
-                                .footer(
-                                    h_flex()
-                                        .gap_2()
-                                        .justify_end()
-                                        .w_full()
-                                        .child(
-                                            Button::new("upd-later")
-                                                .label("下次启动安装")
-                                                .outline()
-                                                .on_click(|_, window, cx| {
-                                                    window.close_dialog(cx)
-                                                }),
-                                        )
-                                        .child(
-                                            Button::new("upd-now")
-                                                .label("立即安装")
-                                                .primary()
-                                                .on_click(move |_, window, cx| {
-                                                    window.close_dialog(cx);
-                                                    if update::install_staged(&staged).is_ok() {
-                                                        cx.quit();
-                                                    }
-                                                }),
+                                    .w(px(440.))
+                                    .title("更新就绪")
+                                    .child(
+                                        v_flex().gap_2().child(
+                                            div().text_sm().child(format!(
+                                                "新版本 v{} 已下载完成（已通过 sha256 校验）。",
+                                                staged.version
+                                            )),
                                         ),
-                                )
-                        });
-                    })
-                    .ok();
+                                    )
+                                    .footer(
+                                        h_flex()
+                                            .gap_2()
+                                            .justify_end()
+                                            .w_full()
+                                            .child(
+                                                Button::new("upd-skip")
+                                                    .label("暂不更新")
+                                                    .outline()
+                                                    .on_click(move |_, window, cx| {
+                                                        // 拒绝本次更新：删除暂存包，
+                                                        // 下次启动不会被自动安装
+                                                        update::discard_staged(&staged_skip);
+                                                        window.close_dialog(cx);
+                                                    }),
+                                            )
+                                            .child(
+                                                Button::new("upd-later")
+                                                    .label("下次启动安装")
+                                                    .outline()
+                                                    .on_click(move |_, window, cx| {
+                                                        // 同意标记：启动时据此自动安装；
+                                                        // 用户跳过对话框则不会强制升级
+                                                        update::mark_install_consent(&ver);
+                                                        window.close_dialog(cx);
+                                                    }),
+                                            )
+                                            .child(
+                                                Button::new("upd-now")
+                                                    .label("立即安装")
+                                                    .primary()
+                                                    .on_click(move |_, window, cx| {
+                                                        window.close_dialog(cx);
+                                                        if let Err(e) =
+                                                            update::install_staged(&staged)
+                                                        {
+                                                            window.push_notification(
+                                                                Notification::error(format!(
+                                                                    "安装失败：{e}"
+                                                                )),
+                                                                cx,
+                                                            );
+                                                        } else {
+                                                            cx.quit();
+                                                        }
+                                                    }),
+                                            ),
+                                    )
+                            });
+                        })
+                        .ok();
+                    }
+                    // 检查/下载失败不打扰用户，但也不能完全无声
+                    Ok(Err(e)) => {
+                        eprintln!("[app] 启动更新检查失败: {e}");
+                        sentry::capture_message(
+                            &format!("startup update check failed: {e}"),
+                            sentry::Level::Warning,
+                        );
+                    }
+                    _ => {}
                 }
             })
             .detach();
@@ -289,6 +325,12 @@ impl MqttXApp {
                 error,
                 ..
             } => {
+                // 引擎 close 与事件循环退出之间有窗口，删除连接后其排队
+                // 事件仍会送达：为已删除的连接重建状态/消息属于泄漏，
+                // 一律丢弃（删除时已主动 close）。
+                if !self.connections.iter().any(|c| c.id == connection_id) {
+                    return;
+                }
                 self.statuses.insert(connection_id.clone(), status);
                 match error {
                     Some(e) => {
@@ -308,6 +350,9 @@ impl MqttXApp {
             }
             EngineEvent::Message(mut record) => {
                 let id = record.connection_id.clone();
+                if !self.connections.iter().any(|c| c.id == id.as_ref()) {
+                    return;
+                }
                 record.seq = self.next_seq();
                 self.push_message(id.clone(), record);
                 if let Some(view) = self.views.get(id.as_ref()) {
@@ -322,8 +367,14 @@ impl MqttXApp {
                 retain,
                 content_type,
                 user_properties,
+                response_topic,
+                correlation_data,
+                message_expiry_interval,
             } => {
-                let (payload, payload_truncated) = retained_payload(&payload);
+                if !self.connections.iter().any(|c| c.id == connection_id) {
+                    return;
+                }
+                let (payload, raw_bytes, payload_truncated) = retained_payload(&payload);
                 let record = MqttRecord {
                     seq: self.next_seq(),
                     connection_id: Arc::from(connection_id.as_str()),
@@ -335,11 +386,12 @@ impl MqttXApp {
                     timestamp: chrono::Local::now().timestamp_millis(),
                     user_properties,
                     content_type,
-                    response_topic: None,
-                    correlation_data: None,
-                    message_expiry_interval: None,
+                    response_topic,
+                    correlation_data,
+                    message_expiry_interval,
                     subscription_identifier: None,
                     payload_truncated,
+                    raw_bytes,
                 };
                 self.push_message(Arc::from(connection_id.as_str()), record);
                 if let Some(view) = self.views.get(connection_id.as_str()) {
@@ -353,13 +405,29 @@ impl MqttXApp {
                 ok,
                 error,
             } => {
+                if !self.connections.iter().any(|c| c.id == connection_id) {
+                    return;
+                }
                 if ok {
-                    self.add_subscription(Subscription::new(connection_id.clone(), topic, qos));
-                } else if let Some(e) = error {
-                    window.push_notification(
-                        Notification::error(format!("订阅失败: {e}")),
-                        cx,
-                    );
+                    // 乐观更新已在发送前入库；这里只在订阅仍存在时同步 QoS，
+                    // 避免 SUBACK 前被删除的订阅被此事件用默认字段复活。
+                    if let Some(existing) = self.subscriptions.iter_mut().find(|s| {
+                        s.connection_id == connection_id && s.topic == topic
+                    }) {
+                        existing.qos = qos;
+                    }
+                } else {
+                    if let Some(e) = error {
+                        window.push_notification(
+                            Notification::error(format!("订阅失败: {e}")),
+                            cx,
+                        );
+                    }
+                    // broker 拒绝订阅：移除乐观插入的订阅行，与引擎状态保持一致
+                    // （不发 UNSUBSCRIBE——本就未订阅成功）
+                    self.subscriptions
+                        .retain(|s| !(s.connection_id == connection_id && s.topic == topic));
+                    self.storage.save_subscriptions(&self.subscriptions);
                 }
                 if let Some(view) = self.views.get(&connection_id) {
                     view.update(cx, |_, cx| cx.notify());
@@ -448,6 +516,8 @@ impl MqttXApp {
     }
 
     /// 打开（或复用按日缓存的）日志文件并追加一行。
+    /// 文件套 BufWriter：高频消息流下每条日志不再触发多次落盘 syscall；
+    /// 跨日重开/出错关句柄时随 drop 自动 flush。
     fn append_log_line(&mut self, entry: &LogEntry) -> std::io::Result<()> {
         use std::io::Write as _;
         use chrono::TimeZone as _;
@@ -469,7 +539,7 @@ impl MqttXApp {
                 .create(true)
                 .append(true)
                 .open(path)?;
-            self.log_file = Some((day, file));
+            self.log_file = Some((day, std::io::BufWriter::new(file)));
         }
         // 连接名查不到时回退为 id，保证行格式恒定
         let conn = self
@@ -547,6 +617,11 @@ impl MqttXApp {
     }
 
     pub fn toggle_connection(&self, cfg: &ConnectionConfig) {
+        // Connecting 期间 is_connected 恒为 false：防抖，双击/误触不会
+        // 并发两次 connect（会互相顶掉句柄并在 broker 侧形成重连风暴）
+        if self.statuses.get(&cfg.id) == Some(&ConnectionStatus::Connecting) {
+            return;
+        }
         if self.engine.is_connected(&cfg.id) {
             self.engine.close(&cfg.id, true);
         } else {
@@ -1273,7 +1348,7 @@ impl MqttXApp {
                 .filter(|c| c.group.as_deref().map(str::trim) == Some(name.as_str()))
                 .count();
             row = row.child(self.render_group_chip(
-                SharedString::from(format!("chip-{}", name)),
+                SharedString::from(format!("chip-g-{name}")),
                 format!("{name} {count}"),
                 GroupFilter::Named(name),
                 cx,
