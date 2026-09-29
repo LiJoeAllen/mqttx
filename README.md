@@ -38,26 +38,60 @@
 
 ## 目录结构
 
+每个文件与目录单一职责；模块门面（`mod.rs`）只做聚合导出与再分派。
+
 ```
 gpui-app/
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs          # 入口：创建窗口、挂载 gpui-kit Root
-│   ├── lib.rs           # 库导出（模型/引擎/UI 可被集成测试复用）
-│   ├── model.rs         # 数据模型（连接/订阅/消息/预设/变量/设置/模板渲染）
-│   ├── mqtt.rs          # MQTT 引擎：多连接生命周期、TLS/WS、重连、事件通道
-│   ├── store.rs         # JSON 持久化（%APPDATA%/MQTTX-GPUI）
-│   ├── aliyun.rs        # 阿里云 IoT 签名与连接生成
+│   ├── main.rs              # 入口：Sentry 初始化、创建窗口、挂载 gpui-kit Root
+│   ├── lib.rs               # 库导出（模型/引擎/UI 可被集成测试复用）
+│   ├── model/               # 数据模型（纯数据层，不依赖 GPUI）
+│   │   ├── mod.rs           #   门面：聚合导出 + 模型测试
+│   │   ├── connection.rs    #   连接配置：协议/传输/遗嘱/TLS/会话参数
+│   │   ├── subscription.rs  #   订阅条目与订阅选项
+│   │   ├── message.rs       #   消息记录 + 条数/字节双预算环形缓冲
+│   │   ├── publish.rs       #   发布参数与发布预设
+│   │   ├── variable.rs      #   全局变量与 {{占位符}} 模板渲染
+│   │   ├── log.rs           #   运行日志级别与条目
+│   │   └── settings.rs      #   应用设置与主题偏好
+│   ├── mqtt/                # MQTT 引擎（独立 tokio runtime）
+│   │   ├── mod.rs           #   门面：EngineEvent / MqttEngine 连接生命周期
+│   │   ├── tls.rs           #   rustls 配置与跳过校验
+│   │   ├── v5.rs            #   MQTT 5.0 客户端构建与事件循环
+│   │   └── v4.rs            #   MQTT 3.1.1 客户端构建与事件循环
+│   ├── update/              # OTA 自更新（Gitea Release 源）
+│   │   ├── mod.rs           #   门面：版本比较、资产命名约定
+│   │   ├── check.rs         #   检查最新版本与资产挑选
+│   │   └── install.rs       #   7z 下载暂存、sha256 校验、自替换安装
+│   ├── store.rs             # JSON 持久化（损坏备份与 fsync）
+│   ├── sysmon.rs            # 自身进程资源采样（CPU/内存/线程/句柄）
+│   ├── platform.rs          # 平台窗口操作（Windows 置顶）
+│   ├── aliyun.rs            # 阿里云 IoT 签名与连接生成
 │   └── ui/
-│       ├── app.rs              # 应用外壳：标题栏/侧边栏/标签页/事件泵
-│       ├── connection_form.rs  # 新建/编辑连接对话框
-│       ├── connection_view.rs  # 连接工作区：订阅、消息流、发布面板、日志
-│       ├── aliyun_dialog.rs    # 阿里云设备对话框
-│       ├── variables_dialog.rs # 全局变量对话框
-│       ├── settings_dialog.rs  # 设置对话框
-│       └── widgets.rs          # 复用组件（枚举下拉、键值对编辑器等）
+│       ├── mod.rs           # 界面层导出
+│       ├── app/             # 应用外壳
+│       │   ├── mod.rs       #   MqttXApp 状态、初始化与渲染分派
+│       │   ├── events.rs    #   引擎事件 → 应用状态（消息/日志缓冲）
+│       │   ├── actions.rs   #   连接/订阅/预设/设置等用户动作
+│       │   ├── io.rs        #   连接配置导入导出
+│       │   ├── theme.rs     #   Linear 风格主题应用
+│       │   ├── titlebar.rs  #   标题栏（置顶钉子/主题切换/动作菜单）
+│       │   ├── sidebar.rs   #   侧边栏（搜索/分组/连接列表）
+│       │   └── main_area.rs #   标签页栏与内容装配
+│       ├── connection_view/ # 连接工作区
+│       │   ├── mod.rs       #   ConnectionView 状态与渲染分派
+│       │   ├── subscribe.rs #   订阅表单/列表
+│       │   ├── messages.rs  #   消息流、单条消息行与日志
+│       │   ├── publish.rs   #   发布表单与发布预设
+│       │   ├── vars.rs      #   模板变量面板
+│       │   └── util.rs      #   topic 匹配/格式化纯函数
+│       ├── connection_form.rs  # 新建/编辑连接表单
+│       ├── dialogs/         # 模态对话框集合（设置/资源监控/发布预设/阿里云/变量）
+│       ├── widgets/         # 复用小组件（枚举下拉/键值对编辑器/字段行/状态指示）
+│       └── logo.rs          # 品牌图标绘制
 └── tests/
-    └── engine_live.rs   # 真实 broker 端到端测试（默认 ignored）
+    └── engine_live.rs       # 真实 broker 端到端测试（默认 ignored）
 ```
 
 ## 构建与运行

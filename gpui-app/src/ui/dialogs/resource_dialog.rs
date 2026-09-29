@@ -49,7 +49,7 @@ pub struct ResourceMonitorDialog {
 }
 
 impl ResourceMonitorDialog {
-    fn new(app: Entity<MqttXApp>, cx: &mut Context<Self>) -> Self {
+    fn new(app: Entity<MqttXApp>, _cx: &mut Context<Self>) -> Self {
         Self {
             app,
             sampler: Sampler::new(),
