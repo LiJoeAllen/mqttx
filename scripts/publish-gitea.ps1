@@ -48,11 +48,38 @@ try {
 function Die($msg) { Write-Error "错误: $msg"; exit 1 }
 
 # ── 必填配置 ────────────────────────────────────────────────────────────────
+# 地址：优先环境变量，否则从 git remote origin 推断
 $GiteaUrl = $env:GITEA_URL
-$Token = $env:GITEA_TOKEN
-if (-not $GiteaUrl) { Die "缺少环境变量 GITEA_URL（如 https://gitea.example.com）" }
-if (-not $Token) { Die "缺少环境变量 GITEA_TOKEN（需 package 写权限）" }
+if (-not $GiteaUrl) {
+    $remote = git -C $Root remote get-url origin 2>$null
+    if ($remote) {
+        if ($remote -match "://") { $hostPart = (($remote -split "://", 2)[-1] -split "/", 2)[0] }
+        else { $hostPart = ($remote -split ":", 2)[0] }
+        $hostPart = ($hostPart -split "@")[-1]
+        if ($hostPart) { $GiteaUrl = "https://$hostPart" }
+    }
+}
+if (-not $GiteaUrl) { Die "缺少环境变量 GITEA_URL（如 https://gitea.example.com），且无法从 git remote 推断" }
 $GiteaUrl = $GiteaUrl.TrimEnd("/")
+
+# 令牌：优先环境变量，否则取 Git Credential Manager 中同一主机的凭证
+# （即推送用的那条 OAuth 凭证，无需另行创建 API token）
+$Token = $env:GITEA_TOKEN
+if (-not $Token) {
+    try {
+        $env:GIT_TERMINAL_PROMPT = "0"
+        $env:GCM_INTERACTIVE = "Never"
+        $credHost = $GiteaUrl -replace "^https?://", ""
+        $raw = @("protocol=https", "host=$credHost", "") | git credential fill 2>$null
+        $Token = ($raw | Where-Object { $_ -like "password=*" }) -replace "^password=", ""
+    }
+    catch { $Token = $null }
+    finally {
+        Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+        Remove-Item Env:GCM_INTERACTIVE -ErrorAction SilentlyContinue
+    }
+}
+if (-not $Token) { Die "缺少环境变量 GITEA_TOKEN，且无法从 git credential store 自动获取" }
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Pkg = if ($PackageName) { $PackageName } elseif ($env:GITEA_PKG) { $env:GITEA_PKG } else { "mqttx" }

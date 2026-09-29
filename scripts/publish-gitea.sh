@@ -20,11 +20,29 @@ set -euo pipefail
 
 die() { echo "错误: $*" >&2; exit 1; }
 
-[ -n "${GITEA_URL:-}" ] || die "缺少 GITEA_URL"
-[ -n "${GITEA_TOKEN:-}" ] || die "缺少 GITEA_TOKEN"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ── 地址：优先环境变量，否则从 git remote origin 推断 ────────────────────────
+if [ -z "${GITEA_URL:-}" ]; then
+  remote_url="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  case "$remote_url" in
+    *://*) host="${remote_url#*://}"; host="${host%%/*}" ;;
+    *:*)   host="${remote_url%%:*}" ;;
+    *)     host="" ;;
+  esac
+  host="${host##*@}"  # 去掉 git@user@ 前缀
+  [ -n "$host" ] && GITEA_URL="https://$host"
+fi
+[ -n "${GITEA_URL:-}" ] || die "缺少 GITEA_URL（或配置 git remote origin）"
 GITEA_URL="${GITEA_URL%/}"
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# ── 令牌：优先环境变量，否则取 Git Credential Manager 中同一主机的凭证 ────────
+if [ -z "${GITEA_TOKEN:-}" ]; then
+  GITEA_TOKEN="$(printf 'protocol=https\nhost=%s\n\n' "${GITEA_URL#*://}" \
+    | GCM_INTERACTIVE=Never GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null \
+    | sed -n 's/^password=//p')"
+  [ -n "${GITEA_TOKEN:-}" ] || die "缺少 GITEA_TOKEN，且无法从 git credential store 自动获取"
+fi
 PKG="${GITEA_PKG:-mqttx}"
 
 # ── owner/repo：优先环境变量，其次从 git remote 推断 ─────────────────────────
