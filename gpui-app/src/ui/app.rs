@@ -225,6 +225,15 @@ impl MqttXApp {
 
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索连接…"));
 
+        // 自验后门：MQTTX_OPEN_RESMON=1 启动时直接打开资源监控
+        // （与 MQTTX_VERSION_OVERRIDE 同类的测试入口，供自动化验证 UI）。
+        // defer 到 effects 阶段执行，避免在 MqttXApp 构造借用内嵌套打开
+        if std::env::var("MQTTX_OPEN_RESMON").as_deref() == Ok("1") {
+            cx.defer_in(window, move |_, window, cx| {
+                crate::ui::resource_dialog::open(cx.entity(), window, cx);
+            });
+        }
+
         // 「跟随系统」：监听系统外观（深浅色）变化，仅在设置为 System 时重应用主题。
         // 订阅需随实体存活，dropped 即取消，故存入字段。
         let appearance_weak = cx.entity().downgrade();
@@ -1059,6 +1068,33 @@ impl MqttXApp {
                                 .small()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_connection_form(None, window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("pin-window")
+                                .icon(if self.pinned {
+                                    IconName::PinOff
+                                } else {
+                                    IconName::Pin
+                                })
+                                .ghost()
+                                .small()
+                                .tooltip(if self.pinned {
+                                    "取消窗口置顶"
+                                } else {
+                                    "窗口置顶"
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    let next = !this.pinned;
+                                    if crate::sysmon::set_topmost(window, next) {
+                                        this.pinned = next;
+                                        cx.notify();
+                                    } else {
+                                        window.push_notification(
+                                            Notification::error("置顶操作失败"),
+                                            cx,
+                                        );
+                                    }
                                 })),
                         )
                         .child(self.render_theme_toggle(cx))
