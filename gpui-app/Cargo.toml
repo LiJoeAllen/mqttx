@@ -1,6 +1,6 @@
 [package]
 name = "mqttx-desktop"
-version = "1.0.4"
+version = "1.0.5"
 edition.workspace = true
 description = "MQTT X —— 基于 GPUI 的跨平台 MQTT 调试客户端"
 default-run = "mqttx"
