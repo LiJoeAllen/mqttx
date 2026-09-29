@@ -1,0 +1,121 @@
+//! 更新检查：访问 Gitea Release API，比较版本并挑选本平台资产。
+
+use super::*;
+
+pub(super) fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        // 整体上限：防止慢速滴流的下载无限占用阻塞线程
+        .timeout(std::time::Duration::from_secs(10 * 60))
+        .timeout_connect(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .timeout_read(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+}
+
+pub(super) fn http_get_json(url: &str) -> Result<serde_json::Value, String> {
+    let resp = agent()
+        .get(url)
+        .call()
+        .map_err(|e| format!("请求失败: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("解析响应失败: {e}"))
+}
+
+
+pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Option<String>)> {
+    let assets = rel.get("assets")?.as_array()?;
+    let want_ext = if cfg!(windows) { ".exe" } else { "" };
+    let triple = platform_triple();
+
+    // (后缀过滤器, 说明)：第一轮 7z，第二轮裸二进制
+    for suffix in [".7z", want_ext] {
+        for a in assets {
+            let Some(name) = a.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            if !name.contains(triple)
+                || !name.ends_with(suffix)
+                || name.ends_with(".sha256")
+            {
+                continue;
+            }
+            // 7z 轮要排除裸二进制（windows 裸 exe 不以 .7z 结尾，天然互斥）
+            if suffix == ".7z" && !name.ends_with(&format!("{want_ext}.7z")) && !want_ext.is_empty()
+            {
+                continue;
+            }
+            let Some(url) = a.get("browser_download_url").and_then(|u| u.as_str()) else {
+                continue;
+            };
+            let url = url.to_string();
+            let size = a.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+            // 侧车命名：<asset>.sha256
+            let sha = assets
+                .iter()
+                .find(|b| {
+                    b.get("name").and_then(|n| n.as_str()) == Some(&format!("{name}.sha256"))
+                })
+                .and_then(|b| b.get("browser_download_url"))
+                .and_then(|u| u.as_str())
+                .map(|s| s.to_string());
+            return Some((name.to_string(), url, size, sha));
+        }
+    }
+    None
+}
+
+/// 检查更新。返回 Ok(None) 表示已是最新。
+pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
+    let base = format!("{GITEA_URL}/api/v1/repos/{PKG_OWNER}/{PKG_REPO}/releases");
+    // 优先 latest 端点；旧版 Gitea 没有时回退到列表取第一个非草稿/预发布
+    let rel = match http_get_json(&format!("{base}/latest")) {
+        Ok(v) => v,
+        Err(_) => {
+            let list = http_get_json(&format!("{base}?limit=5"))?;
+            let first = list
+                .as_array()
+                .and_then(|l| l.iter().find(|r| {
+                    r.get("draft").and_then(|d| d.as_bool()) == Some(false)
+                        && r.get("prerelease").and_then(|d| d.as_bool()) == Some(false)
+                }))
+                .ok_or_else(|| "没有可用 Release".to_string())?;
+            first.clone()
+        }
+    };
+
+    let tag = rel
+        .get("tag_name")
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| "Release 缺少 tag_name".to_string())?;
+    if !is_newer(tag, current_version()) {
+        return Ok(None);
+    }
+    let Some((name, url, size, sha)) = pick_assets(&rel) else {
+        return Err(format!("Release {tag} 没有当前平台（{}）的产物", platform_triple()));
+    };
+    Ok(Some(UpdateInfo {
+        version: tag.trim_start_matches('v').to_string(),
+        notes: rel
+            .get("body")
+            .and_then(|b| b.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        asset_name: name,
+        asset_url: url,
+        sha256_url: sha,
+        size,
+    }))
+}
+
+/// 返回 Ok(None) 表示已是最新；错误仅记录、不打扰用户。
+pub fn check_and_download() -> Result<Option<StagedUpdate>, String> {
+    let Some(info) = check_latest()? else {
+        return Ok(None);
+    };
+    // 已暂存同版本则不重复下载
+    if let Some(staged) = load_staged()
+        && staged.version == info.version
+    {
+        return Ok(Some(staged));
+    }
+    download_and_stage(&info, &|_, _| {}).map(Some)
+}

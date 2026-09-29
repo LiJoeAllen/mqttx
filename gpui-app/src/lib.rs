@@ -3,6 +3,7 @@
 pub mod aliyun;
 pub mod model;
 pub mod mqtt;
+pub mod platform;
 pub mod store;
 pub mod sysmon;
 pub mod ui;
