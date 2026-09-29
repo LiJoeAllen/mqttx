@@ -40,7 +40,7 @@ use crate::ui::{
 const MAX_LOGS: usize = 3000;
 
 // 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
-gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections]);
+gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor]);
 
 /// 侧边栏分组过滤；chips 只做列表过滤，分组重命名/删除通过编辑连接的分组字段完成。
 #[derive(Clone, PartialEq, Eq)]
@@ -267,6 +267,7 @@ impl MqttXApp {
             KeyBinding::new("ctrl-,", OpenSettings, None),
             KeyBinding::new("ctrl-shift-e", ExportConnections, None),
             KeyBinding::new("ctrl-shift-i", ImportConnections, None),
+            KeyBinding::new("ctrl-shift-r", OpenResourceMonitor, None),
         ]);
         let weak = cx.entity().downgrade();
         // Context 上有同名 on_action（绘制期注册），这里必须走 App 的全局注册
@@ -287,6 +288,16 @@ impl MqttXApp {
                     return;
                 }
                 crate::ui::settings_dialog::open(entity, window, cx);
+            });
+        });
+        let weak = cx.entity().downgrade();
+        App::on_action::<OpenResourceMonitor>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                if window.has_active_dialog(cx) {
+                    return;
+                }
+                crate::ui::resource_dialog::open(entity, window, cx);
             });
         });
         let weak = cx.entity().downgrade();
@@ -653,6 +664,11 @@ impl MqttXApp {
             crate::model::render_will_templates(&mut cfg, &self.variables);
             self.engine.connect(cfg);
         }
+    }
+
+    /// 打开的标签数（资源监控展示用）。
+    pub fn open_tab_count(&self) -> usize {
+        self.open_tabs.len()
     }
 
     pub fn open_tab(&mut self, conn_id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1133,6 +1149,13 @@ impl MqttXApp {
                                         move |_, window, cx| {
                                             if let Some(entity) = w2.upgrade() {
                                                 crate::ui::variables_dialog::open(entity, window, cx);
+                                            }
+                                        },
+                                    ))
+                                    .item(PopupMenuItem::new("资源监控").on_click(
+                                        move |_, window, cx| {
+                                            if let Some(entity) = w6.upgrade() {
+                                                crate::ui::resource_dialog::open(entity, window, cx);
                                             }
                                         },
                                     ))
