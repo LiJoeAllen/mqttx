@@ -180,11 +180,24 @@ impl KvEditor {
     }
 
     pub fn pairs(&self, cx: &App) -> Vec<(String, String)> {
-        self.rows
+        // key 统一 trim 并去重（保留最后一条）：否则带首尾空白的 key
+        // 永远无法被 {{key}} 模板引用，重复 key 也只有一条能生效。
+        let mut out: Vec<(String, String)> = Vec::new();
+        for (k, v) in self
+            .rows
             .iter()
             .map(|(k, v)| (k.read(cx).value().to_string(), v.read(cx).value().to_string()))
-            .filter(|(k, _)| !k.trim().is_empty())
-            .collect()
+        {
+            let k = k.trim().to_string();
+            if k.is_empty() {
+                continue;
+            }
+            match out.iter_mut().find(|(ek, _)| *ek == k) {
+                Some(slot) => slot.1 = v,
+                None => out.push((k, v)),
+            }
+        }
+        out
     }
 }
 

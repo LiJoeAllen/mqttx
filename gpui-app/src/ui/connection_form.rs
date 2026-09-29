@@ -253,10 +253,17 @@ impl ConnectionForm {
                     if last_transport.get() == idx {
                         return;
                     }
+                    // 端口只在仍是某个默认端口（而非用户自定义值）时才跟随切换：
+                    // 否则 WSS:9443 → TCP → WSS 的往返会把 9443 静默丢失
+                    let current = port_for_sub.read(cx).value().trim().parse::<u16>().ok();
+                    let is_default = matches!(current, Some(p) if
+                        TransportKind::ALL.iter().any(|k| k.default_port() == p));
                     last_transport.set(idx);
-                    port_for_sub.update(cx, |p, cx| {
-                        p.set_value(kind.default_port().to_string(), window, cx);
-                    });
+                    if is_default {
+                        port_for_sub.update(cx, |p, cx| {
+                            p.set_value(kind.default_port().to_string(), window, cx);
+                        });
+                    }
                     cx.notify();
                 }
             },
