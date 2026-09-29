@@ -1765,7 +1765,7 @@ impl ConnectionView {
                                                 view.detail_format = DetailFormat::Auto;
                                                 if let Some(app) = view.app.upgrade() {
                                                     app.update(cx, |app, cx| {
-                                                        app.messages.remove(clear_id.as_str());
+                                                        app.clear_messages(&clear_id);
                                                         cx.notify();
                                                     });
                                                 }

@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use std::collections::VecDeque;
+
 // ─── 连接配置 ────────────────────────────────────────────────────────────────
 
 /// MQTT 协议版本。
@@ -451,9 +453,70 @@ pub struct MqttRecord {
     pub raw_bytes: Option<Arc<[u8]>>,
 }
 
+impl MqttRecord {
+    /// 该记录保留的主要字节数（文本 + 原始字节），用于内存预算驱逐。
+    /// 其余字段（主题/属性等）相对小一个数量级，不计入。
+    pub fn retained_bytes(&self) -> usize {
+        self.payload.len() + self.raw_bytes.as_ref().map_or(0, |b| b.len())
+    }
+}
+
+/// 单连接的消息环形缓冲：条数上限 + [`MAX_CONNECTION_MESSAGE_BYTES`]
+/// 字节上限双重驱逐（从最旧开始，均摊 O(1)）。
+pub struct MessageRing {
+    queue: VecDeque<MqttRecord>,
+    bytes: usize,
+}
+
+impl MessageRing {
+    pub fn new(max_count: usize) -> Self {
+        Self {
+            // 预分配按较小值钳制：设置上限十万条时不一次性分配过大
+            queue: VecDeque::with_capacity(max_count.clamp(16, 512)),
+            bytes: 0,
+        }
+    }
+
+    /// `max_count` 每次传入以便运行时调整设置后即时生效。
+    /// 设置层已校验 ≥100，这里只防 0 值导致缓冲被清空。
+    pub fn push(&mut self, record: MqttRecord, max_count: usize) {
+        let max_count = max_count.max(1);
+        self.bytes += record.retained_bytes();
+        while self.queue.len() >= max_count
+            || (self.bytes > MAX_CONNECTION_MESSAGE_BYTES && self.queue.len() > 1)
+        {
+            let Some(old) = self.queue.pop_front() else { break };
+            self.bytes -= old.retained_bytes();
+        }
+        self.queue.push_back(record);
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
+    /// 当前保留的字节数（payload + 原始字节）。
+    pub fn retained_bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn iter(&self) -> std::collections::vec_deque::Iter<'_, MqttRecord> {
+        self.queue.iter()
+    }
+}
+
 /// 消息历史中单条 payload 的保留上限。超限截断，避免个别大报文
 /// 长期占据历史缓冲（MQTTX 亦有类似限制）。
-pub const MAX_PAYLOAD_RETAIN: usize = 256 * 1024;
+pub const MAX_PAYLOAD_RETAIN: usize = 128 * 1024;
+
+/// 每连接消息历史的字节预算（payload + 原始字节）。条数上限
+/// （max_messages）在大报文流下形同虚设（2000 条 × 128KB ≈ 256MB），
+/// 超出预算后从最旧开始驱逐，保证单连接消息内存有上界。
+pub const MAX_CONNECTION_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
 /// 把原始 payload 字节转成用于历史记录的共享文本，超限截断。
 /// 返回 (文本, 非文本时的原始字节, 是否截断)。截断时回退到 UTF-8 字符边界。
@@ -984,5 +1047,80 @@ mod tests {
 
         b.ssl.ca_file = "/tmp/ca.pem".into();
         assert!(a.session_params_changed(&b), "TLS 配置改动应触发重连提示");
+    }
+
+    fn ring_record(seq: u64, payload_len: usize, raw_len: usize) -> MqttRecord {
+        MqttRecord {
+            seq,
+            connection_id: "c".into(),
+            direction: Direction::Received,
+            topic: "t".into(),
+            payload: Arc::from("a".repeat(payload_len)),
+            qos: 0,
+            retain: false,
+            timestamp: 0,
+            user_properties: Vec::new(),
+            content_type: None,
+            response_topic: None,
+            correlation_data: None,
+            message_expiry_interval: None,
+            subscription_identifier: None,
+            payload_truncated: false,
+            raw_bytes: if raw_len > 0 {
+                Some(Arc::from(vec![0u8; raw_len]))
+            } else {
+                None
+            },
+        }
+    }
+
+    // 消息环形缓冲：条数上限正常驱逐
+    #[test]
+    fn message_ring_enforces_count_limit() {
+        let mut ring = MessageRing::new(4);
+        for i in 0..10 {
+            ring.push(ring_record(i, 64, 0), 4);
+        }
+        assert_eq!(ring.len(), 4);
+        assert_eq!(
+            ring.iter().next().map(|r| r.seq),
+            Some(6),
+            "应从最旧开始驱逐"
+        );
+        assert_eq!(ring.retained_bytes(), 4 * 64);
+    }
+
+    // 消息环形缓冲：大报文流下字节预算优先于条数上限，内存有上界
+    #[test]
+    fn message_ring_enforces_byte_budget() {
+        let mut ring = MessageRing::new(2000);
+        // 每条 256KB（payload 128KB + raw 128KB）：2000 条本会到 512MB
+        let per = MAX_PAYLOAD_RETAIN;
+        for i in 0..2000 {
+            ring.push(ring_record(i, per, per), 2000);
+        }
+        assert!(
+            ring.retained_bytes() <= MAX_CONNECTION_MESSAGE_BYTES + 2 * per,
+            "字节数 {} 超出预算 {}",
+            ring.retained_bytes(),
+            MAX_CONNECTION_MESSAGE_BYTES
+        );
+        assert!(
+            ring.len() < 2000,
+            "大报文流不应保留满额条数（实际 {} 条）",
+            ring.len()
+        );
+        assert_eq!(ring.iter().next().map(|r| r.seq), Some((2000 - ring.len()) as u64));
+    }
+
+    // 单条超预算的记录也至少保留最新一条（列表不能被清空）
+    #[test]
+    fn message_ring_never_empties_on_oversized_record() {
+        let mut ring = MessageRing::new(10);
+        ring.push(ring_record(0, MAX_PAYLOAD_RETAIN, MAX_PAYLOAD_RETAIN), 10);
+        assert_eq!(ring.len(), 1);
+        ring.push(ring_record(1, 64, 0), 10);
+        assert_eq!(ring.len(), 2);
+        assert_eq!(ring.iter().next().map(|r| r.seq), Some(0));
     }
 }

@@ -24,8 +24,8 @@ use gpui_kit::{
 use crate::aliyun::AliyunPreset;
 use crate::model::{
     AppSettings, ConnectionConfig, ConnectionStatus, Direction, GlobalVariable, LogEntry,
-    LogLevel, MqttRecord, PublishParams, PublishPreset, SubscribeOptions, Subscription,
-    ThemeModePref, retained_payload,
+    LogLevel, MqttRecord, MessageRing, PublishParams, PublishPreset, SubscribeOptions,
+    Subscription, ThemeModePref, retained_payload,
 };
 use crate::mqtt::{EngineEvent, MqttEngine};
 use crate::store::Storage;
@@ -84,8 +84,8 @@ pub struct MqttXApp {
     // ── 运行时状态 ──
     pub statuses: HashMap<String, ConnectionStatus>,
     pub errors: HashMap<String, String>,
-    /// 每连接消息环形缓冲：键为驻留后的连接 ID，容量受 max_messages 约束
-    pub messages: HashMap<Arc<str>, VecDeque<MqttRecord>>,
+    /// 每连接消息环形缓冲：键为驻留后的连接 ID，条数 + 字节预算双重约束
+    pub messages: HashMap<Arc<str>, MessageRing>,
     pub logs: VecDeque<LogEntry>,
     pub seq: u64,
 
@@ -473,16 +473,16 @@ impl MqttXApp {
     }
 
     fn push_message(&mut self, connection_id: Arc<str>, record: MqttRecord) {
-        let cap = self.settings.max_messages.max(100);
-        let list = self
-            .messages
+        let cap = self.settings.max_messages;
+        self.messages
             .entry(connection_id)
-            .or_insert_with(|| VecDeque::with_capacity(cap));
-        // 环形缓冲：满则丢最旧，均摊 O(1)（原来的 Vec::drain 是 O(n) 搬移）
-        while list.len() >= cap {
-            list.pop_front();
-        }
-        list.push_back(record);
+            .or_insert_with(|| MessageRing::new(cap))
+            .push(record, cap);
+    }
+
+    /// 清空指定连接的消息（内存缓冲随 drop 释放）。
+    pub fn clear_messages(&mut self, id: &str) {
+        self.messages.remove(id);
     }
 
     fn push_log(&mut self, entry: LogEntry) {
@@ -603,7 +603,7 @@ impl MqttXApp {
         self.engine.close(id, false);
         self.connections.retain(|c| c.id != id);
         self.subscriptions.retain(|s| s.connection_id != id);
-        self.messages.remove(id);
+        self.clear_messages(id);
         self.statuses.remove(id);
         self.errors.remove(id);
         self.views.remove(id);

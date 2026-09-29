@@ -17,7 +17,7 @@ use gpui_kit::{
     Styled as _, Window,
 };
 
-use crate::model::{AppSettings, ThemeModePref};
+use crate::model::{AppSettings, ThemeModePref, MAX_CONNECTION_MESSAGE_BYTES};
 use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
 use crate::ui::widgets::{field, make_select, OptionDelegate};
@@ -388,6 +388,15 @@ impl Render for SettingsDialog {
                 "每条连接内存中保留的消息条数（100~100000）",
                 Input::new(&self.max_messages),
             ))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "另有每连接 {}MB 的字节预算兜底：大报文流会优先按字节从最旧开始驱逐",
+                        MAX_CONNECTION_MESSAGE_BYTES / (1024 * 1024)
+                    )),
+            )
             .child(
                 h_flex()
                     .justify_between()
