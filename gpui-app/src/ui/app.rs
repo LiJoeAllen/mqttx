@@ -135,6 +135,17 @@ impl MqttXApp {
         // OTA：清理上次自更新遗留文件；开启自动检查则后台静默检查并下载，
         // 下载完成后弹对话框征得同意再安装（不自动重启）。
         update::cleanup_old();
+        // 自动连接：勾选「启动时自动连接」的连接逐个拉起（引擎异步建连）
+        for cfg in connections
+            .iter()
+            .filter(|c| c.auto_connect)
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            let mut cfg = cfg;
+            crate::model::render_will_templates(&mut cfg, &variables);
+            engine.connect(cfg);
+        }
         if settings.auto_check_update {
             let rx = engine.run_blocking(update::check_and_download);
             let weak = cx.entity().downgrade();

@@ -168,6 +168,9 @@ pub struct ConnectionConfig {
     /// 断线自动重连
     #[serde(default = "default_true")]
     pub auto_reconnect: bool,
+    /// 应用启动时自动连接该连接
+    #[serde(default)]
+    pub auto_connect: bool,
 
     #[serde(default)]
     pub last_will: Option<LastWill>,
@@ -227,6 +230,7 @@ impl ConnectionConfig {
             topic_alias_maximum: None,
             auto_resubscribe: true,
             auto_reconnect: true,
+            auto_connect: false,
             last_will: None,
             created_at: chrono::Local::now().timestamp(),
             group: None,

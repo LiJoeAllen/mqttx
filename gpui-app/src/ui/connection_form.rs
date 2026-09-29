@@ -74,6 +74,7 @@ pub struct ConnectionForm {
     clean_start: bool,
     auto_resubscribe: bool,
     auto_reconnect: bool,
+    auto_connect: bool,
     will_enabled: bool,
     will_retain: bool,
     ssl_ignore_ca: bool,
@@ -323,6 +324,7 @@ impl ConnectionForm {
             clean_start: c.clean_start,
             auto_resubscribe: c.auto_resubscribe,
             auto_reconnect: c.auto_reconnect,
+            auto_connect: c.auto_connect,
             will_enabled,
             will_retain,
             ssl_ignore_ca: c.ssl.ignore_ca,
@@ -566,6 +568,7 @@ impl ConnectionForm {
             topic_alias_maximum,
             auto_resubscribe: self.auto_resubscribe,
             auto_reconnect: self.auto_reconnect,
+            auto_connect: self.auto_connect,
             last_will,
             created_at: self.created_at,
             group,
@@ -629,6 +632,7 @@ impl ConnectionForm {
                         match id {
                             "clean_start" => this.clean_start = v,
                             "auto_resubscribe" => this.auto_resubscribe = v,
+                            "auto_connect" => this.auto_connect = v,
                             "auto_reconnect" => this.auto_reconnect = v,
                             "will_enabled" => this.will_enabled = v,
                             "will_retain" => this.will_retain = v,
@@ -807,7 +811,8 @@ impl Render for ConnectionForm {
                     )
                     .child(self.switch_row("clean_start", "Clean Start / Clean Session", self.clean_start, cx))
                     .child(self.switch_row("auto_reconnect", "断线自动重连", self.auto_reconnect, cx))
-                    .child(self.switch_row("auto_resubscribe", "连接后自动恢复订阅", self.auto_resubscribe, cx)),
+                    .child(self.switch_row("auto_resubscribe", "连接后自动恢复订阅", self.auto_resubscribe, cx))
+                    .child(self.switch_row("auto_connect", "启动时自动连接", self.auto_connect, cx)),
                 cx,
             ))
             // ── SSL/TLS（仅 TLS/WSS 显示） ──
