@@ -1,43 +1,19 @@
-# DSH usage records
-dsh-usage/
-
-# Logs
-logs
-src-tauri/logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-.pnpm-store
-dist
-dist-ssr
-*.local
-
-# Rust / Tauri build artifacts
-src-tauri/target
-src-tauri/target_d
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Workspace-level Rust build artifacts (GPUI app)
+# Rust 构建产物（GPUI 工作区）
 /target
 *.pdb
+
+# 日志
+logs
+*.log
+
+# 编辑器
+.vscode/*
+.idea
+.DS_Store
+*.sw?
+
+# 本仓库专属
 /.v2c
 /.video_agent
-
-# 发布产物暂存目录
 /dist-publish
+dsh-usage/

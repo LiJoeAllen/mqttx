@@ -3,7 +3,7 @@
 使用 **Rust + [gpui-kit](https://github.com/longbridge/gpui-kit)**（基于 [GPUI](https://github.com/zed-industries/zed)）重写的 MQTT 调试客户端，对标官方 [MQTTX](https://mqttx.app)。
 纯 Rust 实现：MQTT 引擎、数据持久化与原生 UI 同属一个轻量二进制，无 Electron/WebView 运行时。
 
-> 旧的 Tauri + Vue 版本仍保留在 `src/` 与 `src-tauri/`，新实现位于 `gpui-app/`。
+> 早期 Tauri + Vue 实现已归档到 [`tauri-legacy`](../../archive/tauri-legacy.tar.gz) 分支，本项目仅维护 `gpui-app/` 原生实现。
 
 ## 功能特性
 
