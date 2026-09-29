@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-  发布构建产物到 Gitea Package Registry（Generic 包）。
+  发布构建产物到 Gitea：Generic Package + Release 附件（OTA 更新源）。
 
 .DESCRIPTION
-  用 Gitea Generic Package API 上传文件：
-    PUT {GITEA_URL}/api/packages/{owner}/generic/{pkg}/{version}/{filename}
+  1) Generic Package API 上传：
+       PUT {GITEA_URL}/api/packages/{owner}/generic/{pkg}/{version}/{filename}
+  2) Release 附件上传（应用内 OTA 只认 Release 附件）：
+       POST {GITEA_URL}/api/v1/repos/{owner}/{repo}/releases/{id}/assets?name=...
+     命名约定 mqttx-v<ver>-<triple>-mqttx[.exe]，含 .sha256 侧车。
   认证：Authorization: token <GITEA_TOKEN>
-  同名版本重复上传会得到 409，脚本按"已存在"处理。
-  上传成功后附加 .sha256 校验文件。
+  同名包版本重复上传会得到 409，脚本按"已存在"处理。
 
 .EXAMPLE
   $env:GITEA_URL = "https://gitea.example.com"
@@ -22,6 +24,8 @@
   软件包版本。缺省时依次尝试 git describe --tags、gpui-app/Cargo.toml。
 .PARAMETER Owner
   覆盖 GITEA_OWNER（缺省时从 git remote origin 推断）。
+.PARAMETER Repo
+  覆盖 GITEA_REPO（缺省时从 git remote origin 推断，失败为 mqttx）。
 .PARAMETER PackageName
   覆盖 GITEA_PKG（默认 mqttx）。
 #>
@@ -30,6 +34,7 @@ param(
     [string[]]$Files = @(),
     [string]$Version = "",
     [string]$Owner = "",
+    [string]$Repo = "",
     [string]$PackageName = ""
 )
 
@@ -52,9 +57,10 @@ $GiteaUrl = $GiteaUrl.TrimEnd("/")
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Pkg = if ($PackageName) { $PackageName } elseif ($env:GITEA_PKG) { $env:GITEA_PKG } else { "mqttx" }
 
-# ── owner：参数 > GITEA_OWNER > git remote origin 推断 ──────────────────────
+# ── owner/repo：参数 > 环境变量 > git remote origin 推断 ─────────────────────
 if (-not $Owner) { $Owner = $env:GITEA_OWNER }
-if (-not $Owner) {
+if (-not $Repo)  { $Repo  = $env:GITEA_REPO }
+if (-not $Owner -or -not $Repo) {
     $remote = git -C $Root remote get-url origin 2>$null
     if ($remote) {
         # 兼容 git@host:owner/repo.git 与 https://host/owner/repo.git
@@ -68,10 +74,14 @@ if (-not $Owner) {
         }
         $path = $path -replace "\.git$", ""
         $seg = @($path -split "/" | Where-Object { $_ })
-        if ($seg.Count -ge 2) { $Owner = $seg[0] }
+        if ($seg.Count -ge 2) {
+            if (-not $Owner) { $Owner = $seg[0] }
+            if (-not $Repo)  { $Repo  = $seg[1] }
+        }
     }
 }
 if (-not $Owner) { Die "无法推断 owner，请用 -Owner 或 GITEA_OWNER 指定" }
+if (-not $Repo)  { $Repo = $Pkg }
 
 # ── 版本：参数 > git describe > Cargo.toml ──────────────────────────────────
 if (-not $Version) {
@@ -95,6 +105,7 @@ if (-not $Files -or $Files.Count -eq 0) {
 
 Write-Host "→ Gitea:   $GiteaUrl"
 Write-Host "→ 软件包:  $Owner/$Pkg@$Version"
+Write-Host "→ 仓库:    $Owner/$Repo"
 Write-Host "→ 产物:    $($Files -join ', ')"
 
 foreach ($f in $Files) {
@@ -141,3 +152,76 @@ foreach ($f in $Files) {
 }
 
 Write-Host "完成。软件包页面: $GiteaUrl/$Owner?tab=packages" -ForegroundColor Cyan
+
+# ── Release 附件：OTA 更新源（应用内 update.rs 只查 /releases）──────────────
+# 规范化版本号：tag 推断出的 "v1.0.2" 与 Cargo 的 "1.0.2" 统一为无 v 数字段
+$VerNum = $Version -replace "^v", ""
+$Triple = "x86_64-pc-windows-msvc"
+$Api = "$GiteaUrl/api/v1/repos/$Owner/$Repo"
+
+# 取（或创建）与版本同名 tag 的 Release
+$rel = $null
+try {
+    $rel = Invoke-RestMethod -Headers @{ Authorization = "token $Token" } -Uri "$Api/releases/tags/v$VerNum"
+} catch { }
+if (-not $rel) {
+    try {
+        $rel = Invoke-RestMethod -Method Post `
+            -Headers @{ Authorization = "token $Token" } `
+            -ContentType "application/json" `
+            -Body (@{ tag_name = "v$VerNum"; name = "v$VerNum"; draft = $false; prerelease = $false } | ConvertTo-Json) `
+            -Uri "$Api/releases"
+        Write-Host "→ 已创建 Release v$VerNum"
+    }
+    catch {
+        Write-Host "  ! Release 创建/查询失败：$($_.Exception.Message)；跳过附件上传" -ForegroundColor Yellow
+        return
+    }
+}
+$releaseId = $rel.id
+Write-Host "→ Release v$VerNum (id=$releaseId)，上传附件…"
+
+function Upload-ReleaseAsset($uri, $filePath) {
+    # Windows PowerShell 5.1 没有 -Form，用 .NET HttpClient 组 multipart（字段名必须为 attachment）
+    Add-Type -AssemblyName System.Net.Http
+    $client = New-Object System.Net.Http.HttpClient
+    $client.DefaultRequestHeaders.Authorization =
+        New-Object System.Net.Http.Headers.AuthenticationHeaderValue("token", $Token)
+    $content = New-Object System.Net.Http.MultipartFormDataContent
+    $fs = [System.IO.File]::OpenRead($filePath)
+    try {
+        $fileContent = New-Object System.Net.Http.StreamContent($fs)
+        $fileContent.Headers.ContentType =
+            [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("application/octet-stream")
+        $content.Add($fileContent, "attachment", (Split-Path -Leaf $filePath))
+        $resp = $client.PostAsync($uri, $content).GetAwaiter().GetResult()
+        return [int]$resp.StatusCode
+    }
+    finally {
+        $fs.Dispose()
+        $client.Dispose()
+    }
+}
+
+foreach ($f in $Files) {
+    $name = Split-Path -Leaf $f
+    # 已符合 OTA 命名约定的原样使用；否则按约定规范重命名后上传
+    if ($name -match "^mqttx-v.*-mqttx(\.exe)?$") { $asset = $name }
+    elseif ($name.EndsWith(".exe")) { $asset = "mqttx-v$VerNum-$Triple-mqttx.exe" }
+    else { $asset = "mqttx-v$VerNum-$Triple-mqttx" }
+    $tmp = Join-Path $env:TEMP $asset
+    Copy-Item $f $tmp -Force
+    $sum = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
+    "$sum  $asset" | Set-Content -NoNewline -Encoding ascii "$tmp.sha256"
+    foreach ($a in @($asset, "$asset.sha256")) {
+        $code = Upload-ReleaseAsset "$Api/releases/$releaseId/assets?name=$a" (Join-Path $env:TEMP $a)
+        if ($code -eq 201) {
+            Write-Host "  ✓ Release 附件 $a" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ! Release 附件 $a 上传失败 (HTTP $code)" -ForegroundColor Yellow
+        }
+    }
+    Remove-Item $tmp, "$tmp.sha256" -ErrorAction SilentlyContinue
+}
+Write-Host "完成。Release 页面: $GiteaUrl/$Owner/$Repo/releases/tag/v$VerNum" -ForegroundColor Cyan
