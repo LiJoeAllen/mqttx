@@ -503,7 +503,12 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                 h_flex()
                     .justify_end()
                     .w_full()
-                    .child(Button::new("res-close").label("关闭").outline()),
+                    .child(
+                        Button::new("res-close")
+                            .label("关闭")
+                            .outline()
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
             )
     });
 }
