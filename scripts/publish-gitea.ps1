@@ -47,6 +47,9 @@ try {
 
 function Die($msg) { Write-Error "错误: $msg"; exit 1 }
 
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$Pkg = if ($PackageName) { $PackageName } elseif ($env:GITEA_PKG) { $env:GITEA_PKG } else { "mqttx" }
+
 # ── 必填配置 ────────────────────────────────────────────────────────────────
 # 地址：优先环境变量，否则从 git remote origin 推断
 $GiteaUrl = $env:GITEA_URL
@@ -66,29 +69,27 @@ $GiteaUrl = $GiteaUrl.TrimEnd("/")
 # （即推送用的那条 OAuth 凭证，无需另行创建 API token）
 $Token = $env:GITEA_TOKEN
 if (-not $Token) {
+    # 从 Git Credential Manager 取同一主机的凭证（与 git 推送同源）。
+    # 注意：git credential fill 对 CRLF 管道输入敏感（PS 管道送出 \r\n
+    # 会被拒收），必须写 LF 临时文件、由 cmd 做重定向，stderr 也留在 cmd
+    # 内部（PS 5.1 在 EAP=Stop 下对原生命令的 2>$null 会抛异常）。
+    $credHost = $GiteaUrl -replace "^https?://", ""
+    $req = Join-Path $env:TEMP ("mqttx-cred-" + [guid]::NewGuid().ToString("N") + ".txt")
+    [IO.File]::WriteAllText($req, "protocol=https`nhost=$credHost`n`n")
     try {
-        $env:GIT_TERMINAL_PROMPT = "0"
-        $env:GCM_INTERACTIVE = "Never"
-        $credHost = $GiteaUrl -replace "^https?://", ""
-        $raw = @("protocol=https", "host=$credHost", "") | git credential fill 2>$null
+        $raw = cmd /c "git credential fill < ""$req"" 2>nul"
         $Token = ($raw | Where-Object { $_ -like "password=*" }) -replace "^password=", ""
     }
     catch { $Token = $null }
-    finally {
-        Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
-        Remove-Item Env:GCM_INTERACTIVE -ErrorAction SilentlyContinue
-    }
+    finally { Remove-Item $req -ErrorAction SilentlyContinue }
 }
 if (-not $Token) { Die "缺少环境变量 GITEA_TOKEN，且无法从 git credential store 自动获取" }
-
-$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$Pkg = if ($PackageName) { $PackageName } elseif ($env:GITEA_PKG) { $env:GITEA_PKG } else { "mqttx" }
 
 # ── owner/repo：参数 > 环境变量 > git remote origin 推断 ─────────────────────
 if (-not $Owner) { $Owner = $env:GITEA_OWNER }
 if (-not $Repo)  { $Repo  = $env:GITEA_REPO }
 if (-not $Owner -or -not $Repo) {
-    $remote = git -C $Root remote get-url origin 2>$null
+    try { $remote = git -C $Root remote get-url origin 2>$null } catch { $remote = $null }
     if ($remote) {
         # 兼容 git@host:owner/repo.git 与 https://host/owner/repo.git
         if ($remote -match "://") {
