@@ -1043,6 +1043,11 @@ impl MqttXApp {
                         .gap_1()
                         .pr_2()
                         .items_center()
+                        // 整条标题栏被 gpui-component 标记为 WindowControlArea::Drag
+                        // （WM_NCHITTEST 返回 HTCAPTION），点击会变成拖动窗口。
+                        // 按钮簇必须遮挡鼠标：hit_test 收集到 BlockMouse hitbox
+                        // 即截断，父级 Drag 区不再命中，按钮才能收到点击。
+                        .occlude()
                         .child(
                             Button::new("new-connection")
                                 .icon(IconName::Plus)
