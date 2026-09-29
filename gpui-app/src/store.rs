@@ -16,7 +16,9 @@ macro_rules! elog {
     }};
 }
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 
@@ -28,6 +30,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Storage {
     dir: PathBuf,
+    /// 本次会话中加载失败的文件名。下次保存前先把原文件备份为
+    /// `<name>.corrupt-<时间戳>`，避免损坏文件被空数据直接覆盖。
+    corrupt: std::sync::Arc<Mutex<HashSet<String>>>,
 }
 
 impl Storage {
@@ -38,7 +43,10 @@ impl Storage {
         if let Err(e) = std::fs::create_dir_all(&dir) {
             elog!("创建数据目录 {} 失败: {e}", dir.display());
         }
-        Self { dir }
+        Self {
+            dir,
+            corrupt: std::sync::Arc::new(Mutex::new(HashSet::new())),
+        }
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -50,7 +58,20 @@ impl Storage {
         if !p.exists() {
             return Ok(None);
         }
-        let mut text = std::fs::read_to_string(&p)
+        let result = self.read_json_inner(&p);
+        if let Err(e) = &result {
+            // 读取/解析失败不能静默：否则「连接全部消失」无任何线索，
+            // 且下一次保存会用空数据覆盖本可抢救的原文件。
+            elog!("加载 {} 失败，本次会话将以空数据继续: {e}", p.display());
+            if let Ok(mut set) = self.corrupt.lock() {
+                set.insert(name.to_string());
+            }
+        }
+        result
+    }
+
+    fn read_json_inner<T: for<'de> serde::Deserialize<'de>>(&self, p: &Path) -> Result<Option<T>> {
+        let mut text = std::fs::read_to_string(p)
             .with_context(|| format!("读取 {} 失败", p.display()))?;
         // 容忍 Windows 编辑器/PowerShell 写入的 UTF-8 BOM（BOM 只有 1 个字符，逐字符剥离）
         if let Some(rest) = text.strip_prefix('\u{feff}') {
@@ -59,20 +80,46 @@ impl Storage {
         if text.trim().is_empty() {
             return Ok(None);
         }
-        let value = serde_json::from_str(&text)
-            .with_context(|| format!("解析 {} 失败", p.display()))?;
+        let value =
+            serde_json::from_str(&text).with_context(|| format!("解析 {} 失败", p.display()))?;
         Ok(Some(value))
     }
 
     fn write_json<T: serde::Serialize + ?Sized>(&self, name: &str, value: &T) -> Result<()> {
+        // 曾加载失败过的文件：覆盖前先备份原文件，把数据丢失降为可恢复
+        let was_corrupt = self.corrupt.lock().map(|mut s| s.remove(name)).unwrap_or(false);
         let target = self.path(name);
-        let tmp = target.with_extension("json.tmp");
-        let text = serde_json::to_string_pretty(value)?;
-        std::fs::write(&tmp, text)
-            .with_context(|| format!("写入 {} 失败", tmp.display()))?;
-        std::fs::rename(&tmp, &target)
-            .with_context(|| format!("替换 {} 失败", target.display()))?;
-        Ok(())
+        if was_corrupt && target.exists() {
+            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let backup = self.path(&format!("{name}.corrupt-{ts}"));
+            match std::fs::rename(&target, &backup) {
+                Ok(()) => elog!(
+                    "{} 加载失败过，原文件已备份为 {} 后重新写入",
+                    name,
+                    backup.display()
+                ),
+                Err(e) => elog!("备份损坏文件 {} 失败: {e}", target.display()),
+            }
+        }
+
+        // tmp 名拼入 pid，避免并发调用同名互踩；写完 fsync 再 rename，
+        // 保证掉电后 rename 提交的目标内容完整。
+        let tmp = self.path(&format!("{name}.{}.tmp", std::process::id()));
+        let result = (|| -> Result<()> {
+            let text = serde_json::to_string_pretty(value)?;
+            let mut f = std::fs::File::create(&tmp)
+                .with_context(|| format!("写入 {} 失败", tmp.display()))?;
+            std::io::Write::write_all(&mut f, text.as_bytes())?;
+            f.sync_all().with_context(|| format!("刷盘 {} 失败", tmp.display()))?;
+            drop(f);
+            std::fs::rename(&tmp, &target)
+                .with_context(|| format!("替换 {} 失败", target.display()))?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
     }
 
     pub fn dir(&self) -> &Path {
@@ -284,5 +331,46 @@ mod tests {
         assert!(err.contains("第 2 项"), "错误应定位到序号: {err}");
         assert!(err.contains("id"), "错误应说明 id 为空: {err}");
         let _ = std::fs::remove_file(&path);
+    }
+
+    // 损坏文件：加载失败要被感知，且重新保存前原文件必须被备份，
+    // 防止「连接全部消失后被空数据覆盖」的不可恢复丢失
+    #[test]
+    fn corrupted_file_is_logged_and_backed_up_before_overwrite() {
+        let dir = std::env::temp_dir().join(format!(
+            "mqttx-store-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        let storage = Storage {
+            dir: dir.clone(),
+            corrupt: std::sync::Arc::new(Mutex::new(HashSet::new())),
+        };
+        std::fs::write(dir.join("connections.json"), "{ 这不是 JSON").expect("写入损坏文件");
+
+        assert!(storage.load_connections().is_empty(), "损坏文件按空数据处理");
+
+        storage.save_connections(&[ConnectionConfig::new()]);
+
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .expect("列出测试目录")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            names.iter().any(|n| n.starts_with("connections.json.corrupt-")),
+            "覆盖前应备份损坏文件，实际文件: {names:?}"
+        );
+        assert!(names.contains(&"connections.json".to_string()), "新文件应已写入");
+        // 备份内容仍是损坏原文，可人工抢救
+        let backup = names
+            .iter()
+            .find(|n| n.starts_with("connections.json.corrupt-"))
+            .expect("备份存在");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(backup)).expect("读备份"),
+            "{ 这不是 JSON"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
