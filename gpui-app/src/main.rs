@@ -19,6 +19,8 @@ fn init_sentry() -> sentry::ClientInitGuard {
 }
 
 fn main() {
+    // 资源监控的运行时长基准
+    mqttx_desktop::sysmon::init();
     // OTA 收尾：清理遗留文件；若暂存区有待安装的新版本且用户已同意
     // （「下次启动安装」），在进入 UI 前完成自替换并重启。
     update::cleanup_old();

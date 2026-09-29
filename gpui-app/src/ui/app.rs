@@ -103,6 +103,8 @@ pub struct MqttXApp {
     log_file: Option<(String, std::io::BufWriter<std::fs::File>)>,
     /// 系统外观变化订阅：设置为「跟随系统」时重应用主题，随实体存活
     _appearance_obs: gpui_kit::Subscription,
+    /// 窗口置顶状态（标题栏钉子按钮切换）
+    pinned: bool,
 }
 
 impl MqttXApp {
@@ -312,6 +314,7 @@ impl MqttXApp {
             file_dialog_open: false,
             log_file: None,
             _appearance_obs: appearance_obs,
+            pinned: false,
         }
     }
 
@@ -1070,6 +1073,7 @@ impl MqttXApp {
                                     let w3 = app_weak.clone();
                                     let w4 = app_weak.clone();
                                     let w5 = app_weak.clone();
+                                    let w6 = app_weak.clone();
                                     menu.item(
                                         PopupMenuItem::new("阿里云设备")
                                             .on_click(move |_, window, cx| {
