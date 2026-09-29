@@ -240,9 +240,22 @@ foreach ($f in $Files) {
 
     # ── 7z 压缩附件（OTA 主通道：体积小、下载快）──
     # 内部文件名 = $asset（应用解压后按此名暂存安装）
-    $SevenZip = @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe") |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $SevenZip) { $SevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source }
+    $SevenZip = @(
+        "$env:ProgramFiles\7-Zip\7z.exe",
+        "${env:ProgramFiles(x86)}\7-Zip\7z.exe",
+        "D:\Program Files\7-Zip\7z.exe",
+        "C:\Program Files (x86)\7-Zip\7z.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $SevenZip) {
+        $SevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+    }
+    if (-not $SevenZip) {
+        # 官方安装器写入注册表（Path 指向安装目录）
+        try {
+            $reg = Get-ItemProperty "HKLM:\SOFTWARE\7-Zip" -ErrorAction Stop
+            if ($reg.Path) { $cand = Join-Path $reg.Path "7z.exe"; if (Test-Path $cand) { $SevenZip = $cand } }
+        } catch { }
+    }
     if ($SevenZip) {
         $packDir = Join-Path $env:TEMP ("mqttx-pack-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $packDir | Out-Null
