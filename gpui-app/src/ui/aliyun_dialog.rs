@@ -35,6 +35,7 @@ struct AliyunDialog {
     access_key_secret: Entity<InputState>,
     group_id: Entity<InputState>,
     device_id: Entity<InputState>,
+    product_key: Entity<InputState>,
     device_secret: Entity<InputState>,
 }
 
@@ -77,6 +78,7 @@ impl AliyunDialog {
             }),
             group_id: text_field!(cx, window, &first.group_id, "GID-xxx"),
             device_id: text_field!(cx, window, &first.device_id, "设备 ID"),
+            product_key: text_field!(cx, window, &first.product_key, "一机一密：ProductKey"),
             device_secret: cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(&first.device_secret)
@@ -84,6 +86,71 @@ impl AliyunDialog {
                     .masked(true)
             }),
         }
+    }
+
+    /// 选中项回填表单。此前只做高亮，保存/连接读的是表单旧值，
+    /// 会把所选预设用另一条的数据覆盖，或用错误凭据生成连接。
+    fn select_preset(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(p) = self.presets.get(idx).cloned() else {
+            return;
+        };
+        self.selected = Some(idx);
+        self.name.update(cx, |s, cx| s.set_value(p.name, window, cx));
+        self.group.update(cx, |s, cx| s.set_value(p.group, window, cx));
+        self.instance_id
+            .update(cx, |s, cx| s.set_value(p.instance_id, window, cx));
+        self.region
+            .update(cx, |s, cx| s.set_value(p.region, window, cx));
+        let mode_idx = match p.auth_mode {
+            AliyunAuthMode::Token => 0,
+            AliyunAuthMode::DeviceCredential => 1,
+        };
+        self.auth_mode.update(cx, |s, cx| {
+            s.set_selected_index(
+                Some(gpui_kit::component::IndexPath::new(mode_idx)),
+                window,
+                cx,
+            )
+        });
+        self.access_key_id
+            .update(cx, |s, cx| s.set_value(p.access_key_id, window, cx));
+        self.access_key_secret
+            .update(cx, |s, cx| s.set_value(p.access_key_secret, window, cx));
+        self.group_id
+            .update(cx, |s, cx| s.set_value(p.group_id, window, cx));
+        self.device_id
+            .update(cx, |s, cx| s.set_value(p.device_id, window, cx));
+        self.product_key
+            .update(cx, |s, cx| s.set_value(p.product_key, window, cx));
+        self.device_secret
+            .update(cx, |s, cx| s.set_value(p.device_secret, window, cx));
+        cx.notify();
+    }
+
+    /// 清空表单进入「新建」工作流。
+    fn new_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let p = AliyunPreset::new();
+        self.selected = None;
+        self.name.update(cx, |s, cx| s.set_value(p.name, window, cx));
+        self.group.update(cx, |s, cx| s.set_value("", window, cx));
+        self.instance_id
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.region.update(cx, |s, cx| s.set_value("", window, cx));
+        self.auth_mode.update(cx, |s, cx| {
+            s.set_selected_index(Some(gpui_kit::component::IndexPath::new(0)), window, cx)
+        });
+        self.access_key_id
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.access_key_secret
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.group_id.update(cx, |s, cx| s.set_value("", window, cx));
+        self.device_id
+            .update(cx, |s, cx| s.set_value(p.device_id, window, cx));
+        self.product_key
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.device_secret
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        cx.notify();
     }
 
     fn collect(&self, cx: &App) -> AliyunPreset {
@@ -107,6 +174,7 @@ impl AliyunDialog {
             access_key_secret: v(&self.access_key_secret),
             group_id: v(&self.group_id),
             device_id: v(&self.device_id),
+            product_key: v(&self.product_key),
             device_secret: v(&self.device_secret),
         }
     }
@@ -177,10 +245,8 @@ impl Render for AliyunDialog {
                                     .when(selected, |d| d.bg(cx.theme().secondary))
                                     .cursor_pointer()
                                     .child(p.name.clone())
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        // 选中仅做高亮；表单编辑的是“新建/另存”工作流
-                                        this.selected = Some(i);
-                                        cx.notify();
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_preset(i, window, cx);
                                     }))
                             }),
                     )
@@ -190,9 +256,8 @@ impl Render for AliyunDialog {
                             .label("新建")
                             .ghost()
                             .small()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.selected = None;
-                                cx.notify();
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.new_preset(window, cx);
                             })),
                     ),
             )
@@ -252,15 +317,27 @@ impl Render for AliyunDialog {
                                 )),
                             ),
                     )
-                    .child(field(
-                        "DeviceSecret（一机一密）",
-                        Input::new(&self.device_secret).mask_toggle(),
-                    ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div().flex_1().min_w(px(0.)).child(field(
+                                    "ProductKey（一机一密）",
+                                    Input::new(&self.product_key),
+                                )),
+                            )
+                            .child(
+                                div().flex_1().min_w(px(0.)).child(field(
+                                    "DeviceSecret（一机一密）",
+                                    Input::new(&self.device_secret).mask_toggle(),
+                                )),
+                            ),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Token 模式使用 MQTT 3.1.1，clientId={GroupId}@@@{设备ID}，密码为 HMAC-SHA1 签名"),
+                            .child("Token 模式（云消息队列 MQTT 版）：接入点 {实例ID}.mqtt.aliyuncs.com，clientId={GroupId}@@@{设备ID}，密码为 HMAC-SHA1 签名；一机一密（物联网平台）：接入点 {ProductKey}.iot-as-mqtt.{地域}.aliyuncs.com，按官方三元组规范签名"),
                     )
                     .child(
                         h_flex()
