@@ -13,19 +13,32 @@ fn init_sentry() -> sentry::ClientInitGuard {
     sentry::init(
         sentry::ClientOptions::new()
             .dsn(SENTRY_DSN)
-            .release(format!("mqttx@{}", env!("CARGO_PKG_VERSION"))),
+            // 与更新检查用同一版本来源（尊重 MQTTX_VERSION_OVERRIDE），保持一致
+            .release(format!("mqttx@{}", update::current_version())),
     )
 }
 
 fn main() {
-    // OTA 收尾：清理遗留文件；若暂存区有待安装的新版本（用户上次同意安装），
-    // 在进入 UI 前完成自替换并重启。
+    // OTA 收尾：清理遗留文件；若暂存区有待安装的新版本且用户已同意
+    // （「下次启动安装」），在进入 UI 前完成自替换并重启。
     update::cleanup_old();
-    if let Some(staged) = update::load_staged()
-        && update::install_staged(&staged).is_ok()
-    {
-        // 新进程已拉起，当前进程立即退出
-        std::process::exit(0);
+    if let Some(staged) = update::load_staged() {
+        if update::install_consent_matches(&staged.version) {
+            match update::install_staged(&staged) {
+                Ok(()) => {
+                    // 新进程已拉起，当前进程立即退出
+                    std::process::exit(0);
+                }
+                Err(_) => {
+                    // 安装失败：清除同意标记，继续正常启动，
+                    // 由应用内的更新检查重新弹窗询问。
+                    update::clear_install_consent();
+                }
+            }
+        } else {
+            // 暂存包存在但用户未同意安装（例如跳过了确认对话框）：
+            // 不做任何替换，等待应用内更新流程再次询问。
+        }
     }
 
     let _sentry_guard = init_sentry();

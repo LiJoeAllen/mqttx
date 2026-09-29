@@ -233,15 +233,15 @@ impl SettingsDialog {
                                     .primary()
                                     .xsmall()
                                     .on_click(move |_, window, cx| {
-                                        if update::install_staged(&staged_now).is_ok() {
-                                            cx.quit();
-                                        } else {
+                                        if let Err(e) = update::install_staged(&staged_now) {
                                             window.push_notification(
-                                                Notification::error(
-                                                    "安装失败，请重试",
-                                                ),
+                                                Notification::error(format!(
+                                                    "安装失败：{e}"
+                                                )),
                                                 cx,
                                             );
+                                        } else {
+                                            cx.quit();
                                         }
                                     }),
                             )
@@ -251,11 +251,32 @@ impl SettingsDialog {
                                     .outline()
                                     .xsmall()
                                     .on_click(cx.listener(|this, _, window, cx| {
+                                        // 写入同意标记：下次启动据此自动安装
+                                        if let UpdateUi::ReadyToInstall(staged) = &this.update {
+                                            update::mark_install_consent(&staged.version);
+                                        }
                                         this.update = UpdateUi::Idle;
                                         window.push_notification(
                                             Notification::info(
                                                 "已暂存，下次启动时将自动安装",
                                             ),
+                                            cx,
+                                        );
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("upd-discard")
+                                    .label("放弃此次更新")
+                                    .outline()
+                                    .xsmall()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let UpdateUi::ReadyToInstall(staged) = &this.update {
+                                            update::discard_staged(staged);
+                                        }
+                                        this.update = UpdateUi::Idle;
+                                        window.push_notification(
+                                            Notification::info("已删除暂存的更新包"),
                                             cx,
                                         );
                                         cx.notify();
@@ -283,7 +304,7 @@ impl SettingsDialog {
                     .gap_1()
                     .child(
                         gpui_kit::component::progress::Progress::new("update-progress")
-                            .value(pct),
+                            .value(pct * 100.),
                     )
                     .child(
                         div()
