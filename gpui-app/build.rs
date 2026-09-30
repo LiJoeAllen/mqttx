@@ -5,7 +5,10 @@
 //! 缺失时任务栏与资源管理器显示系统默认图标。
 
 fn main() {
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+    // embed_resource 仅声明在 Windows 的 build-dependencies：必须用 cfg 门控，
+    // 否则 Linux/macOS 编译 build script 时该路径无法解析（运行时 env 判断救不了编译期）
+    #[cfg(target_os = "windows")]
+    {
         println!("cargo:rerun-if-changed=resources/app.rc");
         println!("cargo:rerun-if-changed=resources/icon.ico");
         embed_resource::compile("resources/app.rc", embed_resource::NONE)
