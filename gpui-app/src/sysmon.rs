@@ -24,6 +24,9 @@ pub struct Sample {
 }
 
 /// 周期采样器：内部记录上次 CPU 时间，用于差分计算占用率。
+// pid/last_cpu/last_percent 仅 Windows 采样路径读写；非 Windows 下该路径被 cfg
+// 移除，这三个字段会成为 dead_code（CI 的 -D warnings 下即错误），按平台放行。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub struct Sampler {
     pid: u32,
     last_cpu: Option<(u64, u64, Instant)>,

@@ -47,6 +47,11 @@ fn set_topmost_windows(_window: &gpui_kit::Window, _topmost: bool) -> bool {
     false
 }
 
+// 仅 Windows 采样路径使用；非 Windows 下该路径被 cfg 移除，常量会成为
+// dead_code（CI 的 -D warnings 下即错误），按平台放行。
+#[cfg(target_os = "windows")]
 const SWP_NOSIZE: u32 = 0x0001;
+#[cfg(target_os = "windows")]
 const SWP_NOMOVE: u32 = 0x0002;
+#[cfg(target_os = "windows")]
 const SWP_NOACTIVATE: u32 = 0x0010;
