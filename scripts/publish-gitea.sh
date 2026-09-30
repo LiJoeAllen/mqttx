@@ -62,20 +62,35 @@ REPO="${GITEA_REPO:-$(remote_owner_repo | tail -1 || true)}"
 [ -n "${OWNER:-}" ] || die "无法推断 GITEA_OWNER，请显式设置"
 [ -n "${REPO:-}" ] || REPO="$PKG"
 
-# ── 版本：参数 > git describe > Cargo.toml ───────────────────────────────────
+# ── 版本：参数 > 当前提交的精确 tag > Cargo.toml ─────────────────────────────
+# 严禁用 'git describe --tags --always' 兜底：它会产出 v1.0.0-4-gabc1234 这类非
+# semver 描述串，据此创建的 Release 会被客户端 release_part() 截成 1.0.0 并判定
+# "不比当前版本新" —— 更新永远发不出去，而且该 Release 会占据 /releases/latest，
+# 把真正的更新挡在后面。
 FILES=()
 for arg in "$@"; do
   if [ -f "$arg" ]; then FILES+=("$arg"); else VERSION="$arg"; fi
 done
+CARGO_VER="$(grep -m1 '^version' "$ROOT/gpui-app/Cargo.toml" | cut -d'"' -f2)"
 if [ -z "${VERSION:-}" ]; then
-  VERSION="$(git -C "$ROOT" describe --tags --always 2>/dev/null || true)"
+  VERSION="$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || true)"
+  [ -n "$VERSION" ] && echo "→ 版本取自当前提交的 tag: $VERSION"
 fi
 if [ -z "${VERSION:-}" ]; then
-  VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/gpui-app/Cargo.toml" | head -1)"
+  VERSION="$CARGO_VER"
+  [ -n "$VERSION" ] && echo "→ HEAD 无 tag，版本回退为 gpui-app/Cargo.toml: $VERSION" >&2
 fi
-[ -n "${VERSION:-}" ] || die "无法确定版本号"
-# Gitea 版本段不允许 "/"，tag 形如 v1.0.0-3-gabc123 时规范化
+[ -n "${VERSION:-}" ] || die "无法确定版本号：请显式传入（如 v1.0.1）或先给当前提交打 tag"
+# Gitea 版本段不允许 "/"
 VERSION="${VERSION//\//-}"
+# semver 校验：非 semver 版本会让 OTA 静默失效（见上方注释），宁可直接拒绝发布
+if ! printf '%s' "$VERSION" | grep -Eq '^[vV]?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+  die "版本号 '$VERSION' 不是合法 semver（应形如 v1.0.1 或 1.0.1-rc.1）"
+fi
+# 与编译期版本比对：不一致时客户端装完新版本仍自报旧版本号，会反复提示同一更新
+if [ -n "$CARGO_VER" ] && [ "${VERSION#v}" != "$CARGO_VER" ] && [ "${VERSION#V}" != "$CARGO_VER" ]; then
+  echo "  ! 警告：版本 '$VERSION' 与 gpui-app/Cargo.toml ($CARGO_VER) 不一致" >&2
+fi
 
 # ── 默认产物 ────────────────────────────────────────────────────────────────
 if [ "${#FILES[@]}" -eq 0 ]; then
@@ -174,15 +189,17 @@ if [ "$code" = "404" ]; then
   if [ "$code" != "201" ]; then
     echo "  ! Release 创建失败 (HTTP $code)，跳过附件上传" >&2
     cat "$STAGE/rel.json" >&2 || true
-    exit 0
+    # OTA 只认 Release 附件：这里失败等于本次发布无效，必须让调用方看到失败，
+    # 而不是把 job 变绿、让"发布成功"与"用户能收到更新"脱钩。
+    exit 1
   fi
 elif [ "$code" != "200" ]; then
   echo "  ! 查询 Release 失败 (HTTP $code)，跳过附件上传" >&2
-  exit 0
+  exit 1
 fi
 # 顶层 "id" 是首个出现的 id 字段
 RELEASE_ID="$(sed -n 's/.*"id":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$STAGE/rel.json" | head -1)"
-[ -n "$RELEASE_ID" ] || { echo "  ! 无法解析 Release id，跳过附件上传" >&2; exit 0; }
+[ -n "$RELEASE_ID" ] || { echo "  ! 无法解析 Release id，跳过附件上传" >&2; exit 1; }
 echo "→ Release v${VER_NUM} (id=$RELEASE_ID)，上传附件…"
 
 for f in "${FILES[@]}"; do

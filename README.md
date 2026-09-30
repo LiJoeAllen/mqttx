@@ -148,7 +148,9 @@ export GITEA_TOKEN=gta_xxx
 ```
 
 - **owner** 自动从 `git remote origin` 推断（可用 `GITEA_OWNER` / `-Owner` 覆盖）
-- **版本** 依次取参数 → `git describe --tags` → `Cargo.toml`
+- **版本** 依次取参数 → 当前提交的精确 tag（`git describe --tags --exact-match`）→ `Cargo.toml`；
+  必须是合法 semver（形如 `v1.0.1` 或 `1.0.1-rc.1`），否则脚本直接拒绝发布
+  —— 非 semver 版本（如 `v1.0.0-4-gabc1234`）会被客户端截断比对，更新永远发不出去
 - 每个文件附带 `.sha256` 校验侧车；同名版本重复上传按 409 跳过（Gitea 不允许覆盖）
 - 软件包页面：`{GITEA_URL}/{owner}?tab=packages`
 
@@ -156,11 +158,18 @@ export GITEA_TOKEN=gta_xxx
 
 推送 `v*` tag 即触发 [.gitea/workflows/release.yml](.gitea/workflows/release.yml)：
 
-1. 单元测试
-2. Windows / Linux 双平台 release 构建（产物重命名为 `mqttx-<ver>-<target>-<ext>`）
-3. 调用 `scripts/publish-gitea.sh` 上传到包注册表
+1. 版本一致性校验：tag 必须等于 `v` + `gpui-app/Cargo.toml` 的版本，否则整条流水线失败
+2. 单元测试（`--lib --tests`，集成测试只编译不执行）
+3. Linux release 构建（产物重命名为 `mqttx-v<ver>-<target>-mqttx`）
+4. 调用 `scripts/publish-gitea.sh`：上传包注册表，并创建同名 Release、
+   上传 7z / 裸二进制 / `.sha256` 附件
 
-需要在仓库 **Settings → Actions → Secrets** 配置 `GITEA_TOKEN`；
+> **应用内 OTA 只认 Release 附件**，附件名必须匹配 `mqttx-v<ver>-<triple>-mqttx[.exe]`。
+> Windows 产物目前由本地 `scripts/publish-gitea.ps1` 上传补充（CI 的 Windows 矩阵项
+> 在 runner 就绪前保持注释，见工作流内说明）。
+
+需要在仓库 **Settings → Actions → Secrets** 配置 `GITEA_TOKEN`（需 **repo 写权限**：
+脚本除包注册表外还要创建 Release 并上传附件）；
 若 runner 使用自定义 label，请相应修改工作流的 `runs-on`。
 
 ## 数据目录

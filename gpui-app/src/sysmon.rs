@@ -14,7 +14,8 @@ pub struct Sample {
     pub peak_working_set: u64,
     /// 提交内存（私有字节）
     pub private_bytes: u64,
-    /// 自上次采样以来的 CPU 占用百分比（按可用核数归一，0~100×核数内）
+    /// 自上次采样以来的 CPU 占用（占整机容量的百分比 0~100，已按核数归一，
+    /// 与任务管理器的"总利用率"同口径）
     pub cpu_percent: f32,
     /// 线程数
     pub threads: u32,
@@ -26,6 +27,8 @@ pub struct Sample {
 pub struct Sampler {
     pid: u32,
     last_cpu: Option<(u64, u64, Instant)>,
+    /// 上一次成功算出的占用率：采样间隔过近时沿用，避免读数跳回 0
+    last_percent: f32,
 }
 
 impl Sampler {
@@ -33,6 +36,7 @@ impl Sampler {
         Self {
             pid: std::process::id(),
             last_cpu: None,
+            last_percent: 0.0,
         }
     }
 
@@ -120,9 +124,16 @@ impl Sampler {
                 if dt > 0.05 {
                     let cpu_secs = ((k - pk) + (u - pu)) as f32 / 1e7;
                     cpu_percent = cpu_secs / dt / cores * 100.;
+                    self.last_percent = cpu_percent;
+                    // 只有真正算出结果才前移差分基准：否则连续两次快速采样
+                    // 会既报 0 又把基准推到"刚刚"，用户手点"立即刷新"永远读到 0%
+                    self.last_cpu = Some((k, u, now));
+                } else {
+                    cpu_percent = self.last_percent;
                 }
+            } else {
+                self.last_cpu = Some((k, u, now));
             }
-            self.last_cpu = Some((k, u, now));
         }
 
         // ── 线程数 / 句柄数 ──
@@ -191,7 +202,15 @@ mod tests {
         let first = s.sample().expect("采样应成功");
         std::thread::sleep(Duration::from_millis(30));
         let second = s.sample().expect("第二次采样应成功");
-        assert!(second.working_set > 0, "工作集应大于 0");
+        // 采样能力分平台：Windows 采集真实数据，其余平台按契约返回全零占位样本。
+        // 这里用 if cfg! 而不是 #[cfg]：两个分支都参与编译，避免只在某一个平台上
+        // 才发现语法/类型错误。此前无条件断言 > 0，导致 Linux 上 cargo test 必失败，
+        // 而 CI 的 test job 正是跑在 ubuntu-latest 上，v* tag 会直接停在测试阶段。
+        if cfg!(target_os = "windows") {
+            assert!(second.working_set > 0, "工作集应大于 0");
+        } else {
+            assert_eq!(second.working_set, 0, "非 Windows 平台应返回全零占位样本");
+        }
         let _ = (first, second);
     }
 

@@ -34,16 +34,41 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           owner="${GITEA_OWNER_OVERRIDE:-${GITHUB_REPOSITORY_OWNER}}"
           echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+      # 版本双真源校验：tag 必须与 gpui-app/Cargo.toml 一致。否则新包装完仍自报旧
+      # 版本号，客户端表现为"每次都提示同一个更新"，装多少次都消不掉。
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          cargo_ver="$(grep -m1 '^version' gpui-app/Cargo.toml | cut -d'"' -f2)"
+          if [ -z "$cargo_ver" ]; then
+            echo "::error::无法从 gpui-app/Cargo.toml 解析版本号"
+            exit 1
+          fi
+          if [ "v${cargo_ver}" != "$tag" ]; then
+            echo "::error::tag(${tag}) 与 gpui-app/Cargo.toml(v${cargo_ver}) 不一致：请先 bump 版本再打 tag"
+            exit 1
+          fi
+          echo "版本一致：${tag}"
 
-  # ─── 测试（不依赖系统图形库） ─────────────────────────────────
+  # ─── 测试 ─────────────────────────────────────────────────────
+  # 与 build 一样要完整编译 lib（GPUI 会链接 Linux 系统库），缺库会在链接期失败。
+  # 此前该 job 未安装任何依赖，叠加 sysmon 的跨平台断言缺陷，v* tag 必停在测试阶段。
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Linux system deps (GPUI)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libasound2-dev libfontconfig-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      # --tests：让 tests/engine_live.rs 参与编译（#[ignore] 只跳过执行，不跳过编译）
       - name: Unit tests
-        run: cargo test -p mqttx-desktop --lib
+        run: cargo test -p mqttx-desktop --lib --tests
 
   # ─── 构建矩阵 ─────────────────────────────────────────────────
   # 目前 Gitea 实例只注册了 ubuntu-latest 标签的 Linux runner，

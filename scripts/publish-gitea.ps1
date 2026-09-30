@@ -21,7 +21,8 @@
 .PARAMETER Files
   待上传文件列表。缺省时自动探测 target/release/mqttx(.exe)。
 .PARAMETER Version
-  软件包版本。缺省时依次尝试 git describe --tags、gpui-app/Cargo.toml。
+  软件包版本。缺省时依次尝试当前提交的精确 tag（git describe --tags --exact-match）、
+  gpui-app/Cargo.toml。必须是合法 semver，否则脚本拒绝发布。
 .PARAMETER Owner
   覆盖 GITEA_OWNER（缺省时从 git remote origin 推断）。
 .PARAMETER Repo
@@ -111,16 +112,31 @@ if (-not $Owner -or -not $Repo) {
 if (-not $Owner) { Die "无法推断 owner，请用 -Owner 或 GITEA_OWNER 指定" }
 if (-not $Repo)  { $Repo = $Pkg }
 
-# ── 版本：参数 > git describe > Cargo.toml ──────────────────────────────────
+# ── 版本：参数 > 当前提交的精确 tag > Cargo.toml ────────────────────────────
+# 严禁用 'git describe --tags --always' 兜底：它会产出 v1.0.0-4-gabc1234 这类非
+# semver 描述串，据此创建的 Release 会被客户端 release_part() 截成 1.0.0 并判定
+# "不比当前版本新" —— 更新永远发不出去，而且该 Release 会占据 /releases/latest，
+# 把真正的更新挡在后面。
+$CargoToml = Join-Path $Root "gpui-app\Cargo.toml"
+$CargoVer = ""
+$m = Select-String -Path $CargoToml -Pattern '^version = "(.+)"' | Select-Object -First 1
+if ($m) { $CargoVer = $m.Matches[0].Groups[1].Value }
 if (-not $Version) {
-    $Version = (git -C $Root describe --tags --always 2>$null)
+    $Version = (git -C $Root describe --tags --exact-match 2>$null)
+    if ($Version) { Write-Host "→ 版本取自当前提交的 tag: $Version" }
 }
 if (-not $Version) {
-    $m = Select-String -Path (Join-Path $Root "gpui-app\Cargo.toml") -Pattern '^version = "(.+)"' | Select-Object -First 1
-    if ($m) { $Version = $m.Matches[0].Groups[1].Value }
+    $Version = $CargoVer
+    if ($Version) { Write-Host "→ HEAD 无 tag，版本回退为 gpui-app/Cargo.toml: $Version" -ForegroundColor Yellow }
 }
-if (-not $Version) { Die "无法确定版本号" }
+if (-not $Version) { Die "无法确定版本号：请用 -Version 指定（如 v1.0.1）或先给当前提交打 tag" }
 $Version = $Version -replace "/", "-"   # Gitea 版本段不允许 "/"
+if ($Version -notmatch '^[vV]?\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') {
+    Die "版本号 '$Version' 不是合法 semver（应形如 v1.0.1 或 1.0.1-rc.1）"
+}
+if ($CargoVer -and (($Version -replace '^[vV]', '') -ne $CargoVer)) {
+    Write-Host "  ! 警告：版本 '$Version' 与 gpui-app/Cargo.toml ($CargoVer) 不一致" -ForegroundColor Yellow
+}
 
 # ── 默认产物 ────────────────────────────────────────────────────────────────
 if (-not $Files -or $Files.Count -eq 0) {
@@ -202,8 +218,8 @@ if (-not $rel) {
         Write-Host "→ 已创建 Release v$VerNum"
     }
     catch {
-        Write-Host "  ! Release 创建/查询失败：$($_.Exception.Message)；跳过附件上传" -ForegroundColor Yellow
-        return
+        # OTA 只认 Release 附件：这里失败等于本次发布无效，必须让调用方看到失败
+        Die "Release 创建/查询失败：$($_.Exception.Message)"
     }
 }
 $releaseId = $rel.id
