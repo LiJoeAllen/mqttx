@@ -23,8 +23,6 @@ pub use install::{
 /// - api.github.com 未认证配额为 60 次/小时/IP：共享出口 IP 打满时检查会失败，
 ///   按「错误仅记录、不打扰用户」静默降级，下次成功检查自动追上；
 ///   附件下载走 github.com CDN，不受 API 配额限制。
-/// - Gitea（gitea.heavenlybook.cn）是 v1.0.0 之前的历史发布渠道，已弃用：
-///   GitHub 侧发布历史自 v1.0.0 起独立开始，不再向 Gitea 镜像。
 pub const RELEASES_API: &str = "https://api.github.com/repos/LiJoeAllen/mqttx/releases";
 /// Releases 页面（github.com，非 API、无配额限制）：api.github.com 被限流时
 /// 兜底发现最新 tag —— 跟踪 `{RELEASES_PAGE}/latest` 的 302，从最终 URL 取 tag，

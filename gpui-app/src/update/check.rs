@@ -1,4 +1,4 @@
-//! 更新检查：访问 Gitea Release API，比较版本并挑选本平台资产。
+//! 更新检查：访问 GitHub Releases，比较版本并挑选本平台资产。
 
 use super::*;
 

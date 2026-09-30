@@ -31,7 +31,7 @@ const MAX_MESSAGES_MIN: usize = 100;
 const MAX_MESSAGES_MAX: usize = 100_000;
 
 const SITE_URL: &str = "https://mqttx.app";
-const REPO_URL: &str = "https://gitea.heavenlybook.cn/JoeAllen/mqttx";
+const REPO_URL: &str = "https://github.com/LiJoeAllen/mqttx";
 
 /// 更新检查/安装在设置对话框内的展示状态。
 #[derive(Debug, Clone)]
@@ -171,7 +171,7 @@ impl SettingsDialog {
                     .xsmall()
                     .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
                     .into_any_element(),
-                "检查 Gitea Release 上的新版本".into_any_element(),
+                "检查 GitHub Releases 上的新版本".into_any_element(),
                 false,
             ),
             UpdateUi::Checking => row(
@@ -523,7 +523,7 @@ impl Render for SettingsDialog {
                                     .on_click(|_, _, cx| cx.open_url(SITE_URL)),
                             ).child(
                                 Button::new("about-repo")
-                                    .label("gitea.heavenlybook.cn/JoeAllen/mqttx")
+                                    .label("github.com/LiJoeAllen/mqttx")
                                     .ghost()
                                     .xsmall()
                                     .tooltip(REPO_URL)

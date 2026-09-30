@@ -60,7 +60,7 @@ gpui-app/
 │   │   ├── tls.rs           #   rustls 配置与跳过校验
 │   │   ├── v5.rs            #   MQTT 5.0 客户端构建与事件循环
 │   │   └── v4.rs            #   MQTT 3.1.1 客户端构建与事件循环
-│   ├── update/              # OTA 自更新（GitHub Release 源；v1.0.x 老客户端源仍在 Gitea）
+│   ├── update/              # OTA 自更新（GitHub Releases 源）
 │   │   ├── mod.rs           #   门面：版本比较、资产命名约定
 │   │   ├── check.rs         #   检查最新版本与资产挑选
 │   │   └── install.rs       #   7z 下载暂存、sha256 校验、自替换安装
@@ -141,7 +141,7 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 > macOS 产物未做签名/公证：浏览器下载后首次打开会被 Gatekeeper 拦截，需
 > `xattr -d com.apple.quarantine <binary>`；应用内 OTA 自更新不走浏览器，无此问题。
 >
-> GitHub 侧发布历史自 v1.0.0 起独立开始，不向其他渠道镜像（Gitea 为历史渠道，已弃用）。
+> GitHub 侧发布历史自 v1.0.0 起独立开始，不向其他渠道镜像。
 
 ## 数据目录
 
