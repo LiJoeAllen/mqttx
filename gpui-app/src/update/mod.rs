@@ -53,13 +53,18 @@ pub fn current_version() -> &'static str {
 }
 
 /// 构建目标的平台三元组，需与 release.yml / publish 脚本的产物命名一致。
-pub fn platform_triple() -> &'static str {
+///
+/// 架构取自 `std::env::consts::ARCH` 而非写死：写死 x86_64 会让 Apple Silicon /
+/// ARM Linux 客户端永远挑不到自己的产物（发布脚本能产出 aarch64 资产，但无人下载），
+/// 甚至在只有 x86_64 资产时把错误架构的二进制装上去。
+pub fn platform_triple() -> String {
+    let arch = std::env::consts::ARCH;
     if cfg!(windows) {
-        "x86_64-pc-windows-msvc"
+        format!("{arch}-pc-windows-msvc")
     } else if cfg!(target_os = "macos") {
-        "x86_64-apple-darwin"
+        format!("{arch}-apple-darwin")
     } else {
-        "x86_64-unknown-linux-gnu"
+        format!("{arch}-unknown-linux-gnu")
     }
 }
 
@@ -113,6 +118,12 @@ pub fn is_newer(a: &str, b: &str) -> bool {
 pub struct StagedUpdate {
     pub version: String,
     pub path: PathBuf,
+    /// 暂存二进制的 sha256（小写 hex）。
+    ///
+    /// 注意它与 Release 附件的 `.sha256` 侧车不是同一个东西：侧车校验的是**下载到的
+    /// 压缩包**，这里是**解压/落盘后的最终二进制**。安装同意标记绑定该哈希，安装前
+    /// 也会用它复核，防止"下载校验通过"到"下次启动安装"之间文件被替换。
+    pub sha256: String,
 }
 
 
@@ -183,42 +194,68 @@ mod tests {
 
     #[test]
     fn pick_assets_prefers_7z_over_raw_binary() {
+        // 附件名按**当前平台**三元组构造：写死 x86_64-pc-windows-msvc 会让本测试
+        // 只在 Windows 上通过，Linux CI 必红
+        let triple = platform_triple();
+        let bin = if cfg!(windows) { "mqttx.exe" } else { "mqttx" };
+        let base = format!("mqttx-v1.0.1-{triple}-{bin}");
+        let (n_bin, n_bin_sha, n_7z, n_7z_sha) = (
+            base.clone(),
+            format!("{base}.sha256"),
+            format!("{base}.7z"),
+            format!("{base}.7z.sha256"),
+        );
         let rel: serde_json::Value = serde_json::json!({
             "tag_name": "v1.0.1",
             "assets": [
-                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe", "size": 21000000,
-                 "browser_download_url": "https://x/win.exe"},
-                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.sha256", "size": 65,
-                 "browser_download_url": "https://x/win.exe.sha256"},
-                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.7z", "size": 9000000,
-                 "browser_download_url": "https://x/win.7z"},
-                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.7z.sha256", "size": 65,
-                 "browser_download_url": "https://x/win.7z.sha256"}
+                {"name": n_bin, "size": 21000000, "browser_download_url": "https://x/bin"},
+                {"name": n_bin_sha, "size": 65, "browser_download_url": "https://x/bin.sha256"},
+                {"name": n_7z, "size": 9000000, "browser_download_url": "https://x/bin.7z"},
+                {"name": n_7z_sha, "size": 65, "browser_download_url": "https://x/bin.7z.sha256"}
             ]
         });
         let (name, url, size, sha) = pick_assets(&rel).expect("应选中 7z");
         assert!(name.ends_with(".7z"), "应优先 7z 压缩包，实际 {name}");
-        assert_eq!(url, "https://x/win.7z");
+        assert_eq!(url, "https://x/bin.7z");
         assert_eq!(size, 9000000);
-        assert_eq!(sha.as_deref(), Some("https://x/win.7z.sha256"));
+        assert_eq!(sha.as_deref(), Some("https://x/bin.7z.sha256"));
     }
 
     #[test]
     fn pick_assets_falls_back_to_raw_binary() {
         // 旧发布方式只有裸二进制：仍可被选中
+        let triple = platform_triple();
+        let bin = if cfg!(windows) { "mqttx.exe" } else { "mqttx" };
+        let base = format!("mqttx-v1.0.1-{triple}-{bin}");
+        let (n_bin, n_sha) = (base.clone(), format!("{base}.sha256"));
         let rel: serde_json::Value = serde_json::json!({
             "tag_name": "v1.0.1",
             "assets": [
-                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe", "size": 19132928,
-                 "browser_download_url": "https://x/win"},
-                {"name": "mqttx-v1.0.1-x86_64-pc-windows-msvc-mqttx.exe.sha256", "size": 65,
-                 "browser_download_url": "https://x/win.sha256"}
+                {"name": n_bin, "size": 19132928, "browser_download_url": "https://x/bin"},
+                {"name": n_sha, "size": 65, "browser_download_url": "https://x/bin.sha256"}
             ]
         });
         let (name, url, _size, sha) = pick_assets(&rel).expect("应回退裸二进制");
-        assert!(name.ends_with(".exe"));
-        assert_eq!(url, "https://x/win");
-        assert_eq!(sha.as_deref(), Some("https://x/win.sha256"));
+        assert!(name.ends_with(bin), "实际 {name}");
+        assert_eq!(url, "https://x/bin");
+        assert_eq!(sha.as_deref(), Some("https://x/bin.sha256"));
+    }
+
+    // 非约定命名的附件不得被选中：非 Windows 下旧实现的 ends_with("") 恒真，
+    // 会把 .tar.gz / .deb 这类附件当成可执行文件下载并替换自身
+    #[test]
+    fn pick_assets_rejects_non_convention_assets() {
+        let triple = platform_triple();
+        let rel: serde_json::Value = serde_json::json!({
+            "tag_name": "v1.0.1",
+            "assets": [
+                {"name": format!("mqttx-v1.0.1-{triple}.tar.gz"), "size": 1024,
+                 "browser_download_url": "https://x/pkg.tar.gz"},
+                {"name": format!("mqttx-v1.0.1-{triple}-debug"), "size": 1024,
+                 "browser_download_url": "https://x/dbg"}
+            ]
+        });
+        assert!(pick_assets(&rel).is_none(), "非约定命名的附件不应被选中");
     }
 
     #[test]

@@ -25,7 +25,7 @@ fn main() {
     // （「下次启动安装」），在进入 UI 前完成自替换并重启。
     update::cleanup_old();
     if let Some(staged) = update::load_staged() {
-        if update::install_consent_matches(&staged.version) {
+        if update::install_consent_matches(&staged) {
             match update::install_staged(&staged) {
                 Ok(()) => {
                     // 新进程已拉起，当前进程立即退出

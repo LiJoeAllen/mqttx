@@ -94,7 +94,9 @@ pub struct MqttRecord {
     pub retain: bool,
     /// unix 毫秒
     pub timestamp: i64,
-    pub user_properties: Vec<(String, String)>,
+    /// Arc 共享：消息列表每帧克隆数百条记录，Vec<(String,String)> 的深拷贝是
+    /// 每帧堆分配的主要来源，改为 Arc 后 clone 只增加引用计数
+    pub user_properties: Arc<[(String, String)]>,
     pub content_type: Option<String>,
     pub response_topic: Option<String>,
     pub correlation_data: Option<String>,

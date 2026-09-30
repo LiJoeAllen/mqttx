@@ -2,7 +2,6 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use rumqttc::mqttbytes::v5::{
     ConnectReturnCode as V5ReturnCode, Packet as V5Packet,
@@ -103,7 +102,12 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
     cfg.client_id = format!("mqttx_test_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
     let cfg = &cfg;
     if cfg.protocol.is_v5() {
-        let (client, mut eventloop) = build_v5(cfg)?;
+        // 建 client 会读 CA/证书文件（阻塞 IO）：与 connect 保持一致放 spawn_blocking，
+        // 避免占住 2 线程引擎 runtime 的 worker
+        let owned = cfg.clone();
+        let (client, mut eventloop) = tokio::task::spawn_blocking(move || build_v5(&owned))
+            .await
+            .map_err(|e| format!("内部任务失败: {e}"))??;
         loop {
             match eventloop.poll().await {
                 Ok(V5Event::Incoming(V5Packet::ConnAck(ack))) => {
@@ -129,7 +133,11 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
             }
         }
     } else {
-        let (client, mut eventloop) = build_v4(cfg)?;
+        // 同上：v4 分支同样把阻塞的建连放到阻塞线程池
+        let owned = cfg.clone();
+        let (client, mut eventloop) = tokio::task::spawn_blocking(move || build_v4(&owned))
+            .await
+            .map_err(|e| format!("内部任务失败: {e}"))??;
         loop {
             match eventloop.poll().await {
                 Ok(rv4::Event::Incoming(rv4::Packet::ConnAck(ack))) => {
@@ -193,7 +201,7 @@ pub(super) fn spawn_v4_loop(
                                 },
                                 retain: p.retain,
                                 timestamp: now_ms(),
-                                user_properties: Vec::new(),
+                                user_properties: Default::default(),
                                 content_type: None,
                                 response_topic: None,
                                 correlation_data: None,
@@ -294,13 +302,14 @@ pub(super) fn spawn_v4_loop(
                                 break;
                             }
                             reconnect_attempts += 1;
+                            let delay = reconnect_delay(reconnect_attempts);
                             engine.log(&id, LogLevel::Warn, "connection_error",
-                                format!("连接错误，2 秒后重连（第 {reconnect_attempts} 次）: {e}"), None);
-                            // 退避等待也必须可取消：否则 close() 的取消信号最长
-                            // 2 秒不可见，期间会对用户已关闭的连接继续重连。
+                                format!("连接错误，{:.1} 秒后重连（第 {reconnect_attempts} 次）: {e}", delay.as_secs_f32()), None);
+                            // 退避等待也必须可取消：否则 close() 的取消信号要等一整个
+                            // 退避周期才可见，期间会对用户已关闭的连接继续重连。
                             tokio::select! {
                                 _ = cancel_rx.changed() => break,
-                                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                                _ = tokio::time::sleep(delay) => {}
                             }
                         }
                     }

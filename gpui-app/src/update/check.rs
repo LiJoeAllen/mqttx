@@ -23,23 +23,21 @@ pub(super) fn http_get_json(url: &str) -> Result<serde_json::Value, String> {
 
 pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Option<String>)> {
     let assets = rel.get("assets")?.as_array()?;
-    let want_ext = if cfg!(windows) { ".exe" } else { "" };
     let triple = platform_triple();
+    // 产物命名约定：`mqttx-v<ver>-<triple>-mqttx[.exe]`（压缩包再加 `.7z`）。
+    // 必须按固定后缀精确匹配：非 Windows 下扩展名为空串时 `ends_with("")` 恒真，
+    // 任何含三元组的附件（.tar.gz/.deb/.txt）都会被当成可执行文件下载并替换自身。
+    let bin_name = if cfg!(windows) { "mqttx.exe" } else { "mqttx" };
 
-    // (后缀过滤器, 说明)：第一轮 7z，第二轮裸二进制
-    for suffix in [".7z", want_ext] {
+    // 第一轮 7z 压缩包，第二轮裸二进制
+    for suffix in [".7z", ""] {
         for a in assets {
             let Some(name) = a.get("name").and_then(|n| n.as_str()) else {
                 continue;
             };
-            if !name.contains(triple)
-                || !name.ends_with(suffix)
+            if !name.contains(triple.as_str())
+                || !name.ends_with(&format!("{bin_name}{suffix}"))
                 || name.ends_with(".sha256")
-            {
-                continue;
-            }
-            // 7z 轮要排除裸二进制（windows 裸 exe 不以 .7z 结尾，天然互斥）
-            if suffix == ".7z" && !name.ends_with(&format!("{want_ext}.7z")) && !want_ext.is_empty()
             {
                 continue;
             }

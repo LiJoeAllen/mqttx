@@ -253,7 +253,8 @@ impl SettingsDialog {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         // 写入同意标记：下次启动据此自动安装
                                         if let UpdateUi::ReadyToInstall(staged) = &this.update {
-                                            update::mark_install_consent(&staged.version);
+                                            // 同意标记绑定版本 + 暂存文件哈希
+                                            update::mark_install_consent(staged);
                                         }
                                         this.update = UpdateUi::Idle;
                                         window.push_notification(
@@ -535,6 +536,11 @@ impl Render for SettingsDialog {
 }
 
 pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
+    // 对话框是栈式叠加：标题栏菜单、快捷键、行内按钮等多个入口都会调 open，
+    // 不加守卫会压入第二个模态，同 id 的控件在两层之间串台
+    if window.has_active_dialog(cx) {
+        return;
+    }
     let (engine, initial, data_dir, log_dir) = {
         let state = app.read(cx);
         (

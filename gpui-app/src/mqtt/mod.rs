@@ -96,6 +96,8 @@ pub struct MqttEngine {
     topics: Mutex<HashMap<String, Arc<str>>>,
     tx: EventSender,
     seq: Arc<AtomicU64>,
+    /// 因 UI 队列满而被丢弃的高频事件数（消息/日志），仅在丢弃时递增
+    dropped: AtomicU64,
 }
 
 fn now_ms() -> i64 {
@@ -117,6 +119,7 @@ impl MqttEngine {
             topics: Mutex::new(HashMap::new()),
             tx,
             seq: Arc::new(AtomicU64::new(1)),
+            dropped: AtomicU64::new(0),
         })
     }
 
@@ -124,8 +127,45 @@ impl MqttEngine {
         self.seq.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// 投递事件到 UI 线程。
+    ///
+    /// 通道是**有界**的（容量由 UI 侧创建时决定）。UI 处理不过来时：
+    /// - 高频事件（收到的消息、日志）直接丢弃并累计计数——它们本身就受消息环形缓冲
+    ///   与日志上限约束，丢掉最多是"少看几条"，但内存有了上界；
+    /// - 低频且影响正确性的事件（状态变化、订阅结果、发布回执）改为异步补投，
+    ///   既不阻塞引擎事件循环，也不会丢。
+    ///
+    /// 修复前用的是无界通道：到达速率持续超过消费速率时队列无界增长，单条消息最长
+    /// 可携带 128KB payload，内存没有上界。
     fn emit(&self, event: EngineEvent) {
-        let _ = self.tx.try_send(event);
+        let droppable = matches!(event, EngineEvent::Message(_) | EngineEvent::Log(_));
+        match self.tx.try_send(event) {
+            Ok(()) => {}
+            Err(smol::channel::TrySendError::Full(ev)) => {
+                if droppable {
+                    let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
+                    // 每丢弃 1000 条提示一次，避免用户误以为"消息不来了"
+                    if dropped.is_multiple_of(1000) {
+                        let _ = self.tx.try_send(EngineEvent::Log(LogEntry {
+                            timestamp: now_ms(),
+                            connection_id: String::new(),
+                            level: LogLevel::Warn,
+                            event: "events_dropped".into(),
+                            message: format!(
+                                "UI 处理不过来，已累计丢弃 {dropped} 条高频事件（消息/日志）"
+                            ),
+                            details: None,
+                        }));
+                    }
+                } else {
+                    let tx = self.tx.clone();
+                    self.runtime.spawn(async move {
+                        let _ = tx.send(ev).await;
+                    });
+                }
+            }
+            Err(smol::channel::TrySendError::Closed(_)) => {}
+        }
     }
 
     fn log(&self, conn_id: &str, level: LogLevel, event: &str, message: String, details: Option<String>) {
@@ -532,8 +572,6 @@ impl MqttEngine {
         });
     }
 
-    /// 测试连接：使用配置的连接超时（上限 30 秒，防止误填过大值长时间挂起），
-    /// 结果通过 channel 返回。
     /// 在引擎的 tokio runtime 上调度阻塞任务（OTA 下载等），
     /// 结果经 smol 通道送回 GPUI 执行器；任务 panic 时接收端以空错误结束。
     pub fn run_blocking<T: Send + 'static>(
@@ -565,6 +603,8 @@ impl MqttEngine {
         arc
     }
 
+    /// 测试连接：使用配置的连接超时（上限 30 秒，防止误填过大值长时间挂起），
+    /// 结果通过 channel 返回。
     pub fn test_connection(
         self: &Arc<Self>,
         cfg: ConnectionConfig,
@@ -624,5 +664,16 @@ enum EventLoopKind {
 /// 连接超时秒数：至少 1 秒，避免误填 0 导致立刻超时。
 fn connection_timeout_secs(cfg: &ConnectionConfig) -> u64 {
     u64::from(cfg.connection_timeout_secs.max(1))
+}
+
+/// 重连退避：指数增长（1s、2s、4s…，封顶 30 秒）并叠加 0~500ms 抖动。
+///
+/// 原来固定 2 秒：broker 长时间不可用时会以固定频率持续冲击，多连接还会在同一时刻
+/// 齐步重连（惊群）；抖动让各连接的退避点错开。
+fn reconnect_delay(attempt: u32) -> Duration {
+    let exp = attempt.saturating_sub(1).min(5);
+    let secs = (1u64 << exp).min(30);
+    let jitter_ms = (uuid::Uuid::new_v4().as_u128() % 500) as u64;
+    Duration::from_millis(secs * 1000 + jitter_ms)
 }
 

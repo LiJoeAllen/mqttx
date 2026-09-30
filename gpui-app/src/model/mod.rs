@@ -300,6 +300,21 @@ mod tests {
 
         b.ssl.ca_file = "/tmp/ca.pem".into();
         assert!(a.session_params_changed(&b), "TLS 配置改动应触发重连提示");
+
+        // MQTT 5 的 CONNECT 属性同样随报文一次性生效（此前遗漏，导致
+        // "配置已保存，重连后生效"的提示静默失效）
+        b = a.clone();
+        b.session_expiry_interval = a.session_expiry_interval + 1;
+        assert!(a.session_params_changed(&b), "会话过期间隔改动应触发重连提示");
+        b = a.clone();
+        b.receive_maximum = Some(10);
+        assert!(a.session_params_changed(&b), "接收上限改动应触发重连提示");
+        b = a.clone();
+        b.maximum_packet_size = Some(1024);
+        assert!(a.session_params_changed(&b), "最大报文长度改动应触发重连提示");
+        b = a.clone();
+        b.topic_alias_maximum = Some(5);
+        assert!(a.session_params_changed(&b), "主题别名上限改动应触发重连提示");
     }
 
     fn ring_record(seq: u64, payload_len: usize, raw_len: usize) -> MqttRecord {
@@ -312,7 +327,7 @@ mod tests {
             qos: 0,
             retain: false,
             timestamp: 0,
-            user_properties: Vec::new(),
+            user_properties: Default::default(),
             content_type: None,
             response_topic: None,
             correlation_data: None,

@@ -119,7 +119,9 @@ impl SslConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Debug 手写而非 derive：`{:?}` 一次格式化就会把 `password` 送进 stderr 与 Sentry
+//（panic 钩子会连同载荷一起上报），见文件底部的实现。
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     pub id: String,
     pub name: String,
@@ -250,8 +252,9 @@ impl ConnectionConfig {
 
     /// 与另一份配置相比，影响 broker 会话建立的关键参数是否变化。
     /// 这些字段改动只有在重新建立连接后才会生效，用于提示用户重连。
-    /// WS 路径、遗嘱、TLS 配置、keep_alive 同样随 CONNECT 报文一次性生效，
-    /// 必须纳入比较。
+    /// WS 路径、遗嘱、TLS 配置、keep_alive 随 CONNECT 报文一次性生效；
+    /// MQTT 5 的四个 CONNECT 属性（会话过期/接收上限/最大报文/主题别名）同样如此，
+    /// 全部纳入比较——漏掉的字段会让"重连后生效"提示静默失效。
     pub fn session_params_changed(&self, other: &ConnectionConfig) -> bool {
         self.host != other.host
             || self.port != other.port
@@ -265,12 +268,44 @@ impl ConnectionConfig {
             || self.keep_alive != other.keep_alive
             || self.last_will != other.last_will
             || self.ssl != other.ssl
+            || self.session_expiry_interval != other.session_expiry_interval
+            || self.receive_maximum != other.receive_maximum
+            || self.maximum_packet_size != other.maximum_packet_size
+            || self.topic_alias_maximum != other.topic_alias_maximum
     }
 }
 
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 脱敏 Debug：`password` 以 `<redacted>` 输出。
+/// 该结构在日志/panic 场景下可能被整体格式化（`{:?}`），derive 出的 Debug 会把
+/// 明文密码带进 stderr 与 Sentry（main.rs 的 panic 钩子会上报），因此必须手写。
+impl std::fmt::Debug for ConnectionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionConfig")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("path", &self.path)
+            .field("protocol", &self.protocol)
+            .field("transport", &self.transport)
+            .field("client_id", &self.client_id)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("clean_start", &self.clean_start)
+            .field("keep_alive", &self.keep_alive)
+            .field("auto_resubscribe", &self.auto_resubscribe)
+            .field("auto_reconnect", &self.auto_reconnect)
+            .field("auto_connect", &self.auto_connect)
+            .field("has_last_will", &self.last_will.is_some())
+            .field("group", &self.group)
+            .field("ssl", &"<redacted>")
+            .finish_non_exhaustive()
     }
 }
 

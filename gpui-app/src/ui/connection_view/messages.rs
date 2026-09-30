@@ -135,6 +135,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
         &self,
         record: &MqttRecord,
         sub_color: Option<f32>,
+        show_millis: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let seq = record.seq;
@@ -150,9 +151,6 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
         let direction_label = if received { "接收" } else { "发布" };
-        let show_millis = self
-            .with_app(cx, |app| app.settings.show_millis)
-            .unwrap_or(true);
 
         let header = h_flex()
             .gap_2()
@@ -516,9 +514,12 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
             );
         } else {
             // 最新消息在最上方（与 MQTTX 一致，避免长列表需要手动滚底）
+            let show_millis = self
+                .with_app(cx, |app| app.settings.show_millis)
+                .unwrap_or(true);
             for r in &records {
                 let color = pick_subscription_color(&subs, &r.topic);
-                body = body.child(self.render_message_row(r, color, cx));
+                body = body.child(self.render_message_row(r, color, show_millis, cx));
             }
         }
 

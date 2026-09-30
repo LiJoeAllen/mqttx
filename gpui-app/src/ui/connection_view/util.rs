@@ -149,7 +149,7 @@ pub(super) fn details_copy_text(record: &MqttRecord, show_millis: bool) -> Strin
     }
     if !record.user_properties.is_empty() {
         out.push_str("User Properties:\n");
-        for (k, v) in &record.user_properties {
+        for (k, v) in record.user_properties.iter() {
             out.push_str(&format!("  {k} = {v}\n"));
         }
     }

@@ -145,7 +145,7 @@ fn v5_record(engine: &MqttEngine, seq: u64, conn_id: &str, p: &V5Publish) -> Mqt
         retain: p.retain,
         timestamp: now_ms(),
         user_properties: props
-            .map(|p| p.user_properties.clone())
+            .map(|p| Arc::from(p.user_properties.clone()))
             .unwrap_or_default(),
         content_type: props.and_then(|p| p.content_type.clone()),
         response_topic: props.and_then(|p| p.response_topic.clone()),
@@ -331,13 +331,14 @@ pub(super) fn spawn_v5_loop(
                                 break;
                             }
                             reconnect_attempts += 1;
+                            let delay = reconnect_delay(reconnect_attempts);
                             engine.log(&id, LogLevel::Warn, "connection_error",
-                                format!("连接错误，2 秒后重连（第 {reconnect_attempts} 次）: {e}"), None);
-                            // 退避等待也必须可取消：否则 close() 的取消信号最长
-                            // 2 秒不可见，期间会对用户已关闭的连接继续重连。
+                                format!("连接错误，{:.1} 秒后重连（第 {reconnect_attempts} 次）: {e}", delay.as_secs_f32()), None);
+                            // 退避等待也必须可取消：否则 close() 的取消信号要等一整个
+                            // 退避周期才可见，期间会对用户已关闭的连接继续重连。
                             tokio::select! {
                                 _ = cancel_rx.changed() => break,
-                                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                                _ = tokio::time::sleep(delay) => {}
                             }
                         }
                     }

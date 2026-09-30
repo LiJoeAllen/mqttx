@@ -78,7 +78,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                     qos,
                     retain,
                     timestamp: chrono::Local::now().timestamp_millis(),
-                    user_properties,
+                    user_properties: Arc::from(user_properties),
                     content_type,
                     response_topic,
                     correlation_data,
@@ -185,7 +185,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
         if self.logs.len() >= MAX_LOGS {
             self.logs.pop_front();
         }
-        self.logs.push_back(entry);
+        self.logs.push_back(Arc::new(entry));
     }
 
     /// 追加写入按日切分的日志文件 `mqttx-YYYY-MM-DD.log`。

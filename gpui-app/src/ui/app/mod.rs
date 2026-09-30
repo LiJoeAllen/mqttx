@@ -44,6 +44,8 @@ mod titlebar;
 use theme::apply_theme;
 
 const MAX_LOGS: usize = 3000;
+/// 引擎 → UI 的事件队列容量（有界，见 `MqttEngine::emit` 的丢弃策略）
+const EVENT_QUEUE_CAPACITY: usize = 1024;
 
 // 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
 gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor]);
@@ -92,7 +94,9 @@ pub struct MqttXApp {
     pub errors: HashMap<String, String>,
     /// 每连接消息环形缓冲：键为驻留后的连接 ID，条数 + 字节预算双重约束
     pub messages: HashMap<Arc<str>, MessageRing>,
-    pub logs: VecDeque<LogEntry>,
+    /// Arc 共享：日志面板每帧最多克隆 3000 条，深拷贝会让渲染线程每秒
+    /// 产生数十万次 String 堆分配；改 Arc 后仅增加引用计数
+    pub logs: VecDeque<Arc<LogEntry>>,
     pub seq: u64,
 
     // ── 标签与视图 ──
@@ -126,7 +130,9 @@ impl MqttXApp {
 
         apply_theme(settings.theme, cx);
 
-        let (tx, rx) = smol::channel::unbounded();
+        // 有界事件队列：引擎侧对高频事件（消息/日志）做丢弃并计数，保证 UI 消费
+        // 不过来时内存有上界。1024 × 单条最大 128KB ≈ 最坏 128MB，常规消息下几百 KB。
+        let (tx, rx) = smol::channel::bounded(EVENT_QUEUE_CAPACITY);
         let engine = MqttEngine::new(tx);
 
         let weak = cx.entity().downgrade();
@@ -163,7 +169,7 @@ impl MqttXApp {
                         window.open_dialog(cx, move |dialog, _, _cx| {
                             let staged = staged.clone();
                             let staged_skip = staged.clone();
-                            let ver = staged.version.clone();
+                            let staged_consent = staged.clone();
                             dialog
                                     .w(px(440.))
                                     .title("更新就绪")
@@ -198,7 +204,7 @@ impl MqttXApp {
                                                     .on_click(move |_, window, cx| {
                                                         // 同意标记：启动时据此自动安装；
                                                         // 用户跳过对话框则不会强制升级
-                                                        update::mark_install_consent(&ver);
+                                                        update::mark_install_consent(&staged_consent);
                                                         window.close_dialog(cx);
                                                     }),
                                             )
