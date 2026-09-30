@@ -340,7 +340,36 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                             .child(format!("正在编辑：{topic}")),
                     )
                 })
-                .child(div().flex_1().min_w(px(0.)).child(Input::new(&sub_topic).small()))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("sub-topic-wrap-{}", self.conn_id)))
+                        .flex_1()
+                        .min_w(px(0.))
+                        // Enter 直接提交订阅；Esc 退出编辑态或清空输入，
+                        // 调试时不必为每次订阅伸手点按钮
+                        .on_key_down(cx.listener(
+                            |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
+                                if ev.keystroke.key == "enter"
+                                    && !ev.keystroke.modifiers.control
+                                    && !ev.keystroke.modifiers.alt
+                                {
+                                    cx.stop_propagation();
+                                    this.do_subscribe(window, cx);
+                                } else if ev.keystroke.key == "escape" {
+                                    cx.stop_propagation();
+                                    if this.editing.is_some() {
+                                        this.editing = None;
+                                        this.reset_subscribe_form(window, cx);
+                                    } else {
+                                        this.sub_topic
+                                            .update(cx, |s, cx| s.set_value("", window, cx));
+                                    }
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                        .child(Input::new(&sub_topic).small()),
+                )
                 .child(div().w(px(96.)).child(Select::new(&sub_qos).small()))
                 .child(div().w(px(112.)).child(Input::new(&sub_alias).small()))
                 .when(is_v5, |h| {
@@ -706,6 +735,9 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
             .h_full()
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
+            // 深色主题下订阅面板与消息区同色，补一条分隔线保持边界可辨
+            .border_r_1()
+            .border_color(cx.theme().border)
             .child(
                 h_flex()
                     .h_11()

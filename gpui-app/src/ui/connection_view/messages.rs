@@ -403,11 +403,13 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
             .border_color(border)
             .hover(move |this| this.bg(hover_bg))
             .cursor_pointer()
-            // 左侧色条：有订阅色时显示，否则透明以保持行内对齐
+            // 左侧色条：有订阅色时显示，否则透明以保持行内对齐；
+            // 上下留 2px 间隙，避免相邻行的色条连成一整条竖线
             .child(
                 div()
                     .w(px(3.))
                     .self_stretch()
+                    .my_0p5()
                     .rounded_full()
                     .bg(sub_color.map(hue_color).unwrap_or(hsla(0., 0., 0., 0.))),
             )
@@ -602,8 +604,20 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                     .child(dir_group)
                     .child(
                         div()
+                            .id(SharedString::from(format!("msg-filter-wrap-{}", self.conn_id)))
                             .flex_1()
                             .min_w(px(0.))
+                            // Esc 清空过滤词：高频调试时比全选删除顺手
+                            .on_key_down(cx.listener(
+                                |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
+                                    if ev.keystroke.key == "escape" {
+                                        cx.stop_propagation();
+                                        this.filter
+                                            .update(cx, |s, cx| s.set_value("", window, cx));
+                                        cx.notify();
+                                    }
+                                },
+                            ))
                             .child(Input::new(&self.filter).small().prefix(
                                 gpui_kit::component::Icon::new(IconName::Search).small(),
                             )),
@@ -625,6 +639,33 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                                 .text_color(cx.theme().muted_foreground)
                                 .child(format!("仅显示最新 {} 条", MAX_RENDERED_MESSAGES)),
                         )
+                    })
+                    .child({
+                        // 暂停滚动：高频消息流下锁定当前画面以便阅读/展开，
+                        // 消息仍照常入环形缓冲，恢复后直接显示最新
+                        let paused = self.paused;
+                        Button::new(SharedString::from(format!(
+                            "msg-pause-{}",
+                            self.conn_id
+                        )))
+                        .icon(if paused {
+                            IconName::Play
+                        } else {
+                            IconName::Pause
+                        })
+                        .label(if paused { "恢复" } else { "暂停" })
+                        .ghost()
+                        .small()
+                        .when(paused, |b| b.selected(true))
+                        .tooltip(if paused {
+                            "恢复实时滚动"
+                        } else {
+                            "暂停消息流滚动（消息仍在后台接收）"
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.paused = !this.paused;
+                            cx.notify();
+                        }))
                     })
                     .child({
                         let weak = cx.weak_entity();

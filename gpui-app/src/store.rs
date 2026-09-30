@@ -207,6 +207,28 @@ impl Storage {
             elog!("保存设置失败: {e}");
         }
     }
+
+    // ── ui state（标签页会话恢复） ──
+    pub fn load_ui_state(&self) -> UiState {
+        self.read_json("ui-state.json")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+    pub fn save_ui_state(&self, state: &UiState) {
+        if let Err(e) = self.write_json("ui-state.json", state) {
+            elog!("保存界面状态失败: {e}");
+        }
+    }
+}
+
+/// 会话 UI 状态：打开的标签页与活动标签，用于重启后恢复工作区。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct UiState {
+    #[serde(default)]
+    pub open_tabs: Vec<String>,
+    #[serde(default)]
+    pub active_tab: Option<String>,
 }
 
 impl Default for Storage {

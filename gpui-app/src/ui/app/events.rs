@@ -49,9 +49,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                 }
                 record.seq = self.next_seq();
                 self.push_message(id.clone(), record);
-                if let Some(view) = self.views.get(id.as_ref()) {
-                    view.update(cx, |_, cx| cx.notify());
-                }
+                self.notify_message_view(&id, cx);
             }
             EngineEvent::Published {
                 connection_id,
@@ -88,9 +86,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                     raw_bytes,
                 };
                 self.push_message(Arc::from(connection_id.as_str()), record);
-                if let Some(view) = self.views.get(connection_id.as_str()) {
-                    view.update(cx, |_, cx| cx.notify());
-                }
+                self.notify_message_view(&connection_id, cx);
             }
             EngineEvent::SubscribeResult {
                 connection_id,
@@ -160,6 +156,16 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
     }
 
     // ── 数据工具 ──────────────────────────────────────────────────────────
+
+    /// 消息到达后刷新对应工作区；用户按下「暂停」时跳过，
+    /// 避免高频消息流不断把正在阅读的内容顶走（消息仍照常入环形缓冲）。
+    fn notify_message_view(&self, connection_id: &str, cx: &mut Context<Self>) {
+        if let Some(view) = self.views.get(connection_id)
+            && !view.read(cx).is_paused()
+        {
+            view.update(cx, |_, cx| cx.notify());
+        }
+    }
 
     fn next_seq(&mut self) -> u64 {
         self.seq += 1;

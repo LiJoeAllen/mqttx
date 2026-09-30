@@ -185,7 +185,7 @@ impl ConnectionForm {
         let ssl_client_cert = input(&c.ssl.client_cert_file, "客户端证书 PEM 路径（可选）", window, cx);
         let ssl_client_key = input(&c.ssl.client_key_file, "客户端私钥 PEM 路径（可选）", window, cx);
 
-        let group_new = input("", "新分组名（可选）", window, cx);
+        let group_new = input("", "填写后优先于左侧所选分组", window, cx);
 
         let (will_topic, will_payload, will_enabled, will_retain, will_qos_idx, will_content_type, will_response_topic) =
             match &c.last_will {
@@ -681,6 +681,66 @@ impl ConnectionForm {
         .detach();
     }
 
+    /// 证书路径字段 + 「浏览…」按钮：路径仍可手输，按钮负责选文件。
+    fn cert_path_row(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        target: Entity<InputState>,
+        err: Option<SharedString>,
+        danger: gpui_kit::Hsla,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_1()
+            .w_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .child(field_ex(label, Input::new(&target), false, err, danger)),
+            )
+            .child(
+                Button::new(id)
+                    .label("浏览…")
+                    .outline()
+                    .small()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.browse_cert_path(target.clone(), window, cx);
+                    })),
+            )
+    }
+
+    /// 弹原生文件对话框并把所选路径回填到输入框。rfd 的阻塞式对话框
+    /// 不可占用 UI 线程，与连接导入/导出同模式：后台线程 + smol 通道回传。
+    fn browse_cert_path(
+        &self,
+        target: Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (tx, rx) = smol::channel::bounded::<Option<std::path::PathBuf>>(1);
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new()
+                .set_title("选择证书 / 密钥文件")
+                .add_filter("证书 / 密钥 (PEM)", &["pem", "crt", "cer", "key", "der"])
+                .pick_file();
+            let _ = tx.send_blocking(picked);
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Some(path)) = rx.recv().await {
+                let text = path.display().to_string();
+                this.update_in(cx, |_form, window, cx| {
+                    target.update(cx, |s, cx| s.set_value(text, window, cx));
+                    // 回填的路径可能本就带字段错误提示，触发重绘即时更新
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
     fn switch_row(
         &self,
         id: &'static str,
@@ -828,18 +888,19 @@ impl Render for ConnectionForm {
             // ── 基本信息（始终展开） ──
             .child(section("基本信息", border, card_bg,
                 v_flex().gap_2().child(
+                    // 主机与端口是一对，放同一行；名称与协议/传输同行
                     h_flex().gap_2().w_full()
-                        .child(div().flex_1().min_w(px(0.)).child(field_ex("名称", Input::new(&self.name), true, err("name"), danger)))
+                        .child(div().flex_1().min_w(px(0.)).child(field_ex("主机", Input::new(&self.host), true, err("host"), danger)))
                         .child(div().w(px(120.)).child(field_ex("端口", Input::new(&self.port), true, err("port"), danger)))
                 )
                 .child(h_flex().gap_2().w_full()
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex("主机", Input::new(&self.host), true, err("host"), danger)))
+                    .child(div().flex_1().min_w(px(0.)).child(field_ex("名称", Input::new(&self.name), true, err("name"), danger)))
                     .child(div().flex_1().min_w(px(0.)).child(field("协议", Select::new(&self.protocol))))
                     .child(div().flex_1().min_w(px(0.)).child(field("传输", Select::new(&self.transport))))
                 )
                 .child(h_flex().gap_2().w_full()
                     .child(div().flex_1().min_w(px(0.)).child(field("分组", Select::new(&self.group_select))))
-                    .child(div().flex_1().min_w(px(0.)).child(field("新建分组（优先于左侧选择）", Input::new(&self.group_new))))
+                    .child(div().flex_1().min_w(px(0.)).child(field("新建分组", Input::new(&self.group_new))))
                 )
                 .child(h_flex().gap_2().w_full().items_end()
                     .child(div().flex_1().min_w(px(0.)).child(field_ex("Client ID", Input::new(&self.client_id), true, err("client_id"), danger)))
@@ -887,10 +948,18 @@ impl Render for ConnectionForm {
                 "sec-ssl", "SSL/TLS", ssl_hint, true, self.show_ssl,
                 |f| f.show_ssl = !f.show_ssl, border, card_bg,
                 v_flex().gap_2()
-                    // Phase 2 或后续接原生文件对话框；GPUI 暂无内置文件选择器，先用路径文本输入
-                    .child(field_ex("CA 证书 (PEM)", Input::new(&self.ssl_ca), false, err("ssl_ca"), danger))
-                    .child(field_ex("客户端证书 (PEM)", Input::new(&self.ssl_client_cert), false, err("ssl_client_cert"), danger))
-                    .child(field_ex("客户端密钥 (PEM)", Input::new(&self.ssl_client_key), false, err("ssl_client_key"), danger))
+                    .child(self.cert_path_row(
+                        "ssl-ca-browse", "CA 证书 (PEM)", self.ssl_ca.clone(),
+                        err("ssl_ca"), danger, cx,
+                    ))
+                    .child(self.cert_path_row(
+                        "ssl-cert-browse", "客户端证书 (PEM)", self.ssl_client_cert.clone(),
+                        err("ssl_client_cert"), danger, cx,
+                    ))
+                    .child(self.cert_path_row(
+                        "ssl-key-browse", "客户端密钥 (PEM)", self.ssl_client_key.clone(),
+                        err("ssl_client_key"), danger, cx,
+                    ))
                     .child(self.switch_row("ssl_ignore_ca", "忽略 CA 校验（不验证服务器证书）", self.ssl_ignore_ca, cx)),
                 cx,
             )))

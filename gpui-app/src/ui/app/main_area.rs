@@ -82,6 +82,15 @@ pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self
         }
 
         let view = self.views.get(&active).cloned();
+        #[cfg(debug_assertions)]
+        if std::env::var("MQTTX_DEBUG_TABS").as_deref() == Ok("1") {
+            eprintln!(
+                "[debug] render_main active={active} views={} tabs={:?} view_found={}",
+                self.views.len(),
+                self.open_tabs,
+                view.is_some()
+            );
+        }
         // h_full：父级 h_flex 交叉轴居中子项，不占满高度会被整体垂直居中；
         // 视图根是 size_full，须包在 flex_1 容器里，否则会盖住 TabBar 并溢出。
         v_flex()

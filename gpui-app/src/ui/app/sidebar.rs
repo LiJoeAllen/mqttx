@@ -52,6 +52,11 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                 .get(&conn.id)
                 .copied()
                 .unwrap_or(ConnectionStatus::Disconnected);
+            // Error 状态把失败原因直接展示在行内（截断防溢出）：
+            // 只有一个红点时用户必须点进 tab 才知道为什么失败
+            let error_line = matches!(status, ConnectionStatus::Error)
+                .then(|| self.errors.get(&conn.id).cloned())
+                .flatten();
             let active = self.active_tab.as_deref() == Some(conn.id.as_str());
             let cfg = conn.clone();
             let name = conn.name.clone();
@@ -103,7 +108,17 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                                     .overflow_hidden()
                                     .text_ellipsis()
                                     .child(address),
-                            ),
+                            )
+                            .when_some(error_line, |v, e| {
+                                v.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().danger)
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .child(e),
+                                )
+                            }),
                     )
                     .child(self.render_conn_power(&cfg, status, cx))
                     .child(self.render_conn_menu(&conn.id, cx)),
@@ -149,6 +164,9 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
             .flex_shrink_0()
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
+            // 深色主题下侧边栏与主区同色，补一条分隔线保持边界可辨
+            .border_r_1()
+            .border_color(cx.theme().border)
             .child(
                 h_flex()
                     .h_11()

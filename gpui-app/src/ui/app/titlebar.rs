@@ -167,7 +167,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
             .ghost()
             .small()
             .tooltip(if dark { "切换为浅色" } else { "切换为深色" })
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_click(cx.listener(|this, _, window, cx| {
                 let next = if cx.theme().mode == ThemeMode::Dark {
                     ThemeModePref::Light
                 } else {
@@ -175,7 +175,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                 };
                 let mut s = this.settings.clone();
                 s.theme = next;
-                this.save_settings(s, cx);
+                this.save_settings(s, window, cx);
                 cx.notify();
             }))
     }

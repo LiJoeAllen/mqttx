@@ -29,7 +29,7 @@ use crate::model::{
     Subscription, ThemeModePref,
 };
 use crate::mqtt::MqttEngine;
-use crate::store::Storage;
+use crate::store::{Storage, UiState};
 use crate::update;
 use crate::ui::connection_view::ConnectionView;
 
@@ -48,7 +48,7 @@ const MAX_LOGS: usize = 3000;
 const EVENT_QUEUE_CAPACITY: usize = 1024;
 
 // 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
-gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor]);
+gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor, PublishMessage]);
 
 /// 侧边栏分组过滤；chips 只做列表过滤，分组重命名/删除通过编辑连接的分组字段完成。
 #[derive(Clone, PartialEq, Eq)]
@@ -159,6 +159,42 @@ impl MqttXApp {
             crate::model::render_will_templates(&mut cfg, &variables);
             engine.connect(cfg);
         }
+
+        // 会话恢复：载入上次打开的标签页（过滤掉已删除的连接）。
+        // 若无可恢复标签且启用了自动连接，则自动打开第一个自动连接的工作区，
+        // 避免「连接已在后台连上、主区却演空态」的不连贯。
+        let ui_state = storage.load_ui_state();
+        let conn_ids: std::collections::HashSet<String> =
+            connections.iter().map(|c| c.id.clone()).collect();
+        let restored_tabs: Vec<String> = ui_state
+            .open_tabs
+            .into_iter()
+            .filter(|id| conn_ids.contains(id))
+            .collect();
+        let restored_active = ui_state
+            .active_tab
+            .filter(|id| restored_tabs.contains(id));
+        let auto_first = connections
+            .iter()
+            .find(|c| c.auto_connect)
+            .map(|c| c.id.clone());
+        let defer_tabs = restored_tabs.clone();
+        let defer_active = restored_active.clone();
+        cx.defer_in(window, move |app, window, cx| {
+            if defer_tabs.is_empty() {
+                if let Some(id) = auto_first {
+                    app.open_tab(&id, window, cx);
+                }
+                return;
+            }
+            for id in defer_tabs {
+                app.open_tab(&id, window, cx);
+            }
+            if let Some(id) = defer_active {
+                app.active_tab = Some(id);
+            }
+            cx.notify();
+        });
         if settings.auto_check_update {
             let rx = engine.run_blocking(update::check_and_download);
             let weak = cx.entity().downgrade();
@@ -270,6 +306,9 @@ impl MqttXApp {
             }
             let mode = ThemeMode::from(window.appearance());
             Theme::change(mode, Some(window), cx);
+            // Theme::change 只更新全局令牌，不保证整窗重绘；未损坏区域会
+            // 滞留旧主题像素（实测发布栏长期不收敛），强制重画一次
+            window.refresh();
         });
 
         // ── 全局快捷键：绑定 + action 注册 ──
@@ -281,6 +320,7 @@ impl MqttXApp {
             KeyBinding::new("ctrl-shift-e", ExportConnections, None),
             KeyBinding::new("ctrl-shift-i", ImportConnections, None),
             KeyBinding::new("ctrl-shift-r", OpenResourceMonitor, None),
+            KeyBinding::new("ctrl-enter", PublishMessage, None),
         ]);
         let weak = cx.entity().downgrade();
         // Context 上有同名 on_action（绘制期注册），这里必须走 App 的全局注册
@@ -334,6 +374,24 @@ impl MqttXApp {
                 entity.update(cx, |app, cx| app.import_connections(window, cx));
             });
         });
+        // Ctrl+Enter 全局发送：焦点在负载框、QoS 下拉或任意位置都能发送，
+        // 不再依赖焦点恰好落在某个输入框上（无标签页时静默忽略）
+        let weak = cx.entity().downgrade();
+        App::on_action::<PublishMessage>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                if window.has_active_dialog(cx) {
+                    return;
+                }
+                entity.update(cx, |app, cx| {
+                    if let Some(tab) = app.active_tab.clone()
+                        && let Some(view) = app.views.get(&tab).cloned()
+                    {
+                        view.update(cx, |view, cx| view.do_publish(window, cx));
+                    }
+                });
+            });
+        });
 
         Self {
             storage,
@@ -350,6 +408,8 @@ impl MqttXApp {
             messages: HashMap::new(),
             logs: VecDeque::with_capacity(MAX_LOGS),
             seq: 0,
+            // 标签恢复统一走下方 defer 的 open_tab（负责创建视图实体），
+            // 这里不能预填 open_tabs：预填会让 open_tab 误判标签已存在而跳过建视图
             open_tabs: Vec::new(),
             active_tab: None,
             views: HashMap::new(),

@@ -24,7 +24,7 @@ use crate::ui::widgets::{field, make_select, OptionDelegate};
 use crate::ui::IconName;
 use crate::update::{self, UpdateInfo};
 
-const THEMES: [&str; 3] = ["跟随系统（暂按浅色）", "浅色", "深色"];
+const THEMES: [&str; 3] = ["跟随系统", "浅色", "深色"];
 
 /// 消息缓存条数的合法范围：太少不够回看，太多占内存
 const MAX_MESSAGES_MIN: usize = 100;
@@ -581,8 +581,9 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                                 let result = for_collect.read(cx).collect(cx);
                                 match result {
                                     Ok(settings) => {
+                                        // save_settings 内部会 apply_theme + 整窗 refresh
                                         app_for_save.update(cx, |a, cx| {
-                                            a.save_settings(settings, cx);
+                                            a.save_settings(settings, window, cx);
                                             cx.notify();
                                         });
                                         window.close_dialog(cx);

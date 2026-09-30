@@ -49,6 +49,7 @@ impl MqttXApp {
         }
         self.storage.save_connections(&self.connections);
         self.storage.save_subscriptions(&self.subscriptions);
+        self.persist_ui_state();
         cx.notify();
     }
 
@@ -82,6 +83,11 @@ impl MqttXApp {
             self.views.insert(conn_id.to_string(), view);
         }
         self.active_tab = Some(conn_id.to_string());
+        self.persist_ui_state();
+        #[cfg(debug_assertions)]
+        if std::env::var("MQTTX_DEBUG_TABS").as_deref() == Ok("1") {
+            eprintln!("[debug] open_tab {conn_id} views={}", self.views.len());
+        }
         cx.notify();
     }
 
@@ -91,7 +97,16 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.active_tab.as_deref() == Some(id) {
             self.active_tab = self.open_tabs.last().cloned();
         }
+        self.persist_ui_state();
         cx.notify();
+    }
+
+    /// 把当前打开的标签页写入 ui-state.json，重启后恢复工作区。
+    fn persist_ui_state(&self) {
+        self.storage.save_ui_state(&UiState {
+            open_tabs: self.open_tabs.clone(),
+            active_tab: self.active_tab.clone(),
+        });
     }
 
     // ── 订阅 ──────────────────────────────────────────────────────────────
@@ -146,10 +161,13 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         self.storage.save_aliyun(&self.aliyun_presets);
     }
 
-    pub fn save_settings(&mut self, settings: AppSettings, cx: &mut App) {
+    pub fn save_settings(&mut self, settings: AppSettings, window: &mut Window, cx: &mut App) {
         apply_theme(settings.theme, cx);
         self.settings = settings;
         self.storage.save_settings(&self.settings);
+        // 切主题只更新全局令牌，不触发整窗重绘，未损坏区域会长期滞留旧主题
+        // 像素（实测发布栏黑底不收敛），这里强制重画
+        window.refresh();
     }
 
 

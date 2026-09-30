@@ -18,7 +18,9 @@ use crate::ui::widgets::{ field, KvEditor };
 use super::*;
 
 impl ConnectionView {
-    fn do_publish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 发布当前面板参数。入口有三：发送按钮、发布主题框内 Enter、
+    /// 全局 Ctrl+Enter action（app/mod.rs 注册）。
+    pub(crate) fn do_publish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // 未连接时消息发不出去，先拦截给出与订阅路径一致的提示
         if !self.engine.is_connected(&self.conn_id) {
             window.push_notification(Notification::warning("未连接：消息未发送"), cx);
@@ -79,7 +81,25 @@ impl ConnectionView {
             params.response_topic = None;
             params.correlation_data = None;
         }
+        // 发出的消息若会被当前过滤条件隐藏（方向/订阅/搜索），发布记录在
+        // 消息流里看不到，用户容易误以为没发出去，此时给一条显式反馈
+        let query = self.filter.read(cx).value().to_lowercase();
+        let hidden = self.msg_dir == DirFilter::Received
+            || self
+                .sub_filter
+                .as_deref()
+                .map(|f| !topic_matches(f, &params.topic))
+                .unwrap_or(false)
+            || (!query.is_empty()
+                && !contains_ignore_case(&params.topic, &query)
+                && !contains_ignore_case(&params.payload, &query));
         self.engine.publish(self.conn_id.clone(), params);
+        if hidden {
+            window.push_notification(
+                Notification::success("已发送（被当前过滤条件隐藏，消息流中不显示）"),
+                cx,
+            );
+        }
     }
 
     /// 读取当前发布面板上的参数（模板渲染前的原始值）；保存预设与发布共用，
@@ -196,7 +216,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
             h_flex()
                 .gap_2()
                 .items_center()
-                // Ctrl+Enter 快捷发送（焦点在主题输入上时）
+                // 主题框内 Enter 直接发送（Ctrl+Enter 走全局 action，任意焦点可用）
                 .child(
                     div()
                         .id(SharedString::from(format!("pub-topic-wrap-{}", self.conn_id)))
@@ -204,7 +224,9 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .min_w(px(0.))
                         .on_key_down(cx.listener(
                             |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
-                                if ev.keystroke.modifiers.control && ev.keystroke.key == "enter" {
+                                if ev.keystroke.key == "enter"
+                                    && !ev.keystroke.modifiers.control
+                                {
                                     cx.stop_propagation();
                                     this.do_publish(window, cx);
                                 }
@@ -285,15 +307,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                 .border_color(cx.theme().border)
                 .bg(cx.theme().background)
                 .p_1()
-                // Ctrl+Enter 快捷发送（焦点在负载输入上时）
-                .on_key_down(cx.listener(
-                    |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
-                        if ev.keystroke.modifiers.control && ev.keystroke.key == "enter" {
-                            cx.stop_propagation();
-                            this.do_publish(window, cx);
-                        }
-                    },
-                ))
+                // Ctrl+Enter 发送由全局 action 兜底（焦点在本框内也能触发）
                 .child(Textarea::new(&payload)),
         );
 

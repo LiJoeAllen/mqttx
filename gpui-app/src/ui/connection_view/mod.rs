@@ -178,6 +178,8 @@ pub struct ConnectionView {
     detail_owner: Option<u64>,
     msg_dir: DirFilter,
     detail_format: DetailFormat,
+    /// 消息流暂停滚动：消息照常入环形缓冲，仅不再触发本视图重绘
+    paused: bool,
 
     // 预设
     preset_name: Entity<InputState>,
@@ -254,6 +256,7 @@ impl ConnectionView {
             detail_owner: None,
             msg_dir: DirFilter::All,
             detail_format: DetailFormat::Auto,
+            paused: false,
             preset_name,
             show_vars: true,
             var_rows: Vec::new(),
@@ -274,6 +277,11 @@ impl ConnectionView {
 
     fn is_v5(&self, cx: &App) -> bool {
         self.config(cx).map(|c| c.protocol.is_v5()).unwrap_or(true)
+    }
+
+    /// 消息流是否处于暂停滚动状态（引擎事件泵据此决定是否刷新本视图）。
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
 
