@@ -123,13 +123,33 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 - MQTT 5.0 连接 → 订阅 → 发布 → 回环接收
 - MQTT 3.1.1 连接握手
 
-## 发布到 Gitea Package Registry
+## 发布到 GitHub Releases
 
-构建产物可通过 Gitea 的 Generic Package API 发布，两种方式：
+推送 `v*` tag 即触发 [.github/workflows/release.yml](.github/workflows/release.yml)：
 
-### 方式一：手动发布（本地脚本）
+1. 版本一致性校验：tag 必须等于 `v` + `gpui-app/Cargo.toml` 的版本，否则整条流水线失败
+2. 单元测试（`--lib --tests`，集成测试只编译不执行）
+3. Linux + Windows 双平台 release 构建（产物重命名为 `mqttx-v<ver>-<target>-mqttx[.exe]`
+   并生成 `.sha256` 侧车）
+4. 打包 7z（单条目，内部文件名 = 裸二进制名）并创建 GitHub Release，上传
+   7z / 裸二进制 / `.sha256` 附件
 
-前置：构建 release 产物 + 一个 Gitea 访问令牌（需 `package` 写权限）。
+> **应用内 OTA 只认 Release 附件**，附件名必须匹配 `mqttx-v<ver>-<triple>-mqttx[.exe]`。
+> 7z 是 OTA 主通道；裸二进制供不识别 7z 的旧客户端（≤v1.0.3）升级。
+
+### 可选：镜像到自建 Gitea（老客户端 OTA 源）
+
+已装机的 v1.0.x 客户端 OTA 更新源仍指向 Gitea。在仓库
+**Settings → Secrets and variables → Actions** 配置以下 Secrets 后，每次发布
+会自动把产物同步镜像到 Gitea Release（`mirror-gitea` job，调用
+`scripts/publish-gitea.sh`）；未配置时该 job 自动跳过：
+
+- `GITEA_URL` — 实例地址，如 `https://gitea.heavenlybook.cn`
+- `GITEA_TOKEN` — Gitea 访问令牌（需 `package` + repo 写权限）
+- `GITEA_OWNER` — Gitea 侧 owner（如 `JoeAllen`）
+
+客户端 OTA 更新源切换到 GitHub 后，可删除 `mirror-gitea` job 与
+`scripts/publish-gitea.*`。本地手动镜像（应急）仍可用：
 
 ```powershell
 # Windows（PowerShell）
@@ -152,25 +172,6 @@ export GITEA_TOKEN=gta_xxx
   必须是合法 semver（形如 `v1.0.1` 或 `1.0.1-rc.1`），否则脚本直接拒绝发布
   —— 非 semver 版本（如 `v1.0.0-4-gabc1234`）会被客户端截断比对，更新永远发不出去
 - 每个文件附带 `.sha256` 校验侧车；同名版本重复上传按 409 跳过（Gitea 不允许覆盖）
-- 软件包页面：`{GITEA_URL}/{owner}?tab=packages`
-
-### 方式二：CI 自动发布（Gitea Actions）
-
-推送 `v*` tag 即触发 [.gitea/workflows/release.yml](.gitea/workflows/release.yml)：
-
-1. 版本一致性校验：tag 必须等于 `v` + `gpui-app/Cargo.toml` 的版本，否则整条流水线失败
-2. 单元测试（`--lib --tests`，集成测试只编译不执行）
-3. Linux release 构建（产物重命名为 `mqttx-v<ver>-<target>-mqttx`）
-4. 调用 `scripts/publish-gitea.sh`：上传包注册表，并创建同名 Release、
-   上传 7z / 裸二进制 / `.sha256` 附件
-
-> **应用内 OTA 只认 Release 附件**，附件名必须匹配 `mqttx-v<ver>-<triple>-mqttx[.exe]`。
-> Windows 产物目前由本地 `scripts/publish-gitea.ps1` 上传补充（CI 的 Windows 矩阵项
-> 在 runner 就绪前保持注释，见工作流内说明）。
-
-需要在仓库 **Settings → Actions → Secrets** 配置 `GITEA_TOKEN`（需 **repo 写权限**：
-脚本除包注册表外还要创建 Release 并上传附件）；
-若 runner 使用自定义 label，请相应修改工作流的 `runs-on`。
 
 ## 数据目录
 

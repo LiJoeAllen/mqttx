@@ -1,0 +1,229 @@
+# GitHub Actions：打 tag 时构建 release 产物并发布到 GitHub Release。
+#
+# 产物即 OTA 更新源，命名约定（与客户端 update 模块一致）：
+#   mqttx-v<ver>-<triple>-mqttx[.exe]          裸二进制
+#   mqttx-v<ver>-<triple>-mqttx[.exe].sha256   侧车校验文件
+#   mqttx-v<ver>-<triple>-mqttx[.exe].7z       压缩包（单条目，内部文件名 = 裸二进制名）
+#   mqttx-v<ver>-<triple>-mqttx[.exe].7z.sha256
+# 7z 是 OTA 主通道；裸二进制供不识别 7z 的旧客户端（≤v1.0.3）升级。
+#
+# 可选：镜像发布到自建 Gitea（已装机的 v1.0.x 客户端 OTA 源仍在 Gitea）。
+# 在仓库 Settings → Secrets and variables → Actions 配置后自动启用，缺省跳过：
+#   GITEA_URL    实例地址，如 https://gitea.heavenlybook.cn
+#   GITEA_TOKEN  Gitea 令牌（package + repo 写权限）
+#   GITEA_OWNER  Gitea 侧 owner（如 JoeAllen）
+# 客户端 OTA 更新源切换到 GitHub 后可删除 mirror-gitea job。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ─── 版本与元信息 ─────────────────────────────────────────────
+  meta:
+    name: Meta
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: ver
+        run: |
+          version="${GITHUB_REF_NAME}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      # 版本双真源校验：tag 必须与 gpui-app/Cargo.toml 一致。否则新包装完仍自报旧
+      # 版本号，客户端表现为"每次都提示同一个更新"，装多少次都消不掉。
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          cargo_ver="$(grep -m1 '^version' gpui-app/Cargo.toml | cut -d'"' -f2)"
+          if [ -z "$cargo_ver" ]; then
+            echo "::error::无法从 gpui-app/Cargo.toml 解析版本号"
+            exit 1
+          fi
+          if [ "v${cargo_ver}" != "$tag" ]; then
+            echo "::error::tag(${tag}) 与 gpui-app/Cargo.toml(v${cargo_ver}) 不一致：请先 bump 版本再打 tag"
+            exit 1
+          fi
+          echo "版本一致：${tag}"
+
+  # ─── 测试 ─────────────────────────────────────────────────────
+  # 完整编译 lib（GPUI 会链接 Linux 系统库），缺库会在链接期失败。
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Linux system deps (GPUI)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libasound2-dev libfontconfig-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      # --tests：让 tests/engine_live.rs 参与编译（#[ignore] 只跳过执行，不跳过编译）
+      - name: Unit tests
+        run: cargo test -p mqttx-desktop --lib --tests
+
+  # ─── 构建矩阵 ─────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.os }})
+    needs: [meta, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: mqttx
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            asset: mqttx.exe
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Install Linux system deps (GPUI)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libasound2-dev libfontconfig-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      # rustls 的 aws_lc_rs 后端在 windows-msvc 上编译需要 NASM（托管镜像缺省不在 PATH）
+      - name: Ensure NASM (aws-lc-rs on MSVC)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          if ! command -v nasm >/dev/null 2>&1; then
+            choco install nasm -y
+            echo "C:\Program Files\NASM" >> "$GITHUB_PATH"
+          fi
+
+      - name: Build
+        run: cargo build --release -p mqttx-desktop --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          out="dist-${{ matrix.target }}"
+          mkdir -p "$out"
+          src="target/${{ matrix.target }}/release/${{ matrix.asset }}"
+          ver="${{ needs.meta.outputs.version }}"
+          dst="$out/mqttx-${ver}-${{ matrix.target }}-${{ matrix.asset }}"
+          cp "$src" "$dst"
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$dst" > "$dst.sha256"
+          else
+            shasum -a 256 "$dst" > "$dst.sha256"
+          fi
+          echo "ASSET_DIR=$out" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mqttx-${{ matrix.target }}
+          path: ${{ env.ASSET_DIR }}/*
+
+  # ─── 发布到 GitHub Release ────────────────────────────────────
+  publish:
+    name: Publish to GitHub Release
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install 7-Zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+
+      # 7z 归档内必须恰好一个条目且文件名 = 裸二进制名（客户端解压后按此名校验安装），
+      # 因此先复制到临时目录以产物名命名再压缩。
+      - name: Pack 7z and sidecars (OTA conventions)
+        env:
+          VER: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          for f in artifacts/mqttx-${VER}-*; do
+            name="$(basename "$f")"
+            case "$name" in *.sha256) continue ;; esac
+            cp -f "$f" "$stage/$name"
+            (cd "$stage" && 7z a -y -mx=9 "$OLDPWD/artifacts/$name.7z" "$name")
+            (cd artifacts && sha256sum "$name.7z" > "$name.7z.sha256")
+            rm -f "$stage/$name"
+          done
+          rm -rf "$stage"
+          ls -la artifacts/
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VER" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release ${VER} 已存在，覆盖上传资产"
+          else
+            gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --generate-notes
+          fi
+          gh release upload "$VER" -R "$GITHUB_REPOSITORY" artifacts/* --clobber
+
+  # ─── 可选：镜像发布到自建 Gitea ───────────────────────────────
+  # 已装机的 v1.0.x 客户端 OTA 更新源仍指向 Gitea Release 附件；
+  # 配置 GITEA_URL / GITEA_TOKEN / GITEA_OWNER 三个 Secrets 后本 job 生效，
+  # 未配置时自动跳过（不影响 GitHub Release 发布）。客户端 OTA 切到 GitHub 后可删。
+  mirror-gitea:
+    name: Mirror to Gitea (optional)
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install 7-Zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+
+      # 只传裸二进制：脚本自行生成 .sha256 侧车与 7z 压缩包（条目名约定在脚本内保证）
+      - name: Mirror release assets to Gitea
+        env:
+          GITEA_URL: ${{ secrets.GITEA_URL }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_OWNER: JoeAllen
+          GITEA_REPO: mqttx
+          GITEA_PKG: mqttx
+          VER: ${{ needs.meta.outputs.version }}
+        if: ${{ env.GITEA_URL != '' && env.GITEA_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/publish-gitea.sh
+          files=()
+          for f in artifacts/mqttx-${VER}-*; do
+            case "$f" in *.sha256) ;; *) files+=("$f") ;; esac
+          done
+          ./scripts/publish-gitea.sh "${files[@]}" "$VER"
