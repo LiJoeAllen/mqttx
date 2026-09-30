@@ -15,8 +15,39 @@ use crate::ui::widgets::status_color;
 use super::*;
 
 impl MqttXApp {
-pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let query = self.search.read(cx).value().to_lowercase();
+    /// 侧栏收起后的窄 rail：抽屉把手（拉回侧栏）+ 新建连接入口。
+    pub(super) fn render_sidebar_rail(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .w(px(40.))
+            .h_full()
+            .flex_shrink_0()
+            .items_center()
+            .pt_2()
+            .gap_1()
+            .bg(cx.theme().sidebar)
+            .text_color(cx.theme().sidebar_foreground)
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("sidebar-rail-expand")
+                    .icon(IconName::PanelLeftOpen)
+                    .ghost()
+                    .small()
+                    .tooltip("展开连接侧栏（Ctrl+B）")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
+            )
+            .child(
+                Button::new("sidebar-rail-add")
+                    .icon(IconName::Plus)
+                    .ghost()
+                    .small()
+                    .tooltip("新建连接")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_connection_form(None, window, cx);
+                    })),
+            )
+    }
+pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {        let query = self.search.read(cx).value().to_lowercase();
         let search = self.search.clone();
         // 分组被改名/删除后过滤器可能悬空（列表恒空），渲染前复位到「全部」
         let dangling = matches!(&self.group_filter, GroupFilter::Named(name)
@@ -186,14 +217,28 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                             ),
                     )
                     .child(
-                        Button::new("sidebar-add")
-                            .icon(IconName::Plus)
-                            .tooltip("新建连接")
-                            .ghost()
-                            .xsmall()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_connection_form(None, window, cx);
-                            })),
+                        h_flex()
+                            .gap_0p5()
+                            .child(
+                                Button::new("sidebar-collapse")
+                                    .icon(IconName::PanelLeftClose)
+                                    .ghost()
+                                    .xsmall()
+                                    .tooltip("收起侧栏（Ctrl+B）")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_sidebar(cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("sidebar-add")
+                                    .icon(IconName::Plus)
+                                    .tooltip("新建连接")
+                                    .ghost()
+                                    .xsmall()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_connection_form(None, window, cx);
+                                    })),
+                            ),
                     ),
             )
             .child(v_flex().px_2().pb_2().child(Input::new(&search).small().prefix(

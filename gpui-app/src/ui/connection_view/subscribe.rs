@@ -17,6 +17,31 @@ use crate::ui::widgets::field;
 use super::*;
 
 impl ConnectionView {
+    /// 订阅面板收起后的窄 rail：抽屉把手。
+    pub(super) fn render_subs_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .w(px(32.))
+            .h_full()
+            .flex_shrink_0()
+            .items_center()
+            .pt_2()
+            .bg(cx.theme().sidebar)
+            .text_color(cx.theme().sidebar_foreground)
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("subs-rail-expand")
+                    .icon(IconName::PanelLeftOpen)
+                    .ghost()
+                    .small()
+                    .tooltip("展开订阅面板")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.subs_collapsed = false;
+                        cx.notify();
+                    })),
+            )
+    }
+
     /// 订阅按 (连接, 主题) 唯一：先摘掉旧条目再走 `add_subscription`，
     /// 借它入列 + `save_subscriptions` 落盘的逻辑完成 upsert（storage 字段是私有的）。
     /// 落盘顺序以 add 时为准，入列后移回原位以保持界面顺序稳定。
@@ -743,7 +768,19 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     .h_11()
                     .px_3()
                     .items_center()
-                    .child(div().text_sm().font_semibold().child("订阅")),
+                    .justify_between()
+                    .child(div().text_sm().font_semibold().child("订阅"))
+                    .child(
+                        Button::new("subs-collapse")
+                            .icon(IconName::PanelLeftClose)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("收起订阅面板")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.subs_collapsed = true;
+                                cx.notify();
+                            })),
+                    ),
             )
             .child(div().flex_1().overflow_y_scrollbar().px_2().child(list))
     }

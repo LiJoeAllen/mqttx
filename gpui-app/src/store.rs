@@ -229,6 +229,9 @@ pub struct UiState {
     pub open_tabs: Vec<String>,
     #[serde(default)]
     pub active_tab: Option<String>,
+    /// 连接侧栏抽屉是否收起（抽屉式折叠，Ctrl+B 切换）
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
 }
 
 impl Default for Storage {

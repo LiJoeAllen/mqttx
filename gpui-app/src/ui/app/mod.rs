@@ -48,7 +48,7 @@ const MAX_LOGS: usize = 3000;
 const EVENT_QUEUE_CAPACITY: usize = 1024;
 
 // 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
-gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor, PublishMessage]);
+gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor, PublishMessage, ToggleSidebar]);
 
 /// 侧边栏分组过滤；chips 只做列表过滤，分组重命名/删除通过编辑连接的分组字段完成。
 #[derive(Clone, PartialEq, Eq)]
@@ -80,7 +80,6 @@ pub struct MqttXApp {
     storage: Storage,
     pub engine: std::sync::Arc<MqttEngine>,
     _pump: gpui_kit::Task<()>,
-
     // ── 持久化数据 ──
     pub connections: Vec<ConnectionConfig>,
     pub subscriptions: Vec<Subscription>,
@@ -115,6 +114,8 @@ pub struct MqttXApp {
     _appearance_obs: gpui_kit::Subscription,
     /// 窗口置顶状态（标题栏钉子按钮切换）
     pinned: bool,
+    /// 连接侧栏抽屉收起状态（Ctrl+B / rail 按钮切换，随 ui-state 持久化）
+    sidebar_collapsed: bool,
 }
 
 
@@ -321,6 +322,7 @@ impl MqttXApp {
             KeyBinding::new("ctrl-shift-i", ImportConnections, None),
             KeyBinding::new("ctrl-shift-r", OpenResourceMonitor, None),
             KeyBinding::new("ctrl-enter", PublishMessage, None),
+            KeyBinding::new("ctrl-b", ToggleSidebar, None),
         ]);
         let weak = cx.entity().downgrade();
         // Context 上有同名 on_action（绘制期注册），这里必须走 App 的全局注册
@@ -392,6 +394,14 @@ impl MqttXApp {
                 });
             });
         });
+        // Ctrl+B 抽屉式收起/展开连接侧栏
+        let weak = cx.entity().downgrade();
+        App::on_action::<ToggleSidebar>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, _, cx| {
+                entity.update(cx, |app, cx| app.toggle_sidebar(cx));
+            });
+        });
 
         Self {
             storage,
@@ -419,6 +429,7 @@ impl MqttXApp {
             log_file: None,
             _appearance_obs: appearance_obs,
             pinned: false,
+            sidebar_collapsed: ui_state.sidebar_collapsed,
         }
     }
 
@@ -438,7 +449,12 @@ impl Render for MqttXApp {
                 h_flex()
                     .flex_1()
                     .min_h(px(0.))
-                    .child(self.render_sidebar(window, cx))
+                    // 连接侧栏抽屉：收起时只剩窄 rail（Ctrl+B 或 rail 按钮拉回）
+                    .child(if self.sidebar_collapsed {
+                        self.render_sidebar_rail(cx).into_any_element()
+                    } else {
+                        self.render_sidebar(window, cx).into_any_element()
+                    })
                     .child(self.render_main(window, cx)),
             )
     }

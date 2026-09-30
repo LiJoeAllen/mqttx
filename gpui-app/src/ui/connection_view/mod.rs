@@ -180,6 +180,10 @@ pub struct ConnectionView {
     detail_format: DetailFormat,
     /// 消息流暂停滚动：消息照常入环形缓冲，仅不再触发本视图重绘
     paused: bool,
+    /// 订阅面板抽屉收起状态（会话内有效）
+    subs_collapsed: bool,
+    /// 底部发布栏抽屉收起状态（会话内有效）
+    publish_collapsed: bool,
 
     // 预设
     preset_name: Entity<InputState>,
@@ -257,6 +261,8 @@ impl ConnectionView {
             msg_dir: DirFilter::All,
             detail_format: DetailFormat::Auto,
             paused: false,
+            subs_collapsed: false,
+            publish_collapsed: false,
             preset_name,
             show_vars: true,
             var_rows: Vec::new(),
@@ -299,7 +305,12 @@ impl Render for ConnectionView {
                 h_flex()
                     .flex_1()
                     .min_h(px(0.))
-                    .child(self.render_subscriptions(cx))
+                    // 订阅面板抽屉：收起时只剩窄 rail
+                    .child(if self.subs_collapsed {
+                        self.render_subs_rail(cx).into_any_element()
+                    } else {
+                        self.render_subscriptions(cx).into_any_element()
+                    })
                     .child(
                         v_flex()
                             .flex_1()
@@ -334,7 +345,11 @@ impl Render for ConnectionView {
                             }),
                     ),
             )
-            .child(self.render_publish_bar(cx))
+            .child(if self.publish_collapsed {
+                self.render_publish_rail(cx).into_any_element()
+            } else {
+                self.render_publish_bar(cx).into_any_element()
+            })
     }
 }
 

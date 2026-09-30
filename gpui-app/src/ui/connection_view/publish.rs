@@ -18,6 +18,37 @@ use crate::ui::widgets::{ field, KvEditor };
 use super::*;
 
 impl ConnectionView {
+    /// 发布栏收起后的细条：抽屉把手。
+    pub(super) fn render_publish_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .w_full()
+            .h(px(34.))
+            .px_3()
+            .items_center()
+            .gap_2()
+            .flex_shrink_0()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().secondary)
+            .child(
+                Button::new("pub-rail-expand")
+                    .icon(IconName::PanelBottomOpen)
+                    .ghost()
+                    .small()
+                    .tooltip("展开发布面板")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.publish_collapsed = false;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("发布面板已收起"),
+            )
+    }
+
     /// 发布当前面板参数。入口有三：发送按钮、发布主题框内 Enter、
     /// 全局 Ctrl+Enter action（app/mod.rs 注册）。
     pub(crate) fn do_publish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -295,6 +326,18 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .disabled(!connected)
                         .when(!connected, |b| b.tooltip("未连接，无法发送"))
                         .on_click(cx.listener(|this, _, window, cx| this.do_publish(window, cx))),
+                )
+                // 发布栏抽屉把手：收起整个底部面板
+                .child(
+                    Button::new("pub-collapse")
+                        .icon(IconName::PanelBottom)
+                        .ghost()
+                        .small()
+                        .tooltip("收起发布面板")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.publish_collapsed = true;
+                            cx.notify();
+                        })),
                 ),
         );
 

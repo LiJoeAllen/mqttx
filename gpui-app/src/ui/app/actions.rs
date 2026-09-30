@@ -106,7 +106,15 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         self.storage.save_ui_state(&UiState {
             open_tabs: self.open_tabs.clone(),
             active_tab: self.active_tab.clone(),
+            sidebar_collapsed: self.sidebar_collapsed,
         });
+    }
+
+    /// 收起/展开连接侧栏抽屉（Ctrl+B 或 rail/标题栏按钮），状态随 ui-state 持久化。
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.persist_ui_state();
+        cx.notify();
     }
 
     // ── 订阅 ──────────────────────────────────────────────────────────────
