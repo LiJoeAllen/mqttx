@@ -1,4 +1,4 @@
-use gpui_kit::component::{Root, TitleBar};
+use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 use mqttx_desktop::ui;
@@ -70,9 +70,9 @@ fn main() {
                 ..TitleBar::window_options()
             };
 
-            cx.open_window(options, |window, cx| {
-                let view = cx.new(|cx| ui::app::MqttXApp::new(window, cx));
-                cx.new(|cx| Root::new(view.clone(), window, cx))
+            // 0.7 起 gpui_kit::open_window 自动挂载 Root（承载 dialog/sheet/notification 层）
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| ui::app::MqttXApp::new(window, cx))
             })
             .expect("Failed to open window");
         });

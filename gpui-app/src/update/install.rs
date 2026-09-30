@@ -115,7 +115,8 @@ fn file_sha256(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    // digest 0.11 的 Output 不再实现 LowerHex，手动转 hex
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// 校验 7z 归档的条目清单（只读归档头，不解压数据）。
@@ -240,7 +241,7 @@ fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u6
         .get(&info.asset_url)
         .call()
         .map_err(|e| format!("下载失败: {e}"))?;
-    let mut reader = resp.into_reader();
+    let mut reader = resp.into_body().into_reader();
     let total = info.size;
     let mut file = std::fs::File::create(tmp).map_err(|e| format!("创建临时文件失败: {e}"))?;
     let mut buf = [0u8; 64 * 1024];
@@ -274,7 +275,7 @@ fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u6
     let expect = fetch_expected_sha256(info)?.ok_or_else(|| {
         "Release 未提供 .sha256 校验文件，无法验证完整性，已拒绝安装".to_string()
     })?;
-    let actual = format!("{:x}", hasher.finalize());
+    let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
     if !actual.eq_ignore_ascii_case(&expect) {
         return Err(format!("校验失败：期望 sha256 {expect}，实际 {actual}"));
     }
@@ -308,11 +309,13 @@ fn fetch_expected_sha256(info: &UpdateInfo) -> Result<Option<String>, String> {
     let Some(url) = &info.sha256_url else {
         return Ok(None);
     };
-    let text = agent()
+    let mut body = agent()
         .get(url)
         .call()
         .map_err(|e| format!("获取校验文件失败: {e}"))?
-        .into_string()
+        .into_body();
+    let text = body
+        .read_to_string()
         .map_err(|e| format!("读取校验文件失败: {e}"))?;
     // 常见格式：<hex>  <filename> 或纯 hex
     let hex = text
@@ -517,3 +520,27 @@ pub fn cleanup_old() {
 }
 
 // ─── 单元测试 ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// sha256→hex 转换（digest 0.11 起 Output 不再实现 LowerHex）是 OTA
+    /// 完整性校验的关键路径，用固定向量锁定。
+    #[test]
+    fn file_sha256_matches_known_vector() {
+        let path = std::env::temp_dir().join(format!(
+            "mqttx-sha-test-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(&path, b"abc").expect("写入测试文件");
+        let hex = file_sha256(&path).expect("计算 sha256");
+        let _ = std::fs::remove_file(&path);
+        // echo -n abc | sha256sum
+        assert_eq!(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+}

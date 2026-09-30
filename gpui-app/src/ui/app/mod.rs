@@ -368,7 +368,7 @@ impl MqttXApp {
 
 impl Render for MqttXApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 0.6.x 的 Root 不自动渲染 dialog/sheet/notification 层，需由内容视图挂载。
+        // 0.7 起 Root 自动渲染 dialog/sheet/notification 层，内容视图无需再手动挂载。
         v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -381,8 +381,5 @@ impl Render for MqttXApp {
                     .child(self.render_sidebar(window, cx))
                     .child(self.render_main(window, cx)),
             )
-            .children(gpui_kit::component::Root::render_sheet_layer(window, cx))
-            .children(gpui_kit::component::Root::render_dialog_layer(window, cx))
-            .children(gpui_kit::component::Root::render_notification_layer(window, cx))
     }
 }

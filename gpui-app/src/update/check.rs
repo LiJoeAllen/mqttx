@@ -3,20 +3,23 @@
 use super::*;
 
 pub(super) fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        // 整体上限：防止慢速滴流的下载无限占用阻塞线程
-        .timeout(std::time::Duration::from_secs(10 * 60))
-        .timeout_connect(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .timeout_read(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            // 整体上限：防止慢速滴流的下载无限占用阻塞线程
+            .timeout_global(Some(std::time::Duration::from_secs(10 * 60)))
+            .timeout_connect(Some(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS)))
+            .timeout_recv_response(Some(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS)))
+            .build(),
+    )
 }
 
 pub(super) fn http_get_json(url: &str) -> Result<serde_json::Value, String> {
-    let resp = agent()
+    let mut body = agent()
         .get(url)
         .call()
-        .map_err(|e| format!("请求失败: {e}"))?;
-    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("请求失败: {e}"))?
+        .into_body();
+    body.read_json::<serde_json::Value>()
         .map_err(|e| format!("解析响应失败: {e}"))
 }
 

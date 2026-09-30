@@ -13,7 +13,7 @@
 //! - password: HMAC-SHA256(DeviceSecret, "clientId{ProductKey}.{DeviceName}deviceName{DeviceName}productKey{ProductKey}timestamp{ts}")
 
 use base64::Engine as _;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::Sha256;

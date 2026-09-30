@@ -31,7 +31,8 @@ fn set_topmost_windows(window: &gpui_kit::Window, topmost: bool) -> bool {
     let hwnd = HWND(w.hwnd.get() as *mut core::ffi::c_void);
     let insert = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
     let flags = SET_WINDOW_POS_FLAGS(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    unsafe { SetWindowPos(hwnd, insert, 0, 0, 0, 0, flags).is_ok() }
+    // windows 0.62 起 SetWindowPos 的插入位置参数改为 Option<HWND>
+    unsafe { SetWindowPos(hwnd, Some(insert), 0, 0, 0, 0, flags).is_ok() }
 }
 
 #[cfg(not(target_os = "windows"))]
