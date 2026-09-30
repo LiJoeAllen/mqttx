@@ -26,6 +26,10 @@ pub use install::{
 /// - v1.0.x 老客户端的 OTA 源仍是自建 Gitea，CI 的 mirror-gitea job 会把每次
 ///   发布镜像回 Gitea，老客户端升级完毕后可移除该 job。
 pub const RELEASES_API: &str = "https://api.github.com/repos/LiJoeAllen/mqttx/releases";
+/// Releases 页面（github.com，非 API、无配额限制）：api.github.com 被限流时
+/// 兜底发现最新 tag —— 跟踪 `{RELEASES_PAGE}/latest` 的 302，从最终 URL 取 tag，
+/// 下载与校验按命名约定构造 URL，完整性（sha256）不受影响。
+pub const RELEASES_PAGE: &str = "https://github.com/LiJoeAllen/mqttx/releases";
 /// 更新源展示名（设置对话框「关于」）。
 pub const UPDATE_SOURCE: &str = "GitHub";
 

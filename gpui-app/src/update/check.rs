@@ -69,6 +69,19 @@ pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Opti
 
 /// 检查更新。返回 Ok(None) 表示已是最新。
 pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
+    // API 主路径信息最全（notes/资产清单/大小），但 api.github.com 未认证配额
+    // 仅 60 次/小时/IP，共享出口 IP（VPN/办公 NAT）经常打满 —— 打满或不可达时
+    // 退到 releases 页面重定向发现（无配额），完整性校验不受影响。
+    match check_latest_via_api() {
+        Ok(v) => Ok(v),
+        Err(api_err) => match check_latest_via_redirect() {
+            Ok(v) => Ok(v),
+            Err(_) => Err(api_err),
+        },
+    }
+}
+
+fn check_latest_via_api() -> Result<Option<UpdateInfo>, String> {
     let base = RELEASES_API;
     // 优先 latest 端点（GitHub 恒可用）；回退到列表取第一个非草稿/预发布，作容错
     let rel = match http_get_json(&format!("{base}/latest")) {
@@ -110,6 +123,48 @@ pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
     }))
 }
 
+/// 兜底：跟踪 `releases/latest` 的 302，从最终 URL 提取最新 tag。
+///
+/// github.com 页面不受 API 配额限制。代价是拿不到 Release notes 与资产清单：
+/// notes 置空、大小置 0（进度条显示未知大小，大小对账自动跳过），
+/// 下载 URL 与 `.sha256` 侧车按命名约定构造，sha256 校验仍然强制执行。
+fn check_latest_via_redirect() -> Result<Option<UpdateInfo>, String> {
+    use ureq::ResponseExt as _;
+    let resp = agent()
+        .get(&format!("{RELEASES_PAGE}/latest"))
+        .call()
+        .map_err(|e| format!("页面请求失败: {e}"))?;
+    let uri = resp.get_uri().to_string();
+    let Some(tag) = tag_from_releases_url(&uri) else {
+        return Err(format!("页面 URL 异常: {uri}"));
+    };
+    if !is_newer(tag, current_version()) {
+        return Ok(None);
+    }
+    let version = tag.trim_start_matches('v');
+    let triple = platform_triple();
+    let bin = if cfg!(windows) { "mqttx.exe" } else { "mqttx" };
+    // 与 publish 脚本/工作流的产物命名约定一致（pick_assets 同款匹配规则）
+    let asset_base = format!("mqttx-v{version}-{triple}-{bin}");
+    let asset = format!("{asset_base}.7z");
+    Ok(Some(UpdateInfo {
+        version: version.to_string(),
+        notes: String::new(),
+        asset_name: asset.clone(),
+        asset_url: format!("{RELEASES_PAGE}/download/{tag}/{asset}"),
+        sha256_url: Some(format!("{RELEASES_PAGE}/download/{tag}/{asset}.sha256")),
+        size: 0,
+    }))
+}
+
+/// 从 Releases 页面 URL 提取 tag（如 `.../releases/tag/v1.0.1` → `v1.0.1`）。
+fn tag_from_releases_url(uri: &str) -> Option<&str> {
+    let tag = uri.split("/releases/tag/").nth(1)?;
+    let tag = tag.trim_end_matches('/');
+    // 防御：tag 不含路径段，且必须以 v 开头（约定）
+    (tag.starts_with('v') && !tag.contains('/')).then_some(tag)
+}
+
 /// 返回 Ok(None) 表示已是最新；错误仅记录、不打扰用户。
 pub fn check_and_download() -> Result<Option<StagedUpdate>, String> {
     let Some(info) = check_latest()? else {
@@ -122,4 +177,35 @@ pub fn check_and_download() -> Result<Option<StagedUpdate>, String> {
         return Ok(Some(staged));
     }
     download_and_stage(&info, &|_, _| {}).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_extraction_from_releases_url() {
+        // /releases/latest 302 后的最终 URL 形态
+        assert_eq!(
+            tag_from_releases_url("https://github.com/LiJoeAllen/mqttx/releases/tag/v1.0.1"),
+            Some("v1.0.1")
+        );
+        assert_eq!(
+            tag_from_releases_url("https://github.com/LiJoeAllen/mqttx/releases/tag/v1.2.3-rc.1/"),
+            Some("v1.2.3-rc.1")
+        );
+        // 非 tag 页面 / 异常形态一律拒绝
+        assert_eq!(
+            tag_from_releases_url("https://github.com/LiJoeAllen/mqttx/releases"),
+            None
+        );
+        assert_eq!(
+            tag_from_releases_url("https://github.com/LiJoeAllen/mqttx/releases/tag/1.0.0"),
+            None
+        );
+        assert_eq!(
+            tag_from_releases_url("https://github.com/LiJoeAllen/mqttx/releases/tag/v1.0.0/extra"),
+            None
+        );
+    }
 }

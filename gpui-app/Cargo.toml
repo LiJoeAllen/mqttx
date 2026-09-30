@@ -41,8 +41,9 @@ rustls-native-certs = "0.8"
 # 原生文件对话框（连接导入/导出）；Windows 走内建 COM 后端，Linux 用默认 xdg-portal
 rfd = "0.17"
 
-# OTA 自更新：Gitea Release 检查/下载（ureq 用 rustls，与 rumqttc 依赖同源）
-ureq = { version = "3", features = ["json"] }
+# OTA 自更新：GitHub Release 检查/下载（ureq 用 rustls，与 rumqttc 依赖同源；
+# win-system-proxy 使 Windows 系统代理注册表设置自动生效，环境变量代理本就默认支持）
+ureq = { version = "3", features = ["json", "win-system-proxy"] }
 sha2 = "0.11"
 # Release 附件为 7z 压缩包，纯 Rust 解压（客户端免装 7-Zip）
 sevenz-rust = "0.6"
