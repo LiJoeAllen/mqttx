@@ -42,10 +42,16 @@ impl Sampler {
 
     /// 采样一次；CPU 占用首次采样为 0（无差分基准）。
     pub fn sample(&mut self) -> Option<Sample> {
-        if !cfg!(target_os = "windows") {
-            return Some(Sample::default());
+        // 属性 cfg 分派而非 cfg!() 运行时判断：非 Windows 下 sample_windows
+        // 被 cfg 移除，cfg! 分支仍参与编译会报方法不存在（CI Test job 实测暴露）
+        #[cfg(target_os = "windows")]
+        {
+            self.sample_windows()
         }
-        self.sample_windows()
+        #[cfg(not(target_os = "windows"))]
+        {
+            Some(Sample::default())
+        }
     }
 
     #[cfg(target_os = "windows")]

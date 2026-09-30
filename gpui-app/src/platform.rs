@@ -2,10 +2,17 @@
 
 /// 窗口置顶 / 取消置顶。返回是否成功（非 Windows 或句柄不可得为 false）。
 pub fn set_topmost(window: &gpui_kit::Window, topmost: bool) -> bool {
-    if !cfg!(target_os = "windows") {
-        return false;
+    // 属性 cfg 分派而非 cfg!() 运行时判断：非 Windows 下 set_topmost_windows
+    // 被 cfg 移除，cfg! 分支仍参与编译会报方法不存在（CI Test job 实测暴露）
+    #[cfg(target_os = "windows")]
+    {
+        set_topmost_windows(window, topmost)
     }
-    set_topmost_windows(window, topmost)
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, topmost);
+        false
+    }
 }
 
 #[cfg(target_os = "windows")]
