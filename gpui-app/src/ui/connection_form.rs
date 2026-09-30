@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
@@ -240,7 +240,9 @@ impl ConnectionForm {
         // 切换传输方式时，把端口同步成该方式的默认端口，并刷新 WS 路径的按需显示。
         // gpui 列表点击任意项（含当前项）都会发 Confirm，若不比对索引，
         // 打开下拉点一下当前传输就会把自定义端口静默改回默认值。
-        let last_transport = std::cell::Cell::new(transport_idx);
+        // 记录"上一个传输方式"而非索引：端口只在仍是上一个方式的默认端口时才跟随，
+        // 与全部默认端口比较会把用户恰好手输的 8084/8883 等值误判为默认值而覆盖
+        let last_transport = std::cell::Cell::new(TransportKind::ALL[transport_idx]);
         let port_for_sub = port.clone();
         let sub_transport = cx.subscribe_in(
             &transport,
@@ -250,17 +252,15 @@ impl ConnectionForm {
                     && let Some(idx) = state.read(cx).selected_value().copied()
                     && let Some(kind) = TransportKind::ALL.get(idx).copied()
                 {
-                    // 索引未变化：视为重新点选当前项，不覆盖用户输入的端口
-                    if last_transport.get() == idx {
+                    // 未变化：视为重新点选当前项，不覆盖用户输入的端口
+                    if last_transport.get() == kind {
                         return;
                     }
-                    // 端口只在仍是某个默认端口（而非用户自定义值）时才跟随切换：
-                    // 否则 WSS:9443 → TCP → WSS 的往返会把 9443 静默丢失
-                    let current = port_for_sub.read(cx).value().trim().parse::<u16>().ok();
-                    let is_default = matches!(current, Some(p) if
-                        TransportKind::ALL.iter().any(|k| k.default_port() == p));
-                    last_transport.set(idx);
-                    if is_default {
+                    // WSS:9443 → TCP → WSS 的往返不会丢失 9443
+                    let is_prev_default = port_for_sub.read(cx).value().trim().parse::<u16>().ok()
+                        == Some(last_transport.get().default_port());
+                    last_transport.set(kind);
+                    if is_prev_default {
                         port_for_sub.update(cx, |p, cx| {
                             p.set_value(kind.default_port().to_string(), window, cx);
                         });
@@ -289,6 +289,42 @@ impl ConnectionForm {
             || c.receive_maximum.is_some()
             || c.maximum_packet_size.is_some()
             || c.topic_alias_maximum.is_some();
+
+        // 任一被校验字段被编辑时清空字段错误：错误只在保存/测试时登记，若不随输入
+        // 清除，用户改好值后红字仍然挂着，无从判断当前输入是否已合法
+        let err_watch: [Entity<InputState>; 16] = [
+            name.clone(),
+            host.clone(),
+            port.clone(),
+            path.clone(),
+            client_id.clone(),
+            keep_alive.clone(),
+            conn_timeout.clone(),
+            max_reconnect.clone(),
+            session_expiry.clone(),
+            receive_max.clone(),
+            max_packet.clone(),
+            topic_alias.clone(),
+            ssl_ca.clone(),
+            ssl_client_cert.clone(),
+            ssl_client_key.clone(),
+            will_topic.clone(),
+        ];
+        let mut err_subs = Vec::with_capacity(err_watch.len());
+        for w in err_watch {
+            err_subs.push(cx.subscribe_in(
+                &w,
+                window,
+                move |this, _, ev: &InputEvent, _, cx| {
+                    if matches!(ev, InputEvent::Change)
+                        && !this.field_errors.borrow().is_empty()
+                    {
+                        this.field_errors.borrow_mut().clear();
+                        cx.notify();
+                    }
+                },
+            ));
+        }
 
         Self {
             engine,
@@ -334,7 +370,11 @@ impl ConnectionForm {
             show_ssl: ssl_configured,
             field_errors: RefCell::default(),
             testing: false,
-            _subs: vec![sub_transport, sub_protocol],
+            _subs: {
+                let mut subs = vec![sub_transport, sub_protocol];
+                subs.extend(err_subs);
+                subs
+            },
         }
     }
 
@@ -362,6 +402,25 @@ impl ConnectionForm {
         s.trim()
             .parse::<u16>()
             .map_err(|_| format!("{label} 需要是 0~65535 的整数"))
+    }
+
+    /// 端口：1~65535。0 不是可连接端口，放行只会在 CONNECT 阶段报出难以理解的错误。
+    fn parse_port(s: &str) -> Result<u16, String> {
+        match s.trim().parse::<u16>() {
+            Ok(0) => Err("端口需要是 1~65535 的整数".into()),
+            Ok(p) => Ok(p),
+            Err(_) => Err("端口需要是 1~65535 的整数".into()),
+        }
+    }
+
+    /// 同 `parse_opt_u32`，但 0 视为非法：MQTT 5 规范把 Receive Maximum /
+    /// Maximum Packet Size 为 0 定义为 Protocol Error，broker 会直接断开连接，
+    /// 且该值会被持久化，表现为"每次连接都失败"。
+    fn parse_opt_positive_u32(s: &str, label: &str) -> Result<Option<u32>, String> {
+        match Self::parse_opt_u32(s, label)? {
+            Some(0) => Err(format!("{label} 必须大于 0（0 是 MQTT 5 协议错误）")),
+            other => Ok(other),
+        }
     }
 
     fn parse_opt_u32(s: &str, label: &str) -> Result<Option<u32>, String> {
@@ -402,7 +461,7 @@ impl ConnectionForm {
             return Err(self.fail("host", "主机地址不能为空"));
         }
         let host = host.trim().to_string();
-        let port = self.fail_as("port", Self::parse_u16(&self.val(&self.port, cx), "端口"))?;
+        let port = self.fail_as("port", Self::parse_port(&self.val(&self.port, cx)))?;
         let mut client_id = self.val(&self.client_id, cx);
         if client_id.trim().is_empty() {
             if !for_test {
@@ -429,16 +488,16 @@ impl ConnectionForm {
             }
         };
         let receive_maximum = self.fail_as("receive_max", (|| -> Result<_, String> {
-            Ok(Self::parse_opt_u32(&self.val(&self.receive_max, cx), "接收上限")?
+            Ok(Self::parse_opt_positive_u32(&self.val(&self.receive_max, cx), "接收上限")?
                 .map(|v| u16::try_from(v).map_err(|_| "接收上限不能超过 65535".to_string()))
                 .transpose())
         })())??;
         let maximum_packet_size = self.fail_as(
             "max_packet",
-            Self::parse_opt_u32(&self.val(&self.max_packet, cx), "最大报文长度"),
+            Self::parse_opt_positive_u32(&self.val(&self.max_packet, cx), "最大报文长度"),
         )?;
         let topic_alias_maximum = self.fail_as("topic_alias", (|| -> Result<_, String> {
-            Ok(Self::parse_opt_u32(&self.val(&self.topic_alias, cx), "主题别名")?
+            Ok(Self::parse_opt_positive_u32(&self.val(&self.topic_alias, cx), "主题别名")?
                 .map(|v| u16::try_from(v).map_err(|_| "主题别名上限不能超过 65535".to_string()))
                 .transpose())
         })())??;
@@ -528,9 +587,17 @@ impl ConnectionForm {
         }
 
         let last_will = if self.will_enabled {
-            let topic = self.val(&self.will_topic, cx);
-            if topic.trim().is_empty() {
+            // 与其它字段一致：trim 后入库
+            let topic = self.val(&self.will_topic, cx).trim().to_string();
+            if topic.is_empty() {
                 return Err(self.fail("will_topic", "遗嘱主题不能为空"));
+            }
+            // 通配符只用于订阅过滤器；出现在 PUBLISH 主题上会被 broker 直接拒绝
+            if topic.contains('+') || topic.contains('#') {
+                return Err(self.fail(
+                    "will_topic",
+                    "遗嘱主题不能包含通配符 + 或 #",
+                ));
             }
             let opt_str = |v: String| {
                 let t = v.trim().to_string();

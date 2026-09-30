@@ -470,6 +470,11 @@ impl Render for ResourceMonitorDialog {
 }
 
 pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
+    // 对话框是栈式叠加：标题栏菜单、快捷键、行内按钮等多个入口都会调 open，
+    // 不加守卫会压入第二个模态，同 id 的控件在两层之间串台
+    if window.has_active_dialog(cx) {
+        return;
+    }
     let dialog_view = cx.new(|cx| ResourceMonitorDialog::new(app, cx));
     // 用弱引用刷新：对话框关闭、实体释放后 update 返回 Err，循环退出。
     // 强引用的 update 在实体释放后会 panic。

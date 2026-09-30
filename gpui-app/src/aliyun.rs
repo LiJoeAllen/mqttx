@@ -44,7 +44,9 @@ impl AliyunAuthMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Debug 手写脱敏：AccessKeySecret 与 DeviceSecret 是长期凭据，一次 `{:?}` 格式化
+// 就会把它们送进 stderr 与 Sentry（panic 钩子会一并上报），因此不能 derive。
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AliyunPreset {
     pub id: String,
     pub name: String,
@@ -152,6 +154,10 @@ impl AliyunPreset {
                 {
                     return Err("Group ID、AccessKey ID 与 AccessKey Secret 不能为空".into());
                 }
+                // 空 DeviceName 会拼出 "group@@@" 这样的非法 clientId，服务端报错难懂
+                if self.device_id.trim().is_empty() {
+                    return Err("Device ID 不能为空".into());
+                }
                 conn.host = self.host();
                 let client_id = format!("{}@@@{}", self.group_id, self.device_id);
                 let password = Self::signature(&self.access_key_secret, &client_id)?;
@@ -163,6 +169,10 @@ impl AliyunPreset {
             AliyunAuthMode::DeviceCredential => {
                 if self.product_key.is_empty() || self.device_secret.is_empty() {
                     return Err("一机一密需要 ProductKey 与 DeviceSecret (设备密钥)".into());
+                }
+                // 空 DeviceName 会拼出 "pk.|securemode=..." 与 "&pk"，服务端报错难懂
+                if self.device_id.trim().is_empty() {
+                    return Err("一机一密需要 DeviceName（设备名）".into());
                 }
                 conn.host = self.host();
                 // 物联网平台「一机一密」直连三元组（见模块文档），DeviceName 复用 device_id
@@ -187,5 +197,24 @@ impl AliyunPreset {
 impl Default for AliyunPreset {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for AliyunPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AliyunPreset")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("group", &self.group)
+            .field("instance_id", &self.instance_id)
+            .field("region", &self.region)
+            .field("auth_mode", &self.auth_mode)
+            .field("access_key_id", &self.access_key_id)
+            .field("access_key_secret", &"<redacted>")
+            .field("group_id", &self.group_id)
+            .field("device_id", &self.device_id)
+            .field("product_key", &self.product_key)
+            .field("device_secret", &"<redacted>")
+            .finish()
     }
 }

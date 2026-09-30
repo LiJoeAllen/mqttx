@@ -49,13 +49,17 @@ impl SearchableListDelegate for OptionDelegate {
     fn item(&self, ix: IndexPath) -> Option<&Self::Item> {
         self.items.get(ix.row)
     }
-    fn position<V>(&self, _value: &V) -> Option<IndexPath>
+    fn position<V>(&self, value: &V) -> Option<IndexPath>
     where
         Self::Item: SearchableListItem<Value = V>,
         V: PartialEq,
     {
-        // 选中项统一通过 IndexPath 构造，无需按值反查
-        None
+        // 框架契约：按值反查索引，set_selected_value 与过滤视图都依赖它。
+        // 返回 None 会导致下拉显示空、保存写默认值，这里必须如实实现。
+        self.items
+            .iter()
+            .position(|i| i.value() == value)
+            .map(IndexPath::new)
     }
 }
 

@@ -3,9 +3,9 @@
     {
       "name": "Linear Light",
       "mode": "light",
-      "font_size": 14,
+      "font.size": 14,
       "radius": 6,
-      "radius_lg": 10,
+      "radius.lg": 10,
       "colors": {
         "accent.background": "#eeeef0",
         "accent.foreground": "#0d0e10",
@@ -211,9 +211,9 @@
     {
       "name": "Linear Dark",
       "mode": "dark",
-      "font_size": 14,
+      "font.size": 14,
       "radius": 6,
-      "radius_lg": 10,
+      "radius.lg": 10,
       "colors": {
         "accent.background": "#1c1d1f",
         "accent.foreground": "#f7f8f8",

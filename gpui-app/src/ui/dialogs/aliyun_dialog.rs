@@ -52,10 +52,13 @@ macro_rules! text_field {
 impl AliyunDialog {
     fn new(app: Entity<MqttXApp>, presets: Vec<AliyunPreset>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let first = presets.first().cloned().unwrap_or_else(AliyunPreset::new);
+        // 表单已用 first 预填：selected 也指向它，否则"打开即保存"会用相同的
+        // 内容 push 出一条重复预设（selected=None 走新建分支、另生成 uuid）
+        let selected = (!presets.is_empty()).then_some(0);
         Self {
             app,
             presets,
-            selected: None,
+            selected,
             name: text_field!(cx, window, &first.name, "预设名称"),
             group: text_field!(cx, window, &first.group, "分组（可选）"),
             instance_id: text_field!(cx, window, &first.instance_id, "post-cn-xxxx"),
@@ -365,6 +368,11 @@ impl Render for AliyunDialog {
 }
 
 pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
+    // 对话框是栈式叠加：标题栏菜单、快捷键、行内按钮等多个入口都会调 open，
+    // 不加守卫会压入第二个模态，同 id 的控件在两层之间串台
+    if window.has_active_dialog(cx) {
+        return;
+    }
     let presets = app.read(cx).aliyun_presets.clone();
     let dialog_view = cx.new(|cx| AliyunDialog::new(app, presets, window, cx));
     window.open_dialog(cx, move |dialog, _, _| {

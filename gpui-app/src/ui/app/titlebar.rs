@@ -14,6 +14,38 @@ use super::*;
 impl MqttXApp {
 pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let app_weak = cx.entity().downgrade();
+        // 非 Windows 平台 `set_topmost` 恒为 false，渲染一个必然报错的按钮只会让人困惑
+        let pin_button = if cfg!(target_os = "windows") {
+            Some(
+                Button::new("pin-window")
+                    .icon(if self.pinned {
+                        IconName::PinOff
+                    } else {
+                        IconName::Pin
+                    })
+                    .ghost()
+                    .small()
+                    .tooltip(if self.pinned {
+                        "取消窗口置顶"
+                    } else {
+                        "窗口置顶"
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let next = !this.pinned;
+                        if crate::platform::set_topmost(window, next) {
+                            this.pinned = next;
+                            cx.notify();
+                        } else {
+                            window.push_notification(
+                                Notification::error("置顶操作失败"),
+                                cx,
+                            );
+                        }
+                    })),
+            )
+        } else {
+            None
+        };
 
         TitleBar::new().child(
             h_flex()
@@ -59,33 +91,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                     this.open_connection_form(None, window, cx);
                                 })),
                         )
-                        .child(
-                            Button::new("pin-window")
-                                .icon(if self.pinned {
-                                    IconName::PinOff
-                                } else {
-                                    IconName::Pin
-                                })
-                                .ghost()
-                                .small()
-                                .tooltip(if self.pinned {
-                                    "取消窗口置顶"
-                                } else {
-                                    "窗口置顶"
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    let next = !this.pinned;
-                                    if crate::platform::set_topmost(window, next) {
-                                        this.pinned = next;
-                                        cx.notify();
-                                    } else {
-                                        window.push_notification(
-                                            Notification::error("置顶操作失败"),
-                                            cx,
-                                        );
-                                    }
-                                })),
-                        )
+                        .children(pin_button)
                         .child(self.render_theme_toggle(cx))
                         .child(
                             Button::new("more-menu")
