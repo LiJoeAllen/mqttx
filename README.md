@@ -130,8 +130,8 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 1. 版本一致性校验：tag 必须等于 `v` + `gpui-app/Cargo.toml` 的版本，否则整条流水线失败
 2. 单元测试（`--lib --tests`，集成测试只编译不执行）
 3. Linux + Windows + macOS 三平台 release 构建（产物重命名为
-   `mqttx-v<ver>-<target>-mqttx[.exe]` 并生成 `.sha256` 侧车；macOS 含
-   Apple Silicon 与 Intel）
+   `mqttx-v<ver>-<target>-mqttx[.exe]` 并生成 `.sha256` 侧车；macOS 仅
+   Apple Silicon）
 4. 打包 7z（单条目，内部文件名 = 裸二进制名）并创建 GitHub Release，上传
    7z / 裸二进制 / `.sha256` 附件
 
