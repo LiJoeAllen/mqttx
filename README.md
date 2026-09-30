@@ -129,13 +129,17 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 
 1. 版本一致性校验：tag 必须等于 `v` + `gpui-app/Cargo.toml` 的版本，否则整条流水线失败
 2. 单元测试（`--lib --tests`，集成测试只编译不执行）
-3. Linux + Windows 双平台 release 构建（产物重命名为 `mqttx-v<ver>-<target>-mqttx[.exe]`
-   并生成 `.sha256` 侧车）
+3. Linux + Windows + macOS 三平台 release 构建（产物重命名为
+   `mqttx-v<ver>-<target>-mqttx[.exe]` 并生成 `.sha256` 侧车；macOS 含
+   Apple Silicon 与 Intel）
 4. 打包 7z（单条目，内部文件名 = 裸二进制名）并创建 GitHub Release，上传
    7z / 裸二进制 / `.sha256` 附件
 
 > **应用内 OTA 只认 Release 附件**，附件名必须匹配 `mqttx-v<ver>-<triple>-mqttx[.exe]`。
 > 7z 是 OTA 主通道；裸二进制供不识别 7z 的旧客户端（≤v1.0.3）升级。
+>
+> macOS 产物未做签名/公证：浏览器下载后首次打开会被 Gatekeeper 拦截，需
+> `xattr -d com.apple.quarantine <binary>`；应用内 OTA 自更新不走浏览器，无此问题。
 >
 > GitHub 侧发布历史自 v1.0.0 起独立开始，不向其他渠道镜像（Gitea 为历史渠道，已弃用）。
 

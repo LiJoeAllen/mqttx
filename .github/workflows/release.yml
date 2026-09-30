@@ -81,6 +81,14 @@ jobs:
           - os: windows-latest
             asset: mqttx.exe
             target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            asset: mqttx
+            target: aarch64-apple-darwin
+          # macos-latest 是 ARM 机：x86_64 走交叉编译（Apple SDK 双架构通用，
+          # rustup 加上 target 即可，无需独立 Intel runner）
+          - os: macos-latest
+            asset: mqttx
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
