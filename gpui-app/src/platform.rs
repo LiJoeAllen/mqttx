@@ -10,8 +10,7 @@ pub fn set_topmost(window: &gpui_kit::Window, topmost: bool) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (window, topmost);
-        false
+        set_topmost_windows(window, topmost)
     }
 }
 
