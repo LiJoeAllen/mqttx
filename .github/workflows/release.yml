@@ -6,13 +6,6 @@
 #   mqttx-v<ver>-<triple>-mqttx[.exe].7z       压缩包（单条目，内部文件名 = 裸二进制名）
 #   mqttx-v<ver>-<triple>-mqttx[.exe].7z.sha256
 # 7z 是 OTA 主通道；裸二进制供不识别 7z 的旧客户端（≤v1.0.3）升级。
-#
-# 可选：镜像发布到自建 Gitea（已装机的 v1.0.x 客户端 OTA 源仍在 Gitea）。
-# 在仓库 Settings → Secrets and variables → Actions 配置后自动启用，缺省跳过：
-#   GITEA_URL    实例地址，如 https://gitea.heavenlybook.cn
-#   GITEA_TOKEN  Gitea 令牌（package + repo 写权限）
-#   GITEA_OWNER  Gitea 侧 owner（如 JoeAllen）
-# 客户端 OTA 更新源切换到 GitHub 后可删除 mirror-gitea job。
 name: Release
 
 on:
@@ -187,44 +180,3 @@ jobs:
             gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --generate-notes
           fi
           gh release upload "$VER" -R "$GITHUB_REPOSITORY" artifacts/* --clobber
-
-# ─── 可选：镜像发布到自建 Gitea ───────────────────────────────
-# 客户端 OTA 源已切换到 GitHub Releases，但已装机的 v1.0.x 老客户端仍轮询
-# Gitea Release 附件；配置 GITEA_URL / GITEA_TOKEN / GITEA_OWNER 三个 Secrets 后
-# 本 job 生效，把这些老客户端喂到能升级到 OTA 切换后的版本为止。未配置时自动
-# 跳过（不影响 GitHub Release 发布）。老客户端升级完毕后可删除本 job。
-  mirror-gitea:
-    name: Mirror to Gitea (optional)
-    needs: [meta, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Install 7-Zip
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y p7zip-full
-
-      # 只传裸二进制：脚本自行生成 .sha256 侧车与 7z 压缩包（条目名约定在脚本内保证）
-      - name: Mirror release assets to Gitea
-        env:
-          GITEA_URL: ${{ secrets.GITEA_URL }}
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-          GITEA_OWNER: JoeAllen
-          GITEA_REPO: mqttx
-          GITEA_PKG: mqttx
-          VER: ${{ needs.meta.outputs.version }}
-        if: ${{ env.GITEA_URL != '' && env.GITEA_TOKEN != '' }}
-        run: |
-          set -euo pipefail
-          chmod +x scripts/publish-gitea.sh
-          files=()
-          for f in artifacts/mqttx-${VER}-*; do
-            case "$f" in *.sha256) ;; *) files+=("$f") ;; esac
-          done
-          ./scripts/publish-gitea.sh "${files[@]}" "$VER"

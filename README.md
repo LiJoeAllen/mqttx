@@ -136,43 +136,8 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 
 > **应用内 OTA 只认 Release 附件**，附件名必须匹配 `mqttx-v<ver>-<triple>-mqttx[.exe]`。
 > 7z 是 OTA 主通道；裸二进制供不识别 7z 的旧客户端（≤v1.0.3）升级。
-
-### 可选：镜像到自建 Gitea（老客户端 OTA 源）
-
-已装机的 v1.0.x 客户端 OTA 更新源仍指向 Gitea（master 上的客户端自 v1.0.1
-起已切换到 GitHub Releases）。在仓库
-**Settings → Secrets and variables → Actions** 配置以下 Secrets 后，每次发布
-会自动把产物同步镜像到 Gitea Release（`mirror-gitea` job，调用
-`scripts/publish-gitea.sh`）；未配置时该 job 自动跳过：
-
-- `GITEA_URL` — 实例地址，如 `https://gitea.heavenlybook.cn`
-- `GITEA_TOKEN` — Gitea 访问令牌（需 `package` + repo 写权限）
-- `GITEA_OWNER` — Gitea 侧 owner（如 `JoeAllen`）
-
-待 v1.0.x 老客户端全部升级完毕，可删除 `mirror-gitea` job 与
-`scripts/publish-gitea.*`。本地手动镜像（应急）仍可用：
-
-```powershell
-# Windows（PowerShell）
-$env:GITEA_URL = "https://gitea.example.com"
-$env:GITEA_TOKEN = "gta_xxx"
-.\scripts\publish-gitea.ps1                    # 默认产物 + 自动推断版本/owner
-.\scripts\publish-gitea.ps1 -Version v1.0.1    # 指定版本
-```
-
-```bash
-# macOS / Linux（bash）
-export GITEA_URL=https://gitea.example.com
-export GITEA_TOKEN=gta_xxx
-./scripts/publish-gitea.sh                     # 默认产物
-./scripts/publish-gitea.sh target/release/mqttx v1.0.1
-```
-
-- **owner** 自动从 `git remote origin` 推断（可用 `GITEA_OWNER` / `-Owner` 覆盖）
-- **版本** 依次取参数 → 当前提交的精确 tag（`git describe --tags --exact-match`）→ `Cargo.toml`；
-  必须是合法 semver（形如 `v1.0.1` 或 `1.0.1-rc.1`），否则脚本直接拒绝发布
-  —— 非 semver 版本（如 `v1.0.0-4-gabc1234`）会被客户端截断比对，更新永远发不出去
-- 每个文件附带 `.sha256` 校验侧车；同名版本重复上传按 409 跳过（Gitea 不允许覆盖）
+>
+> GitHub 侧发布历史自 v1.0.0 起独立开始，不向其他渠道镜像（Gitea 为历史渠道，已弃用）。
 
 ## 数据目录
 
