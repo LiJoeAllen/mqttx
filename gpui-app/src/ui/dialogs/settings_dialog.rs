@@ -502,7 +502,7 @@ impl Render for SettingsDialog {
                                 .child(format!(
                                     "版本 {}（更新源 {}）",
                                     update::current_version(),
-                                    update::PKG_REPO
+                                    update::UPDATE_SOURCE
                                 ))
                                 .child("Apache-2.0 许可证"),
                         )

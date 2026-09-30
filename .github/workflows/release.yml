@@ -188,10 +188,11 @@ jobs:
           fi
           gh release upload "$VER" -R "$GITHUB_REPOSITORY" artifacts/* --clobber
 
-  # ─── 可选：镜像发布到自建 Gitea ───────────────────────────────
-  # 已装机的 v1.0.x 客户端 OTA 更新源仍指向 Gitea Release 附件；
-  # 配置 GITEA_URL / GITEA_TOKEN / GITEA_OWNER 三个 Secrets 后本 job 生效，
-  # 未配置时自动跳过（不影响 GitHub Release 发布）。客户端 OTA 切到 GitHub 后可删。
+# ─── 可选：镜像发布到自建 Gitea ───────────────────────────────
+# 客户端 OTA 源已切换到 GitHub Releases，但已装机的 v1.0.x 老客户端仍轮询
+# Gitea Release 附件；配置 GITEA_URL / GITEA_TOKEN / GITEA_OWNER 三个 Secrets 后
+# 本 job 生效，把这些老客户端喂到能升级到 OTA 切换后的版本为止。未配置时自动
+# 跳过（不影响 GitHub Release 发布）。老客户端升级完毕后可删除本 job。
   mirror-gitea:
     name: Mirror to Gitea (optional)
     needs: [meta, build]

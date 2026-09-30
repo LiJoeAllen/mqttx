@@ -5,6 +5,9 @@ use super::*;
 pub(super) fn agent() -> ureq::Agent {
     ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
+            // GitHub API 要求请求携带 User-Agent（缺省 ureq/x.y 也能过，
+            // 但标识应用更符合其规范，也便于服务端区分流量）
+            .user_agent("mqttx-ota")
             // 整体上限：防止慢速滴流的下载无限占用阻塞线程
             .timeout_global(Some(std::time::Duration::from_secs(10 * 60)))
             .timeout_connect(Some(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS)))
@@ -66,12 +69,12 @@ pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Opti
 
 /// 检查更新。返回 Ok(None) 表示已是最新。
 pub fn check_latest() -> Result<Option<UpdateInfo>, String> {
-    let base = format!("{GITEA_URL}/api/v1/repos/{PKG_OWNER}/{PKG_REPO}/releases");
-    // 优先 latest 端点；旧版 Gitea 没有时回退到列表取第一个非草稿/预发布
+    let base = RELEASES_API;
+    // 优先 latest 端点（GitHub 恒可用）；回退到列表取第一个非草稿/预发布，作容错
     let rel = match http_get_json(&format!("{base}/latest")) {
         Ok(v) => v,
         Err(_) => {
-            let list = http_get_json(&format!("{base}?limit=5"))?;
+            let list = http_get_json(&format!("{base}?per_page=5"))?;
             let first = list
                 .as_array()
                 .and_then(|l| l.iter().find(|r| {

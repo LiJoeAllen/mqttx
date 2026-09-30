@@ -60,7 +60,7 @@ gpui-app/
 │   │   ├── tls.rs           #   rustls 配置与跳过校验
 │   │   ├── v5.rs            #   MQTT 5.0 客户端构建与事件循环
 │   │   └── v4.rs            #   MQTT 3.1.1 客户端构建与事件循环
-│   ├── update/              # OTA 自更新（Gitea Release 源）
+│   ├── update/              # OTA 自更新（GitHub Release 源；v1.0.x 老客户端源仍在 Gitea）
 │   │   ├── mod.rs           #   门面：版本比较、资产命名约定
 │   │   ├── check.rs         #   检查最新版本与资产挑选
 │   │   └── install.rs       #   7z 下载暂存、sha256 校验、自替换安装
@@ -139,7 +139,8 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 
 ### 可选：镜像到自建 Gitea（老客户端 OTA 源）
 
-已装机的 v1.0.x 客户端 OTA 更新源仍指向 Gitea。在仓库
+已装机的 v1.0.x 客户端 OTA 更新源仍指向 Gitea（master 上的客户端自 v1.0.1
+起已切换到 GitHub Releases）。在仓库
 **Settings → Secrets and variables → Actions** 配置以下 Secrets 后，每次发布
 会自动把产物同步镜像到 Gitea Release（`mirror-gitea` job，调用
 `scripts/publish-gitea.sh`）；未配置时该 job 自动跳过：
@@ -148,7 +149,7 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 - `GITEA_TOKEN` — Gitea 访问令牌（需 `package` + repo 写权限）
 - `GITEA_OWNER` — Gitea 侧 owner（如 `JoeAllen`）
 
-客户端 OTA 更新源切换到 GitHub 后，可删除 `mirror-gitea` job 与
+待 v1.0.x 老客户端全部升级完毕，可删除 `mirror-gitea` job 与
 `scripts/publish-gitea.*`。本地手动镜像（应急）仍可用：
 
 ```powershell

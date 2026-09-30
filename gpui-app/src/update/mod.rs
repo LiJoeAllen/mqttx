@@ -1,4 +1,4 @@
-//! OTA 自更新：以 Gitea Release 为更新源。
+//! OTA 自更新：以 GitHub Release 为更新源。
 //!
 //! - [`check`] 检查最新版本与资产挑选
 //! - [`install`] 下载暂存、校验安装、同意标记与清理
@@ -18,10 +18,16 @@ pub use install::{
     install_consent_matches, install_staged, load_staged, mark_install_consent,
 };
 
-/// 更新源（自建 Gitea，仓库公开、附件可直接下载，无需认证）。
-pub const GITEA_URL: &str = "https://gitea.heavenlybook.cn";
-pub const PKG_OWNER: &str = "JoeAllen";
-pub const PKG_REPO: &str = "mqttx";
+/// 更新源（GitHub Releases；仓库公开，API 与附件下载均无需认证）。
+///
+/// - api.github.com 未认证配额为 60 次/小时/IP：共享出口 IP 打满时检查会失败，
+///   按「错误仅记录、不打扰用户」静默降级，下次成功检查自动追上；
+///   附件下载走 github.com CDN，不受 API 配额限制。
+/// - v1.0.x 老客户端的 OTA 源仍是自建 Gitea，CI 的 mirror-gitea job 会把每次
+///   发布镜像回 Gitea，老客户端升级完毕后可移除该 job。
+pub const RELEASES_API: &str = "https://api.github.com/repos/LiJoeAllen/mqttx/releases";
+/// 更新源展示名（设置对话框「关于」）。
+pub const UPDATE_SOURCE: &str = "GitHub";
 
 const HTTP_TIMEOUT_SECS: u64 = 30;
 
