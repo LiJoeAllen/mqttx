@@ -157,54 +157,6 @@ pub(super) fn details_copy_text(record: &MqttRecord, show_millis: bool) -> Strin
     out
 }
 
-/// 折叠态预览行数与字符上限：JSON 美化后多行完整展示，超大负载兜底截断
-const PREVIEW_MAX_LINES: usize = 40;
-const PREVIEW_MAX_CHARS: usize = 4000;
-
-/// 折叠态预览：JSON 负载按原始数据美化展示（缩进多行），非 JSON
-/// 压平换行/制表符截 200 字符；含替换字符（U+FFFD）提示切 Hex。
-pub(super) fn preview_payload(payload: &str) -> String {
-    let parsed = serde_json::from_str::<serde_json::Value>(payload).ok();
-    let mut out = match &parsed {
-        Some(value) => {
-            let pretty = serde_json::to_string_pretty(value).unwrap_or_default();
-            truncate_preview(pretty)
-        }
-        None => {
-            let flat: String = payload
-                .chars()
-                .map(|c| match c {
-                    '\n' | '\r' | '\t' => ' ',
-                    _ => c,
-                })
-                .collect();
-            let mut s: String = flat.chars().take(200).collect();
-            if flat.chars().count() > 200 {
-                s.push('…');
-            }
-            s
-        }
-    };
-    if payload.contains('\u{FFFD}') {
-        out.push_str("（非文本，详情可切 Hex）");
-    }
-    out
-}
-
-/// 截断预览文本：最多 [`PREVIEW_MAX_LINES`] 行、[`PREVIEW_MAX_CHARS`] 字符。
-fn truncate_preview(text: String) -> String {
-    let mut lines: Vec<&str> = text.lines().take(PREVIEW_MAX_LINES).collect();
-    let more = text.lines().count() > PREVIEW_MAX_LINES;
-    if more {
-        lines.push("…");
-    }
-    let mut out = lines.join("\n");
-    if out.chars().count() > PREVIEW_MAX_CHARS {
-        out = out.chars().take(PREVIEW_MAX_CHARS).collect::<String>() + "…";
-    }
-    out
-}
-
 /// 大小写不敏感子串匹配。`needle` 已由调用方 to_lowercase 一次；
 /// 先做零拷贝的字面匹配，未命中且原文含大写时才回退整串小写，
 /// 避免渲染热路径对全部记录做 to_lowercase 拷贝。
@@ -233,7 +185,6 @@ pub(super) fn contains_ignore_case(hay: &str, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::extract_placeholder_keys;
-    use super::preview_payload;
 
     // 修复回归：提取须 trim、排除内置变量、去重且保持首次出现顺序
     #[test]
@@ -255,31 +206,4 @@ mod tests {
         assert_eq!(keys, vec!["名称"]);
     }
 
-    #[test]
-    fn preview_json_is_pretty_and_complete_for_typical_payloads() {
-        let payload = r#"{"type":"heartbeat","ts":1790751279869,"data":{"version":"0.1.0","lon":117.229,"lat":31.8206,"uptime":1716450,"rssi":-52}}"#;
-        let out = preview_payload(payload);
-        // JSON 被美化（多行缩进）且常规负载完整展示、不带任何加工注释
-        assert!(out.contains('\n'), "JSON 应多行展示: {out}");
-        assert!(out.contains("\"rssi\": -52"), "常规负载应完整显示: {out}");
-        assert!(!out.contains("//"), "预览不应附加注释: {out}");
-        assert!(!out.contains('…'), "常规负载不应截断: {out}");
-    }
-
-    #[test]
-    fn preview_truncates_very_deep_json() {
-        // 50 个元素的数组美化后超过 40 行，应截断并带省略号
-        let items: Vec<String> = (0..50).map(|i| i.to_string()).collect();
-        let payload = format!("{{\"a\":[{}]}}", items.join(","));
-        let deep = preview_payload(&payload);
-        assert!(deep.lines().count() <= 41, "超行应截断: {deep}");
-        assert!(deep.contains('…'), "截断应有省略号: {deep}");
-    }
-
-    #[test]
-    fn preview_non_json_still_flat() {
-        assert_eq!(preview_payload("hello\nworld"), "hello world");
-        assert_eq!(preview_payload("纯文本"), "纯文本");
-        assert!(preview_payload("bad\ntext\u{FFFD}").contains("非文本"));
-    }
 }

@@ -5,6 +5,7 @@ pub mod app;
 pub mod connection_form;
 pub mod connection_view;
 pub mod dialogs;
+pub mod i18n;
 pub mod logo;
 pub mod widgets;
 

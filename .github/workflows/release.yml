@@ -140,7 +140,10 @@ jobs:
     needs: [meta, build]
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 拉取附注 tag 对象，发布正文取自 tag message
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -177,8 +180,17 @@ jobs:
           VER: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
+          # 发布正文优先取附注 tag 的 message（剥掉签名块），无附注时回退自动生成
+          notes="$(git tag -l --format='%(contents)' "$VER" | sed '/^-----BEGIN PGP SIGNATURE----$/,/^-----END PGP SIGNATURE----$/d' || true)"
+          notes="$(echo "$notes" | sed -e '/^[[:space:]]*$/d' | sed -e ':a;N;$!ba;s/
+$//')"
           if gh release view "$VER" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release ${VER} 已存在，覆盖上传资产"
+            if [ -n "$notes" ]; then
+              gh release edit "$VER" -R "$GITHUB_REPOSITORY" --notes "$notes"
+            fi
+          elif [ -n "$notes" ]; then
+            gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --notes "$notes"
           else
             gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --generate-notes
           fi

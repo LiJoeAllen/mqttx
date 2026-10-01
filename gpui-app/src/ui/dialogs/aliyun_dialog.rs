@@ -18,6 +18,7 @@ use crate::aliyun::{AliyunAuthMode, AliyunPreset};
 use crate::model::{render_will_templates, ConnectionConfig};
 use crate::ui::app::MqttXApp;
 use crate::ui::widgets::{field, make_select, OptionDelegate};
+use crate::ui::i18n;
 
 const AUTH_MODES: [&str; 2] = ["Group 令牌 (Token)", "一机一密"];
 
@@ -59,10 +60,10 @@ impl AliyunDialog {
             app,
             presets,
             selected,
-            name: text_field!(cx, window, &first.name, "预设名称"),
-            group: text_field!(cx, window, &first.group, "分组（可选）"),
+            name: text_field!(cx, window, &first.name, i18n::t("预设名称")),
+            group: text_field!(cx, window, &first.group, i18n::t("分组（可选）")),
             instance_id: text_field!(cx, window, &first.instance_id, "post-cn-xxxx"),
-            region: text_field!(cx, window, &first.region, "如 cn-shanghai（可留空）"),
+            region: text_field!(cx, window, &first.region, i18n::t("如 cn-shanghai（可留空）")),
             auth_mode: make_select(
                 &AUTH_MODES,
                 match first.auth_mode {
@@ -80,12 +81,12 @@ impl AliyunDialog {
                     .masked(true)
             }),
             group_id: text_field!(cx, window, &first.group_id, "GID-xxx"),
-            device_id: text_field!(cx, window, &first.device_id, "设备 ID"),
-            product_key: text_field!(cx, window, &first.product_key, "一机一密：ProductKey"),
+            device_id: text_field!(cx, window, &first.device_id, i18n::t("设备 ID")),
+            product_key: text_field!(cx, window, &first.product_key, i18n::t("一机一密：ProductKey")),
             device_secret: cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(&first.device_secret)
-                    .placeholder("一机一密：DeviceSecret")
+                    .placeholder(i18n::t("一机一密：DeviceSecret"))
                     .masked(true)
             }),
         }
@@ -185,7 +186,7 @@ impl AliyunDialog {
     fn save_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let preset = self.collect(cx);
         if preset.name.trim().is_empty() {
-            window.push_notification(Notification::warning("请填写预设名称"), cx);
+            window.push_notification(Notification::warning(i18n::t("请填写预设名称")), cx);
             return;
         }
         match self.selected {
@@ -197,7 +198,7 @@ impl AliyunDialog {
             a.save_aliyun(saved);
             cx.notify();
         });
-        window.push_notification(Notification::success("预设已保存"), cx);
+        window.push_notification(Notification::success(i18n::t("预设已保存")), cx);
     }
 
     fn connect(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -216,7 +217,7 @@ impl AliyunDialog {
                 window.close_dialog(cx);
             }
             Err(e) => {
-                window.push_notification(Notification::error(format!("无法生成连接: {e}")), cx);
+                window.push_notification(Notification::error(i18n::tf("无法生成连接: {e}", &[("e", &e.to_string())])), cx);
             }
         }
     }
@@ -232,7 +233,7 @@ impl Render for AliyunDialog {
                 v_flex()
                     .w(px(160.))
                     .gap_1()
-                    .child(div().text_xs().font_semibold().child("已保存预设"))
+                    .child(div().text_xs().font_semibold().child(i18n::t("已保存预设")))
                     .children(
                         self.presets
                             .iter()
@@ -256,7 +257,7 @@ impl Render for AliyunDialog {
                     .child(
                         Button::new("aliyun-new")
                             .icon(IconName::Plus)
-                            .label("新建")
+                            .label(i18n::t("新建"))
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -270,36 +271,36 @@ impl Render for AliyunDialog {
                     .flex_1()
                     .min_w(px(0.))
                     .gap_2()
-                    .child(field("预设名称", Input::new(&self.name)))
+                    .child(field(i18n::t("预设名称"), Input::new(&self.name)))
                     .child(
                         h_flex()
                             .gap_2()
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "实例 ID",
+                                    i18n::t("实例 ID"),
                                     Input::new(&self.instance_id),
                                 )),
                             )
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "地域",
+                                    i18n::t("地域"),
                                     Input::new(&self.region),
                                 )),
                             ),
                     )
-                    .child(field("鉴权方式", Select::new(&self.auth_mode)))
+                    .child(field(i18n::t("鉴权方式"), Select::new(&self.auth_mode)))
                     .child(
                         h_flex()
                             .gap_2()
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "AccessKey ID",
+                                    i18n::t("AccessKey ID"),
                                     Input::new(&self.access_key_id),
                                 )),
                             )
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "AccessKey Secret",
+                                    i18n::t("AccessKey Secret"),
                                     Input::new(&self.access_key_secret).mask_toggle(),
                                 )),
                             ),
@@ -309,13 +310,13 @@ impl Render for AliyunDialog {
                             .gap_2()
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "Group ID",
+                                    i18n::t("Group ID"),
                                     Input::new(&self.group_id),
                                 )),
                             )
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "设备 ID",
+                                    i18n::t("设备 ID"),
                                     Input::new(&self.device_id),
                                 )),
                             ),
@@ -325,13 +326,13 @@ impl Render for AliyunDialog {
                             .gap_2()
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "ProductKey（一机一密）",
+                                    i18n::t("ProductKey（一机一密）"),
                                     Input::new(&self.product_key),
                                 )),
                             )
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
-                                    "DeviceSecret（一机一密）",
+                                    i18n::t("DeviceSecret（一机一密）"),
                                     Input::new(&self.device_secret).mask_toggle(),
                                 )),
                             ),
@@ -348,7 +349,7 @@ impl Render for AliyunDialog {
                             .justify_end()
                             .child(
                                 Button::new("aliyun-save")
-                                    .label("保存预设")
+                                    .label(i18n::t("保存预设"))
                                     .outline()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.save_preset(window, cx)
@@ -356,7 +357,7 @@ impl Render for AliyunDialog {
                             )
                             .child(
                                 Button::new("aliyun-connect")
-                                    .label("生成并连接")
+                                    .label(i18n::t("生成并连接"))
                                     .primary()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.connect(window, cx)
@@ -378,7 +379,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .w(px(760.))
-            .title("阿里云 IoT 设备")
+            .title(i18n::t("阿里云 IoT 设备"))
             .child(dialog_view.clone())
             .footer(gpui_kit::div())
     });

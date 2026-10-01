@@ -49,10 +49,38 @@ impl ThemeModePref {
     }
 }
 
+/// 界面语言偏好。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LanguagePref {
+    /// 首次启动按系统语言解析（zh 开头 → 中文，其余 → English）
+    #[default]
+    System,
+    /// 中文
+    Zh,
+    /// English
+    En,
+}
+
+impl LanguagePref {
+    pub const ALL: [Self; 3] = [Self::System, Self::Zh, Self::En];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "跟随系统 / System",
+            Self::Zh => "中文",
+            Self::En => "English",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub theme: ThemeModePref,
+    /// 界面语言（跟随系统 / 中文 / English）
+    #[serde(default)]
+    pub language: LanguagePref,
     /// 每条连接在内存中保留的最大消息条数
     #[serde(default = "default_max_messages")]
     pub max_messages: usize,
@@ -72,6 +100,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: ThemeModePref::default(),
+            language: LanguagePref::default(),
             max_messages: default_max_messages(),
             show_millis: true,
             auto_check_update: true,

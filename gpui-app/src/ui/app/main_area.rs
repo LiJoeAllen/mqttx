@@ -9,6 +9,7 @@ use gpui_kit::{ div, px, Context, IntoElement, SharedString, Window,  };
 use crate::ui::IconName;
 
 use super::*;
+use crate::ui::i18n;
 
 impl MqttXApp {
 pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -26,18 +27,18 @@ pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self
                     cx.theme().muted,
                     cx.theme().muted_foreground,
                 ))
-                .child(div().text_base().font_medium().child("开始使用 MQTTX"))
+                .child(div().text_base().font_medium().child(i18n::t("开始使用 MQTTX")))
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .text_center()
-                        .child("从左侧选择一个连接，或新建连接开始调试"),
+                        .child(i18n::t("从左侧选择一个连接，或新建连接开始调试")),
                 )
                 .child(
                     Button::new("empty-new")
                         .icon(IconName::Plus)
-                        .label("新建连接")
+                        .label(i18n::t("新建连接"))
                         .outline()
                         .small()
                         .mt_1()

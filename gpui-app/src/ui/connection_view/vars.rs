@@ -10,6 +10,7 @@ use gpui_kit::{ div, px, Context, IntoElement, Window,  };
 use crate::model::{ render_template, GlobalVariable,  };
 
 use super::*;
+use crate::ui::i18n;
 
 impl ConnectionView {
     /// 输入框创建需要 Window，因此只能在按钮回调里调用（无法在 render 中同步）。
@@ -20,7 +21,7 @@ pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Sel
         if keys.is_empty() {
             self.show_vars = false;
             window.push_notification(
-                Notification::warning("主题/负载中没有 {{变量}} 引用"),
+                Notification::warning(i18n::t("主题/负载中没有 {{变量}} 引用")),
                 cx,
             );
             cx.notify();
@@ -39,7 +40,7 @@ pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Sel
                 .map(|v| v.value.clone())
                 .unwrap_or_default();
             let input = cx.new(|cx| {
-                let mut s = InputState::new(window, cx).placeholder("变量值");
+                let mut s = InputState::new(window, cx).placeholder(i18n::t("变量值"));
                 // set_value 不会触发 InputEvent::Change，不会误写回
                 if !initial.is_empty() {
                     s.set_value(initial.as_str(), window, cx);
@@ -117,7 +118,10 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                         div()
                             .text_xs()
                             .font_semibold()
-                            .child(format!("变量（{}）", self.var_rows.len())),
+                            .child(i18n::tf(
+                                "变量（{n}）",
+                                &[("n", &self.var_rows.len().to_string())],
+                            )),
                     )
                     .child(div().flex_1())
                     .child(
@@ -125,7 +129,8 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .icon(IconName::RefreshCw)
                             .ghost()
                             .xsmall()
-                            .tooltip("重新提取占位符")
+                            .tooltip(i18n::t("重新提取占位符"))
+                            .accessibility_label(i18n::t("重新提取占位符"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.sync_var_rows(window, cx);
                             })),
@@ -135,7 +140,8 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .icon(IconName::ChevronUp)
                             .ghost()
                             .xsmall()
-                            .tooltip("收起")
+                            .tooltip(i18n::t("收起"))
+                            .accessibility_label(i18n::t("收起"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_vars = false;
                                 cx.notify();
@@ -147,13 +153,16 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("内置：{{$ts}}（秒） {{$ts_ms}}（毫秒） {{$uuid}} · 发布时注入"),
+                    .child(i18n::t("内置：{{$ts}}（秒） {{$ts_ms}}（毫秒） {{$uuid}} · 发布时注入")),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child(format!("预览：{topic_rendered} | {payload_preview}")),
+                    .child(i18n::tf(
+                                "预览：{tp} | {pl}",
+                                &[("tp", &topic_rendered), ("pl", &payload_preview)],
+                            )),
             )
     }
 

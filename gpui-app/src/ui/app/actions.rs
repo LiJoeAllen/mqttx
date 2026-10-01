@@ -11,6 +11,7 @@ use crate::ui::IconName;
 use crate::ui::{ connection_form::ConnectionForm, connection_view::ConnectionView,  };
 
 use super::*;
+use crate::ui::i18n;
 
 impl MqttXApp {
     pub fn save_connection(&mut self, cfg: ConnectionConfig) {
@@ -117,6 +118,23 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         cx.notify();
     }
 
+    /// Ctrl+Tab / Ctrl+Shift+Tab：按方向在打开的标签页间循环切换。
+    pub fn cycle_tab(&mut self, dir: i32, cx: &mut Context<Self>) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let cur = self
+            .active_tab
+            .as_ref()
+            .and_then(|a| self.open_tabs.iter().position(|t| t == a))
+            .unwrap_or(0);
+        let len = self.open_tabs.len() as i32;
+        let next = ((cur as i32 + dir).rem_euclid(len)) as usize;
+        self.active_tab = Some(self.open_tabs[next].clone());
+        self.persist_ui_state();
+        cx.notify();
+    }
+
     // ── 订阅 ──────────────────────────────────────────────────────────────
 
     pub fn add_subscription(&mut self, sub: Subscription) {
@@ -171,6 +189,12 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
 
     pub fn save_settings(&mut self, settings: AppSettings, window: &mut Window, cx: &mut App) {
         apply_theme(settings.theme, cx);
+        // 语言即时生效（含跟随系统）
+        crate::ui::i18n::set_lang(match settings.language {
+            crate::model::LanguagePref::Zh => crate::ui::i18n::Lang::Zh,
+            crate::model::LanguagePref::En => crate::ui::i18n::Lang::En,
+            crate::model::LanguagePref::System => crate::ui::i18n::from_system(),
+        });
         self.settings = settings;
         self.storage.save_settings(&self.settings);
         // 切主题只更新全局令牌，不触发整窗重绘，未损坏区域会长期滞留旧主题
@@ -204,7 +228,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
             let testing = form_test.read(cx).is_testing();
             dialog
                 .w(px(680.))
-                .title("连接配置")
+                .title(i18n::t("连接配置"))
                 .child(form.clone())
                 .footer(
                     h_flex()
@@ -218,7 +242,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                 } else {
                                     IconName::PlugZap
                                 })
-                                .label(if testing { "测试中…" } else { "测试连接" })
+                                .label(if testing { i18n::t("测试中…") } else { i18n::t("测试连接") })
                                 .outline()
                                 .loading(testing)
                                 .on_click(move |_, window, cx| {
@@ -228,13 +252,13 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                         .child(div().flex_1())
                         .child(
                             Button::new("form-cancel")
-                                .label("取消")
+                                .label(i18n::t("取消"))
                                 .outline()
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("form-ok")
-                                .label("保存")
+                                .label(i18n::t("保存"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     let built = form_ok.read(cx).build(cx);
@@ -264,7 +288,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                             window.close_dialog(cx);
                                             if stale {
                                                 window.push_notification(
-                                                    Notification::info("配置已保存，重连后生效"),
+                                                    Notification::info(i18n::t("配置已保存，重连后生效")),
                                                     cx,
                                                 );
                                             }

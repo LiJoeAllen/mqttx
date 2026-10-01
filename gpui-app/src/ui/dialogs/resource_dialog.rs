@@ -19,6 +19,7 @@ use gpui_kit::{
 };
 
 use crate::model::MAX_CONNECTION_MESSAGE_BYTES;
+use crate::ui::i18n;
 use crate::sysmon::{Sample, Sampler};
 use crate::ui::app::MqttXApp;
 use crate::ui::IconName;
@@ -89,7 +90,7 @@ impl ResourceMonitorDialog {
                         .get(&c.id)
                         .copied()
                         .map(|s| s.label())
-                        .unwrap_or("未连接"),
+                        .unwrap_or(i18n::t("未连接")),
                     connected: app.engine.is_connected(&c.id),
                     messages,
                     bytes,
@@ -246,7 +247,7 @@ impl ResourceMonitorDialog {
                                 div()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child(format!("{} 条消息", c.messages)),
+                                    .child(i18n::tf("{n} 条消息", &[("n", &c.messages.to_string())])),
                             ),
                     )
                     .child(
@@ -309,7 +310,7 @@ impl Render for ResourceMonitorDialog {
                         cx.theme().primary,
                         cx.theme().primary_foreground,
                     ))
-                    .child(div().text_base().font_semibold().child("资源监控"))
+                    .child(div().text_base().font_semibold().child(i18n::t("资源监控")))
                     .child(
                         div()
                             .text_xs()
@@ -318,7 +319,7 @@ impl Render for ResourceMonitorDialog {
                             .rounded_full()
                             .bg(cx.theme().muted)
                             .text_color(muted)
-                            .child(format!("运行 {uptime_text}")),
+                            .child(i18n::tf("运行 {t}", &[("t", &uptime_text)])),
                     ),
             )
             .child(
@@ -333,7 +334,7 @@ impl Render for ResourceMonitorDialog {
                                 div()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child("自动刷新"),
+                                    .child(i18n::t("自动刷新")),
                             )
                             .child(
                                 Switch::new("resmon-auto")
@@ -347,7 +348,7 @@ impl Render for ResourceMonitorDialog {
                     .child(
                         Button::new("resmon-refresh")
                             .icon(IconName::RefreshCw)
-                            .label("立即刷新")
+                            .label(i18n::t("立即刷新"))
                             .outline()
                             .xsmall()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -366,36 +367,39 @@ impl Render for ResourceMonitorDialog {
             .child(self.tile(
                 "tile-cpu",
                 IconName::Cpu,
-                "CPU 占用",
+                i18n::t("CPU 占用"),
                 format!("{cpu:.1}%"),
-                Some("按可用核数归一".into()),
+                Some(i18n::t("按可用核数归一").into()),
                 Some(cpu),
                 cx,
             ))
             .child(self.tile(
                 "tile-ws",
                 IconName::MemoryStick,
-                "工作集内存",
+                i18n::t("工作集内存"),
                 Self::fmt_bytes(ws),
-                Some(format!("峰值 {}", Self::fmt_bytes(s.peak_working_set))),
+                Some(i18n::tf(
+                            "峰值 {v}",
+                            &[("v", &Self::fmt_bytes(s.peak_working_set))],
+                        )),
                 Some(ws as f32 / peak as f32 * 100.),
                 cx,
             ))
             .child(self.tile(
                 "tile-private",
                 IconName::HardDrive,
-                "提交内存",
+                i18n::t("提交内存"),
                 Self::fmt_bytes(s.private_bytes),
-                Some("进程独占的物理页承诺".into()),
+                Some(i18n::t("进程独占的物理页承诺").into()),
                 None,
                 cx,
             ))
             .child(self.tile(
                 "tile-threads",
                 IconName::Layers,
-                "线程 · 句柄",
+                i18n::t("线程 · 句柄"),
                 format!("{} / {}", s.threads, s.handles),
-                Some("tokio 引擎 + GPUI 渲染".into()),
+                Some(i18n::t("tokio 引擎 + GPUI 渲染").into()),
                 None,
                 cx,
             ));
@@ -412,7 +416,7 @@ impl Render for ResourceMonitorDialog {
                     .border_1()
                     .border_color(cx.theme().border)
                     .child(Icon::new(IconName::Info).size_4().text_color(muted))
-                    .child(div().text_sm().text_color(muted).child("暂无连接")),
+                    .child(div().text_sm().text_color(muted).child(i18n::t("暂无连接"))),
             );
         }
         for (i, c) in self.conns.iter().enumerate() {
@@ -427,7 +431,7 @@ impl Render for ResourceMonitorDialog {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(self.section_header(IconName::Database, "消息与连接", cx))
+                    .child(self.section_header(IconName::Database, i18n::t("消息与连接"), cx))
                     .child(
                         div()
                             .text_xs()
@@ -502,7 +506,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .w(px(640.))
-            .title("资源监控")
+            .title(i18n::t("资源监控"))
             .child(dialog_view.clone())
             .footer(
                 h_flex()
@@ -510,7 +514,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                     .w_full()
                     .child(
                         Button::new("res-close")
-                            .label("关闭")
+                            .label(i18n::t("关闭"))
                             .outline()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),

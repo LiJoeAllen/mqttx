@@ -209,6 +209,7 @@ pub(super) fn spawn_v4_loop(
                                 subscription_identifier: None,
                                 payload_truncated,
                                 raw_bytes,
+                                preview: Arc::from(""),
                             };
                             engine.log(
                                 &id, LogLevel::Info, "publish_received",

@@ -108,7 +108,7 @@ impl Render for KvEditor {
             .child(
                 Button::new(SharedString::from(format!("kv-add-{prefix}")))
                     .icon(IconName::Plus)
-                    .label("添加属性")
+                    .label(crate::ui::i18n::t("添加属性"))
                     .ghost()
                     .xsmall()
                     .on_click(cx.listener(|this, _, window, cx| {

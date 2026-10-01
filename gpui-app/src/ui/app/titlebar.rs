@@ -10,6 +10,7 @@ use crate::model::ThemeModePref;
 use crate::ui::IconName;
 
 use super::*;
+use crate::ui::i18n;
 
 impl MqttXApp {
 pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -26,9 +27,14 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                     .ghost()
                     .small()
                     .tooltip(if self.pinned {
-                        "取消窗口置顶"
+                        i18n::t("取消窗口置顶")
                     } else {
-                        "窗口置顶"
+                        i18n::t("置顶窗口")
+                    })
+                    .accessibility_label(if self.pinned {
+                        i18n::t("取消窗口置顶")
+                    } else {
+                        i18n::t("置顶窗口")
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         let next = !this.pinned;
@@ -37,7 +43,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                             cx.notify();
                         } else {
                             window.push_notification(
-                                Notification::error("置顶操作失败"),
+                                Notification::error(i18n::t("置顶操作失败")),
                                 cx,
                             );
                         }
@@ -68,7 +74,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("MQTT 调试客户端"),
+                                .child(i18n::t("MQTT 调试客户端")),
                         ),
                 )
                 .child(
@@ -84,7 +90,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                         .child(
                             Button::new("new-connection")
                                 .icon(IconName::Plus)
-                                .label("新建连接")
+                                .label(i18n::t("新建连接"))
                                 .primary()
                                 .small()
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -106,21 +112,21 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                     let w5 = app_weak.clone();
                                     let w6 = app_weak.clone();
                                     menu.item(
-                                        PopupMenuItem::new("阿里云设备")
+                                        PopupMenuItem::new(i18n::t("阿里云设备"))
                                             .on_click(move |_, window, cx| {
                                                 if let Some(entity) = w1.upgrade() {
                                                     crate::ui::dialogs::aliyun_dialog::open(entity, window, cx);
                                                 }
                                             }),
                                     )
-                                    .item(PopupMenuItem::new("全局变量").on_click(
+                                    .item(PopupMenuItem::new(i18n::t("全局变量")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w2.upgrade() {
                                                 crate::ui::dialogs::variables_dialog::open(entity, window, cx);
                                             }
                                         },
                                     ))
-                                    .item(PopupMenuItem::new("资源监控").on_click(
+                                    .item(PopupMenuItem::new(i18n::t("资源监控")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w6.upgrade() {
                                                 crate::ui::dialogs::resource_dialog::open(entity, window, cx);
@@ -128,7 +134,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                         },
                                     ))
                                     .separator()
-                                    .item(PopupMenuItem::new("导出连接").on_click(
+                                    .item(PopupMenuItem::new(i18n::t("导出连接")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w4.upgrade() {
                                                 entity.update(cx, |app, cx| {
@@ -137,7 +143,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                             }
                                         },
                                     ))
-                                    .item(PopupMenuItem::new("导入连接").on_click(
+                                    .item(PopupMenuItem::new(i18n::t("导入连接")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w5.upgrade() {
                                                 entity.update(cx, |app, cx| {
@@ -147,7 +153,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                         },
                                     ))
                                     .separator()
-                                    .item(PopupMenuItem::new("设置").on_click(
+                                    .item(PopupMenuItem::new(i18n::t("设置")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w3.upgrade() {
                                                 crate::ui::dialogs::settings_dialog::open(entity, window, cx);
@@ -166,7 +172,16 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
             .icon(if dark { IconName::Sun } else { IconName::Moon })
             .ghost()
             .small()
-            .tooltip(if dark { "切换为浅色" } else { "切换为深色" })
+            .tooltip(if dark {
+                i18n::t("切换为浅色")
+            } else {
+                i18n::t("切换为深色")
+            })
+            .accessibility_label(if dark {
+                i18n::t("切换为浅色")
+            } else {
+                i18n::t("切换为深色")
+            })
             .on_click(cx.listener(|this, _, window, cx| {
                 let next = if cx.theme().mode == ThemeMode::Dark {
                     ThemeModePref::Light

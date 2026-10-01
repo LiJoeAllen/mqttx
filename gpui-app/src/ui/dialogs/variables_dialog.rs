@@ -8,6 +8,7 @@ use gpui_kit::{
 
 use crate::model::GlobalVariable;
 use crate::ui::app::MqttXApp;
+use crate::ui::i18n;
 use crate::ui::widgets::KvEditor;
 
 pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
@@ -32,7 +33,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
         let app_ok = app.clone();
         dialog
             .w(px(560.))
-            .title("全局变量")
+            .title(i18n::t("全局变量"))
             .child(
                 v_flex()
                     .gap_2()
@@ -40,8 +41,8 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                         v_flex()
                             .text_sm()
                             .gap_1()
-                            .child("在发布主题、消息负载中使用 {{变量名}} 引用。")
-                            .child("内置变量：{{$ts}}（秒）、{{$ts_ms}}（毫秒）、{{$uuid}}"),
+                            .child(i18n::t("在发布主题、消息负载中使用 {{变量名}} 引用。"))
+                            .child(i18n::t("内置变量：{{$ts}}（秒）、{{$ts_ms}}（毫秒）、{{$uuid}}")),
                     )
                     .child(editor_body),
             )
@@ -52,13 +53,13 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                     .w_full()
                     .child(
                         Button::new("vars-cancel")
-                            .label("取消")
+                            .label(i18n::t("取消"))
                             .outline()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("vars-ok")
-                            .label("保存")
+                            .label(i18n::t("保存"))
                             .primary()
                             .on_click(move |_, window, cx| {
                                 let vars = for_ok

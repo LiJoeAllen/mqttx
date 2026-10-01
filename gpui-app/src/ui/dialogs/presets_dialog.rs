@@ -12,6 +12,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use crate::ui::IconName;
+use crate::ui::i18n;
 use gpui_kit::{
     div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window,
@@ -80,17 +81,17 @@ impl PresetsDialog {
         let name_value = first.as_ref().map(|p| p.name.clone()).unwrap_or_default();
         let name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("预设名称，如 温度上报")
+                .placeholder(i18n::t("预设名称，如 温度上报"))
                 .default_value(name_value)
         });
         let topic = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("发布主题，支持 {{变量名}}")
+                .placeholder(i18n::t("发布主题，支持 {{变量名}}"))
                 .default_value(params.topic.clone())
         });
         let payload = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("消息负载，支持 {{变量名}}")
+                .placeholder(i18n::t("消息负载，支持 {{变量名}}"))
                 .default_value(params.payload.clone())
         });
         let qos = make_select(&QOS, params.qos.min(2) as usize, window, cx);
@@ -101,11 +102,11 @@ impl PresetsDialog {
         let payload_format = make_select(&PAYLOAD_FORMATS, fmt_idx, window, cx);
         let content_type = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Content-Type（可选）")
+                .placeholder(i18n::t("Content-Type（可选）"))
                 .default_value(params.content_type.clone().unwrap_or_default())
         });
         let msg_expiry = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("秒，如 60").default_value(
+            InputState::new(window, cx).placeholder(i18n::t("秒，如 60")).default_value(
                 params
                     .message_expiry_interval
                     .map(|v| v.to_string())
@@ -114,12 +115,12 @@ impl PresetsDialog {
         });
         let response_topic = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Response Topic（可选）")
+                .placeholder(i18n::t("Response Topic（可选）"))
                 .default_value(params.response_topic.clone().unwrap_or_default())
         });
         let correlation_data = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Correlation Data（可选）")
+                .placeholder(i18n::t("Correlation Data（可选）"))
                 .default_value(params.correlation_data.clone().unwrap_or_default())
         });
         let user_props =
@@ -267,10 +268,10 @@ impl PresetsDialog {
 
     /// 「新建」：创建默认名称预设（重名自动加序号）并立即落盘、进入编辑。
     fn create_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut name = "新预设".to_string();
+        let mut name = i18n::t("新预设").to_string();
         let mut n = 2;
         while self.presets.iter().any(|p| p.name == name) {
-            name = format!("新预设 {n}");
+            name = i18n::tf("新预设 {n}", &[("n", &n.to_string())]);
             n += 1;
         }
         self.presets.push(PublishPreset::new(name, PublishParams::default()));
@@ -282,12 +283,12 @@ impl PresetsDialog {
     /// 「保存」：name 校验 + 冲突检查通过后按 id 更新，再落盘。
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(idx) = self.selected else {
-            window.push_notification(Notification::warning("请先选择或新建预设"), cx);
+            window.push_notification(Notification::warning(i18n::t("请先选择或新建预设")), cx);
             return;
         };
         let name = self.name.read(cx).value().trim().to_string();
         if name.is_empty() {
-            window.push_notification(Notification::warning("请填写预设名称"), cx);
+            window.push_notification(Notification::warning(i18n::t("请填写预设名称")), cx);
             return;
         }
         // 与其他预设（不含自身）重名 → 报错且不落盘
@@ -298,7 +299,10 @@ impl PresetsDialog {
             .any(|p| p.id != own_id && p.name == name)
         {
             window.push_notification(
-                Notification::error(format!("预设名称「{name}」已存在")),
+                Notification::error(i18n::tf(
+                    "预设名称「{name}」已存在",
+                    &[("name", &name)],
+                )),
                 cx,
             );
             return;
@@ -308,7 +312,7 @@ impl PresetsDialog {
         let params = self.collect(cx);
         if !expiry_raw.trim().is_empty() && params.message_expiry_interval.is_none() {
             window.push_notification(
-                Notification::warning("消息过期须为非负整数（秒）"),
+                Notification::warning(i18n::t("消息过期须为非负整数（秒）")),
                 cx,
             );
             return;
@@ -319,13 +323,16 @@ impl PresetsDialog {
             p.params = params;
         }
         self.persist(cx);
-        window.push_notification(Notification::success(format!("预设「{name}」已保存")), cx);
+        window.push_notification(Notification::success(i18n::tf(
+                "预设「{name}」已保存",
+                &[("name", &name)],
+            )), cx);
     }
 
     /// 「删除」：`open_alert_dialog` 二次确认后从列表移除并落盘。
     fn ask_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(idx) = self.selected else {
-            window.push_notification(Notification::warning("请先选择要删除的预设"), cx);
+            window.push_notification(Notification::warning(i18n::t("请先选择要删除的预设")), cx);
             return;
         };
         let pid = self.presets[idx].id.clone();
@@ -336,13 +343,16 @@ impl PresetsDialog {
             let weak = weak.clone();
             let pid = pid.clone();
             alert
-                .title("删除预设")
-                .description(format!("确定删除预设「{pname}」吗？此操作不可撤销。"))
+                .title(i18n::t("删除预设"))
+                .description(i18n::tf(
+                    "确定删除预设「{name}」吗？此操作不可撤销。",
+                    &[("name", &pname)],
+                ))
                 .button_props(
                     DialogButtonProps::default()
                         .show_cancel(true)
-                        .cancel_text("取消")
-                        .ok_text("删除")
+                        .cancel_text(i18n::t("取消"))
+                        .ok_text(i18n::t("删除"))
                         .ok_variant(ButtonVariant::Danger),
                 )
                 .on_ok(move |_, window, cx| {
@@ -388,7 +398,7 @@ impl Render for PresetsDialog {
                             .text_xs()
                             .text_color(muted)
                             .text_center()
-                            .child("暂无发布预设，点击上方「新建」创建"),
+                            .child(i18n::t("暂无发布预设，点击上方「新建」创建")),
                     ),
             );
         } else {
@@ -450,10 +460,10 @@ impl Render for PresetsDialog {
             .flex_1()
             .min_w(px(0.))
             .gap_2()
-            .child(field("预设名称", Input::new(&self.name)))
-            .child(field("发布主题", Input::new(&self.topic)))
+            .child(field(i18n::t("预设名称"), Input::new(&self.name)))
+            .child(field(i18n::t("发布主题"), Input::new(&self.topic)))
             .child(field(
-                "Payload（原文保存，发送时渲染变量）",
+                i18n::t("Payload（原文保存，发送时渲染变量）"),
                 Textarea::new(&self.payload).h(px(96.)),
             ))
             .child(
@@ -484,13 +494,13 @@ impl Render for PresetsDialog {
                             .flex_1()
                             .min_w(px(0.))
                             .child(field(
-                                "Payload 格式",
+                                i18n::t("Payload 格式"),
                                 Select::new(&self.payload_format).small(),
                             )),
                     ),
             )
             .child(div().h(px(1.)).bg(cx.theme().border).w_full())
-            .child(div().text_xs().font_semibold().child("MQTT 5 属性"))
+            .child(div().text_xs().font_semibold().child(i18n::t("MQTT 5 属性")))
             .child(
                 h_flex()
                     .gap_2()
@@ -502,7 +512,7 @@ impl Render for PresetsDialog {
                     )
                     .child(
                         div().w(px(120.)).child(field(
-                            "消息过期(秒)",
+                            i18n::t("消息过期(秒)"),
                             Input::new(&self.msg_expiry).small(),
                         )),
                     ),
@@ -523,7 +533,7 @@ impl Render for PresetsDialog {
                         )),
                     ),
             )
-            .child(field("用户属性", self.user_props.clone()));
+            .child(field(i18n::t("用户属性"), self.user_props.clone()));
 
         h_flex()
             .gap_3()
@@ -538,11 +548,11 @@ impl Render for PresetsDialog {
                         h_flex()
                             .justify_between()
                             .items_center()
-                            .child(div().text_sm().font_semibold().child("发布预设"))
+                            .child(div().text_sm().font_semibold().child(i18n::t("发布预设")))
                             .child(
                                 Button::new("preset-new")
                                     .icon(IconName::Plus)
-                                    .label("新建")
+                                    .label(i18n::t("新建"))
                                     .ghost()
                                     .xsmall()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -574,7 +584,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
         let has_selection = dialog_view.read(cx).selected.is_some();
         dialog
             .w(px(760.))
-            .title("管理发布预设")
+            .title(i18n::t("管理发布预设"))
             .child(body)
             .footer(
                 h_flex()
@@ -583,7 +593,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                     .child(
                         Button::new("preset-delete")
                             .icon(IconName::Trash)
-                            .label("删除")
+                            .label(i18n::t("删除"))
                             .danger()
                             .outline()
                             .disabled(!has_selection)
@@ -596,13 +606,13 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                             .gap_2()
                             .child(
                                 Button::new("preset-close")
-                                    .label("关闭")
+                                    .label(i18n::t("关闭"))
                                     .outline()
                                     .on_click(|_, window, cx| window.close_dialog(cx)),
                             )
                             .child(
                                 Button::new("preset-save")
-                                    .label("保存")
+                                    .label(i18n::t("保存"))
                                     .primary()
                                     .disabled(!has_selection)
                                     .on_click(move |_, window, cx| {

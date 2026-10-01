@@ -32,6 +32,7 @@ use crate::mqtt::MqttEngine;
 use crate::store::{Storage, UiState};
 use crate::update;
 use crate::ui::connection_view::ConnectionView;
+use crate::ui::i18n::{self, Lang};
 
 mod actions;
 mod events;
@@ -48,7 +49,7 @@ const MAX_LOGS: usize = 3000;
 const EVENT_QUEUE_CAPACITY: usize = 1024;
 
 // 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
-gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor, PublishMessage, ToggleSidebar]);
+gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor, PublishMessage, ToggleSidebar, CloseActiveTab, NextTab, PrevTab, FocusMessageFilter]);
 
 /// 侧边栏分组过滤；chips 只做列表过滤，分组重命名/删除通过编辑连接的分组字段完成。
 #[derive(Clone, PartialEq, Eq)]
@@ -130,6 +131,12 @@ impl MqttXApp {
         let settings = storage.load_settings();
 
         apply_theme(settings.theme, cx);
+        // 界面语言：设置显式指定优先，跟随系统时按系统 locale 解析
+        i18n::set_lang(match settings.language {
+            crate::model::LanguagePref::Zh => Lang::Zh,
+            crate::model::LanguagePref::En => Lang::En,
+            crate::model::LanguagePref::System => i18n::from_system(),
+        });
 
         // 有界事件队列：引擎侧对高频事件（消息/日志）做丢弃并计数，保证 UI 消费
         // 不过来时内存有上界。1024 × 单条最大 128KB ≈ 最坏 128MB，常规消息下几百 KB。
@@ -209,12 +216,12 @@ impl MqttXApp {
                             let staged_consent = staged.clone();
                             dialog
                                     .w(px(440.))
-                                    .title("更新就绪")
+                                    .title(i18n::t("更新就绪"))
                                     .child(
                                         v_flex().gap_2().child(
-                                            div().text_sm().child(format!(
-                                                "新版本 v{} 已下载完成（已通过 sha256 校验）。",
-                                                staged.version
+                                            div().text_sm().child(i18n::tf(
+                                                "新版本 v{v} 已下载完成（已通过 sha256 校验）。",
+                                                &[("v", &staged.version)],
                                             )),
                                         ),
                                     )
@@ -225,7 +232,7 @@ impl MqttXApp {
                                             .w_full()
                                             .child(
                                                 Button::new("upd-skip")
-                                                    .label("暂不更新")
+                                                    .label(i18n::t("暂不更新"))
                                                     .outline()
                                                     .on_click(move |_, window, cx| {
                                                         // 拒绝本次更新：删除暂存包，
@@ -236,7 +243,7 @@ impl MqttXApp {
                                             )
                                             .child(
                                                 Button::new("upd-later")
-                                                    .label("下次启动安装")
+                                                    .label(i18n::t("下次启动安装"))
                                                     .outline()
                                                     .on_click(move |_, window, cx| {
                                                         // 同意标记：启动时据此自动安装；
@@ -247,7 +254,7 @@ impl MqttXApp {
                                             )
                                             .child(
                                                 Button::new("upd-now")
-                                                    .label("立即安装")
+                                                    .label(i18n::t("立即安装"))
                                                     .primary()
                                                     .on_click(move |_, window, cx| {
                                                         window.close_dialog(cx);
@@ -255,9 +262,10 @@ impl MqttXApp {
                                                             update::install_staged(&staged)
                                                         {
                                                             window.push_notification(
-                                                                Notification::error(format!(
-                                                                    "安装失败：{e}"
-                                                                )),
+                                                                Notification::error(i18n::tf(
+                                                                    "安装失败：{e}",
+                                                                    &[("e", &e),
+                                                                ])),
                                                                 cx,
                                                             );
                                                         } else {
@@ -284,7 +292,7 @@ impl MqttXApp {
             .detach();
         }
 
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索连接…"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("搜索连接…")));
 
         // 自验后门：MQTTX_OPEN_RESMON=1 启动时直接打开资源监控
         // （与 MQTTX_VERSION_OVERRIDE 同类的测试入口，供自动化验证 UI）。
@@ -323,6 +331,10 @@ impl MqttXApp {
             KeyBinding::new("ctrl-shift-r", OpenResourceMonitor, None),
             KeyBinding::new("ctrl-enter", PublishMessage, None),
             KeyBinding::new("ctrl-b", ToggleSidebar, None),
+            KeyBinding::new("ctrl-w", CloseActiveTab, None),
+            KeyBinding::new("ctrl-tab", NextTab, None),
+            KeyBinding::new("ctrl-shift-tab", PrevTab, None),
+            KeyBinding::new("ctrl-f", FocusMessageFilter, None),
         ]);
         let weak = cx.entity().downgrade();
         // Context 上有同名 on_action（绘制期注册），这里必须走 App 的全局注册
@@ -400,6 +412,50 @@ impl MqttXApp {
             let w = weak.clone();
             run_on_active_window(cx, w, |entity, _, cx| {
                 entity.update(cx, |app, cx| app.toggle_sidebar(cx));
+            });
+        });
+        // Ctrl+W 关闭当前标签页
+        let weak = cx.entity().downgrade();
+        App::on_action::<CloseActiveTab>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, _, cx| {
+                entity.update(cx, |app, cx| {
+                    if let Some(tab) = app.active_tab.clone() {
+                        app.close_tab(&tab, cx);
+                    }
+                });
+            });
+        });
+        // Ctrl+Tab / Ctrl+Shift+Tab 在打开的标签页间循环切换
+        let weak = cx.entity().downgrade();
+        App::on_action::<NextTab>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, _, cx| {
+                entity.update(cx, |app, cx| app.cycle_tab(1, cx));
+            });
+        });
+        let weak = cx.entity().downgrade();
+        App::on_action::<PrevTab>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, _, cx| {
+                entity.update(cx, |app, cx| app.cycle_tab(-1, cx));
+            });
+        });
+        // Ctrl+F 聚焦当前工作区的消息过滤框
+        let weak = cx.entity().downgrade();
+        App::on_action::<FocusMessageFilter>(cx, move |_, cx| {
+            let w = weak.clone();
+            run_on_active_window(cx, w, |entity, window, cx| {
+                if window.has_active_dialog(cx) {
+                    return;
+                }
+                entity.update(cx, |app, cx| {
+                    if let Some(tab) = app.active_tab.clone()
+                        && let Some(view) = app.views.get(&tab).cloned()
+                    {
+                        view.update(cx, |view, cx| view.focus_filter(window, cx));
+                    }
+                });
             });
         });
 

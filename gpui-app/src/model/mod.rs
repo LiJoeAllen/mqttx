@@ -339,6 +339,7 @@ mod tests {
             } else {
                 None
             },
+            preview: Arc::from(""),
         }
     }
 

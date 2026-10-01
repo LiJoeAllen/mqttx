@@ -9,6 +9,7 @@ use crate::model::{ ConnectionStatus, Direction, LogEntry, LogLevel, MqttRecord,
 use crate::mqtt::EngineEvent;
 
 use super::*;
+use crate::ui::i18n;
 
 impl MqttXApp {
 pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -84,6 +85,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                     subscription_identifier: None,
                     payload_truncated,
                     raw_bytes,
+                    preview: Arc::from(""),
                 };
                 self.push_message(Arc::from(connection_id.as_str()), record);
                 self.notify_message_view(&connection_id, cx);
@@ -109,7 +111,10 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                 } else {
                     if let Some(e) = error {
                         window.push_notification(
-                            Notification::error(format!("订阅失败: {e}")),
+                            Notification::error(i18n::tf(
+                                "订阅失败: {e}",
+                                &[("e", &e)],
+                            )),
                             cx,
                         );
                     }
@@ -172,7 +177,9 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
         self.seq
     }
 
-    fn push_message(&mut self, connection_id: Arc<str>, record: MqttRecord) {
+    fn push_message(&mut self, connection_id: Arc<str>, mut record: MqttRecord) {
+        // 折叠态预览在此唯一入口计算一次；渲染热路径逐帧直接取用
+        record.compute_preview();
         let cap = self.settings.max_messages;
         self.messages
             .entry(connection_id)

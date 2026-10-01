@@ -7,6 +7,7 @@ use gpui_kit::{ Context, Window,  };
 
 
 use super::*;
+use crate::ui::i18n;
 
 impl MqttXApp {
     /// 数据目录（设置对话框展示 / 打开用）。
@@ -76,9 +77,12 @@ impl MqttXApp {
                 let count = app.connections.len();
                 match crate::store::export_connections_to(&path, &app.connections) {
                     Ok(()) => window.push_notification(
-                        Notification::success(format!(
-                            "已导出 {count} 条连接到 {}",
-                            path.display()
+                        Notification::success(i18n::tf(
+                            "导出 {n} 条连接到 {path}",
+                            &[
+                                ("n", &count.to_string()),
+                                ("path", &path.display().to_string()),
+                            ],
                         )),
                         cx,
                     ),
@@ -129,7 +133,13 @@ impl MqttXApp {
                         app.storage.save_connections(&app.connections);
                     }
                     window.push_notification(
-                        Notification::success(format!("导入 {added} 条，跳过 {skipped} 条")),
+                        Notification::success(i18n::tf(
+                            "导入 {n} 条，跳过 {n2} 条",
+                            &[
+                                ("n", &added.to_string()),
+                                ("n2", &skipped.to_string()),
+                            ],
+                        )),
                         cx,
                     );
                 }

@@ -25,6 +25,7 @@ use gpui_kit::{
 };
 
 use crate::model::ConnectionConfig;
+use crate::ui::i18n;
 use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
 use crate::ui::widgets::{make_select, KvEditor, OptionDelegate};
@@ -39,7 +40,9 @@ use util::*;
 const QOS: [&str; 3] = ["QoS 0", "QoS 1", "QoS 2"];
 const PAYLOAD_FORMATS: [&str; 4] = ["Plaintext", "JSON", "Base64", "Hex"];
 /// Retain Handling 0/1/2 的下拉文案
-const RETAIN_HANDLING: [&str; 3] = ["0 每次发送", "1 仅新订阅", "2 不发送"];
+fn retain_handling_labels() -> [&'static str; 3] {
+    [i18n::t("0 每次发送"), i18n::t("1 仅新订阅"), i18n::t("2 不发送")]
+}
 const MAX_RENDERED_MESSAGES: usize = 300;
 /// 日志渲染上限，与 app.rs 的 MAX_LOGS 保持一致
 const MAX_RENDERED_LOGS: usize = 3000;
@@ -205,29 +208,29 @@ impl ConnectionView {
     ) -> Self {
 
         let sub_topic = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("订阅主题，支持 # +，多个用逗号/空格分隔")
+            InputState::new(window, cx).placeholder(i18n::t("订阅主题，支持 # +，多个用逗号/空格分隔"))
         });
         let sub_qos = make_select(&QOS, 0, window, cx);
-        let sub_alias = cx.new(|cx| InputState::new(window, cx).placeholder("别名（可选）"));
-        let sub_identifier = cx.new(|cx| InputState::new(window, cx).placeholder("订阅标识符"));
-        let sub_retain_handling = make_select(&RETAIN_HANDLING, 0, window, cx);
-        let pub_topic = cx.new(|cx| InputState::new(window, cx).placeholder("发布主题"));
+        let sub_alias = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("别名（可选）")));
+        let sub_identifier = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("订阅标识符")));
+        let sub_retain_handling = make_select(&retain_handling_labels(), 0, window, cx);
+        let pub_topic = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("发布主题")));
         let payload = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("输入消息负载，支持 {{变量名}} 与 {{$ts}} {{$uuid}}")
+                .placeholder(i18n::t("输入消息负载，支持 {{变量名}} 与 {{$ts}} {{$uuid}}"))
         });
         let pub_qos = make_select(&QOS, 0, window, cx);
         let payload_format = make_select(&PAYLOAD_FORMATS, 0, window, cx);
-        let content_type = cx.new(|cx| InputState::new(window, cx).placeholder("Content-Type（可选）"));
-        let msg_expiry = cx.new(|cx| InputState::new(window, cx).placeholder("秒，如 60"));
+        let content_type = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("Content-Type（可选）")));
+        let msg_expiry = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("秒，如 60")));
         let response_topic =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Response Topic（可选）"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("Response Topic（可选）")));
         let correlation_data =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Correlation Data（可选）"));
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder("过滤主题或内容…"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("Correlation Data（可选）")));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("过滤主题或内容…")));
         let user_props = cx.new(|cx| KvEditor::new("pub", &[], window, cx));
         let preset_name =
-            cx.new(|cx| InputState::new(window, cx).placeholder("预设名称，如 温度上报"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("预设名称，如 温度上报")));
 
         Self {
             conn_id,
@@ -290,6 +293,13 @@ impl ConnectionView {
         self.paused
     }
 
+    /// Ctrl+F：把焦点移到消息过滤框（键盘直达过滤入口）。
+    pub fn focus_filter(&self, window: &mut Window, cx: &mut App) {
+        let handle = gpui_kit::component::input::AnyInputState::from(self.filter.clone())
+            .focus_handle(cx);
+        window.focus(&handle, cx);
+    }
+
 
 }
 
@@ -322,7 +332,7 @@ impl Render for ConnectionView {
                                     .selected_index(if panel == Panel::Messages { 0 } else { 1 })
                                     .child(
                                         Tab::new()
-                                            .label("消息流")
+                                            .label(i18n::t("消息流"))
                                             .selected(panel == Panel::Messages)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.panel = Panel::Messages;
@@ -331,7 +341,7 @@ impl Render for ConnectionView {
                                     )
                                     .child(
                                         Tab::new()
-                                            .label("日志")
+                                            .label(i18n::t("日志"))
                                             .selected(panel == Panel::Logs)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.panel = Panel::Logs;

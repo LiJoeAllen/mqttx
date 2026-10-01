@@ -159,6 +159,7 @@ fn v5_record(engine: &MqttEngine, seq: u64, conn_id: &str, p: &V5Publish) -> Mqt
             .and_then(|p| p.subscription_identifiers.first().map(|v| *v as u32)),
         payload_truncated,
         raw_bytes,
+        preview: Arc::from(""),
     }
 }
 
