@@ -180,7 +180,9 @@ jobs:
           VER: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
-          # 发布正文优先取附注 tag 的 message（awk 剥掉签名块与空行）
+          # 发布正文优先取附注 tag 的 message。actions/checkout 会把 tag 重建为
+          # 轻量 tag（%(contents) 退化成 commit message），这里显式拉取 tag 对象
+          git fetch -q origin "refs/tags/$VER:refs/tags/$VER" --force --no-tags
           notes="$(git for-each-ref "refs/tags/$VER" --format='%(contents)' | awk '/^-----BEGIN PGP SIGNATURE----$/{sig=1} !sig' | awk 'NF')"
           if gh release view "$VER" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release ${VER} 已存在，覆盖上传资产"
