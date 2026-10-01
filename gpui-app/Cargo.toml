@@ -1,6 +1,6 @@
 [package]
 name = "mqttx-desktop"
-version = "1.1.0"
+version = "1.0.0"
 edition.workspace = true
 description = "MQTT X —— 基于 GPUI 的跨平台 MQTT 调试客户端"
 license = "Apache-2.0"
