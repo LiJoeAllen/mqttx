@@ -1,0 +1,1035 @@
+# MQTTX 应用文案（rust-i18n v2 格式，key = 语义标识符 ns.name）。
+# 规则：en/zh-CN 必填、占位符 {x} 两侧一致、调用点全覆盖——ui/i18n.rs 单测强制。
+_version: 2
+"aliyun.access_key_id":
+  en: "AccessKey ID"
+  zh-CN: "AccessKey ID"
+"aliyun.access_key_secret":
+  en: "AccessKey Secret"
+  zh-CN: "AccessKey Secret"
+"aliyun.auth_mode":
+  en: "Auth mode"
+  zh-CN: "鉴权方式"
+"aliyun.auth_token_mode":
+  en: "Group token"
+  zh-CN: "Group 令牌 (Token)"
+"aliyun.auth_triple_mode":
+  en: "Per-device secret"
+  zh-CN: "一机一密"
+"aliyun.build_failed":
+  en: "Failed to build connection: {e}"
+  zh-CN: "无法生成连接: {e}"
+"aliyun.device_id":
+  en: "Device ID"
+  zh-CN: "设备 ID"
+"aliyun.device_secret":
+  en: "DeviceSecret (per-device)"
+  zh-CN: "DeviceSecret（一机一密）"
+"aliyun.device_secret_ph":
+  en: "Triple: DeviceSecret"
+  zh-CN: "一机一密：DeviceSecret"
+"aliyun.generate_connect":
+  en: "Generate & connect"
+  zh-CN: "生成并连接"
+"aliyun.group":
+  en: "Group (optional)"
+  zh-CN: "分组（可选）"
+"aliyun.group_id":
+  en: "Group ID"
+  zh-CN: "Group ID"
+"aliyun.help":
+  en: "Token mode (Alibaba Cloud MQTT): endpoint {实例ID}.mqtt.aliyuncs.com, clientId={GroupId}@@@{设备ID}, password is the HMAC-SHA1 signature. Per-device secret (IoT Platform): endpoint {ProductKey}.iot-as-mqtt.{地域}.aliyuncs.com, signed per the official triple spec."
+  zh-CN: "Token 模式（云消息队列 MQTT 版）：接入点 {实例ID}.mqtt.aliyuncs.com，clientId={GroupId}@@@{设备ID}，密码为 HMAC-SHA1 签名；一机一密（物联网平台）：接入点 {ProductKey}.iot-as-mqtt.{地域}.aliyuncs.com，按官方三元组规范签名"
+"aliyun.instance_id":
+  en: "Instance ID"
+  zh-CN: "实例 ID"
+"aliyun.preset_name":
+  en: "Preset name"
+  zh-CN: "预设名称"
+"aliyun.product_key":
+  en: "ProductKey (per-device)"
+  zh-CN: "ProductKey（一机一密）"
+"aliyun.product_key_ph":
+  en: "Triple: ProductKey"
+  zh-CN: "一机一密：ProductKey"
+"aliyun.region":
+  en: "Region"
+  zh-CN: "地域"
+"aliyun.region_ph":
+  en: "e.g. cn-shanghai (optional)"
+  zh-CN: "如 cn-shanghai（可留空）"
+"aliyun.save_preset":
+  en: "Save preset"
+  zh-CN: "保存预设"
+"aliyun.saved_presets":
+  en: "Saved presets"
+  zh-CN: "已保存预设"
+"aliyun.title":
+  en: "Alibaba Cloud IoT"
+  zh-CN: "阿里云 IoT 设备"
+"color.blue":
+  en: "Blue"
+  zh-CN: "蓝"
+"color.cyan":
+  en: "Cyan"
+  zh-CN: "青"
+"color.green":
+  en: "Green"
+  zh-CN: "绿"
+"color.indigo":
+  en: "Indigo"
+  zh-CN: "靛"
+"color.magenta":
+  en: "Magenta"
+  zh-CN: "品红"
+"color.orange":
+  en: "Orange"
+  zh-CN: "橙"
+"color.purple":
+  en: "Purple"
+  zh-CN: "紫"
+"color.red":
+  en: "Red"
+  zh-CN: "红"
+"color.rose":
+  en: "Rose"
+  zh-CN: "玫红"
+"color.yellow":
+  en: "Yellow"
+  zh-CN: "黄"
+"common.advanced":
+  en: "Advanced"
+  zh-CN: "高级"
+"common.all":
+  en: "All"
+  zh-CN: "全部"
+"common.auto":
+  en: "Auto"
+  zh-CN: "自动"
+"common.browse":
+  en: "Browse…"
+  zh-CN: "浏览…"
+"common.cancel":
+  en: "Cancel"
+  zh-CN: "取消"
+"common.clear":
+  en: "Clear"
+  zh-CN: "清空"
+"common.close":
+  en: "Close"
+  zh-CN: "关闭"
+"common.collapse":
+  en: "Collapse"
+  zh-CN: "收起"
+"common.delete":
+  en: "Delete"
+  zh-CN: "删除"
+"common.edit":
+  en: "Edit"
+  zh-CN: "编辑"
+"common.new":
+  en: "New"
+  zh-CN: "新建"
+"common.ok":
+  en: "OK"
+  zh-CN: "确定"
+"common.pause":
+  en: "Pause"
+  zh-CN: "暂停"
+"common.resume":
+  en: "Resume"
+  zh-CN: "恢复"
+"common.retain":
+  en: "Retain"
+  zh-CN: "Retain"
+"common.retry":
+  en: "Retry"
+  zh-CN: "重试"
+"common.save":
+  en: "Save"
+  zh-CN: "保存"
+"common.saved":
+  en: "Saved"
+  zh-CN: "已保存"
+"common.send":
+  en: "Send"
+  zh-CN: "发送"
+"common.text":
+  en: "Text"
+  zh-CN: "文本"
+"common.update":
+  en: "Update"
+  zh-CN: "更新"
+"connview.connecting":
+  en: "Connecting…"
+  zh-CN: "连接中…"
+"connview.logs":
+  en: "Logs"
+  zh-CN: "日志"
+"connview.messages":
+  en: "Messages"
+  zh-CN: "消息流"
+"connview.subscriptions":
+  en: "Subscriptions"
+  zh-CN: "订阅"
+"dir.published":
+  en: "Published"
+  zh-CN: "发布"
+"dir.received":
+  en: "Received"
+  zh-CN: "接收"
+"encode.base64_failed":
+  en: "Base64 decode failed: {e}"
+  zh-CN: "Base64 解码失败: {e}"
+"encode.hex_failed":
+  en: "Hex decode failed: {e}"
+  zh-CN: "Hex 解码失败: {e}"
+"encode.hex_invalid":
+  en: "Hex decode failed: non-hex character present"
+  zh-CN: "Hex 解码失败: 含非十六进制字符"
+"encode.hex_odd":
+  en: "Hex length must be even (two chars per byte)"
+  zh-CN: "Hex 长度必须为偶数（每两个字符一个字节）"
+"form.auth_section":
+  en: "Auth & Keep-alive"
+  zh-CN: "认证与心跳"
+"form.auto_connect":
+  en: "Connect on app start"
+  zh-CN: "启动时自动连接"
+"form.auto_reconnect":
+  en: "Auto reconnect on disconnect"
+  zh-CN: "断线自动重连"
+"form.auto_resub":
+  en: "Auto-resubscribe on connect"
+  zh-CN: "连接后自动恢复订阅"
+"form.basics":
+  en: "Basics"
+  zh-CN: "基本信息"
+"form.cert_pair_required":
+  en: "Client certificate and key must be provided together"
+  zh-CN: "客户端证书与客户端密钥必须同时填写"
+"form.clean_start":
+  en: "Clean Start / Clean Session"
+  zh-CN: "Clean Start / Clean Session"
+"form.client_id":
+  en: "Client ID"
+  zh-CN: "Client ID"
+"form.client_id_required":
+  en: "Client ID cannot be empty"
+  zh-CN: "Client ID 不能为空"
+"form.conn_timeout":
+  en: "Connect timeout (s)"
+  zh-CN: "连接超时 (秒)"
+"form.conn_timeout_invalid":
+  en: "Connect timeout must be an integer 1-65535 (seconds)"
+  zh-CN: "连接超时需要是 1~65535 的整数（秒）"
+"form.content_type_ph":
+  en: "Content type (optional)"
+  zh-CN: "内容类型（可选）"
+"form.err_positive":
+  en: "must be > 0 (0 is an MQTT 5 protocol error)"
+  zh-CN: "必须大于 0（0 是 MQTT 5 协议错误）"
+"form.err_range":
+  en: "must be an integer 0-65535"
+  zh-CN: "需要是 0~65535 的整数"
+"form.err_uint":
+  en: "must be a non-negative integer"
+  zh-CN: "需要是非负整数"
+"form.group":
+  en: "Group"
+  zh-CN: "分组"
+"form.host":
+  en: "Host"
+  zh-CN: "主机"
+"form.host_required":
+  en: "Host cannot be empty"
+  zh-CN: "主机地址不能为空"
+"form.keep_alive":
+  en: "Keep Alive (s)"
+  zh-CN: "Keep Alive (秒)"
+"form.keep_alive_invalid":
+  en: "Keep Alive must be an integer 0-65535"
+  zh-CN: "Keep Alive (秒) 需要是 0~65535 的整数"
+"form.keep_alive_short":
+  en: "Keep Alive"
+  zh-CN: "Keep Alive"
+"form.max_packet":
+  en: "Maximum Packet Size"
+  zh-CN: "最大报文长度"
+"form.max_reconnects":
+  en: "Max reconnects (0 = unlimited)"
+  zh-CN: "最大重连次数 (0=无限)"
+"form.max_reconnects_invalid":
+  en: "Max reconnects must be a non-negative integer (0 = unlimited)"
+  zh-CN: "最大重连次数需要是非负整数（0=无限）"
+"form.max_reconnects_ph":
+  en: "0 = unlimited"
+  zh-CN: "0=无限重连"
+"form.name":
+  en: "Name"
+  zh-CN: "名称"
+"form.name_ph":
+  en: "Connection name"
+  zh-CN: "连接名称"
+"form.name_required":
+  en: "Connection name cannot be empty"
+  zh-CN: "连接名称不能为空"
+"form.new_group":
+  en: "New group"
+  zh-CN: "新建分组"
+"form.new_group_hint":
+  en: "Overrides the selected group when filled"
+  zh-CN: "填写后优先于左侧所选分组"
+"form.no_group":
+  en: "No group"
+  zh-CN: "无分组"
+"form.password":
+  en: "Password"
+  zh-CN: "密码"
+"form.password_ph":
+  en: "Password (optional)"
+  zh-CN: "密码（可选）"
+"form.path_missing":
+  en: "{label}: path not found: {p}"
+  zh-CN: "{label}路径不存在：{p}"
+"form.port":
+  en: "Port"
+  zh-CN: "端口"
+"form.port_invalid":
+  en: "Port must be an integer 1-65535"
+  zh-CN: "端口需要是 1~65535 的整数"
+"form.protocol":
+  en: "Protocol"
+  zh-CN: "协议"
+"form.receive_max":
+  en: "Receive Maximum"
+  zh-CN: "接收最大值"
+"form.receive_max_invalid":
+  en: "Receive Maximum cannot exceed 65535"
+  zh-CN: "接收上限不能超过 65535"
+"form.receive_max_ph":
+  en: "Server receive maximum"
+  zh-CN: "服务端接收上限"
+"form.receive_max_short":
+  en: "Receive Maximum"
+  zh-CN: "接收上限"
+"form.regen_client_id":
+  en: "Regenerate Client ID"
+  zh-CN: "重新生成 Client ID"
+"form.response_topic_ph":
+  en: "Response topic (optional)"
+  zh-CN: "响应主题（可选）"
+"form.saved_reconnect":
+  en: "Saved. Takes effect after reconnect"
+  zh-CN: "配置已保存，重连后生效"
+"form.session_expiry":
+  en: "Session expiry (s)"
+  zh-CN: "会话过期间隔(秒)"
+"form.session_expiry_invalid":
+  en: "Session expiry must be a non-negative integer (0 = session ends with connection)"
+  zh-CN: "会话过期间隔需要是非负整数（0=会话随连接结束）"
+"form.session_expiry_ph":
+  en: "seconds (0 = session ends with connection)"
+  zh-CN: "秒（0=会话随连接结束）"
+"form.test":
+  en: "Test Connection"
+  zh-CN: "测试连接"
+"form.test_ok":
+  en: "Connection test succeeded"
+  zh-CN: "连接测试成功"
+"form.testing":
+  en: "Testing…"
+  zh-CN: "测试中…"
+"form.timeout_ph":
+  en: "seconds (default 10)"
+  zh-CN: "秒（默认 10）"
+"form.title":
+  en: "Connection Settings"
+  zh-CN: "连接配置"
+"form.topic_alias":
+  en: "Topic Alias"
+  zh-CN: "主题别名"
+"form.topic_alias_invalid":
+  en: "Topic Alias Maximum cannot exceed 65535"
+  zh-CN: "主题别名上限不能超过 65535"
+"form.topic_alias_max":
+  en: "Topic Alias Maximum"
+  zh-CN: "主题别名上限"
+"form.transport":
+  en: "Transport"
+  zh-CN: "传输"
+"form.username":
+  en: "Username"
+  zh-CN: "用户名"
+"form.username_ph":
+  en: "Username (optional)"
+  zh-CN: "用户名（可选）"
+"form.will_content_type":
+  en: "Content Type"
+  zh-CN: "内容类型 (Content Type)"
+"form.will_enable":
+  en: "Enable last will"
+  zh-CN: "启用遗嘱消息"
+"form.will_payload":
+  en: "Will payload"
+  zh-CN: "遗嘱内容"
+"form.will_payload_ph":
+  en: "Will message"
+  zh-CN: "遗嘱消息"
+"form.will_response_topic":
+  en: "Response Topic"
+  zh-CN: "响应主题 (Response Topic)"
+"form.will_section":
+  en: "Last Will"
+  zh-CN: "遗嘱消息 (Last Will)"
+"form.will_topic":
+  en: "Will topic"
+  zh-CN: "遗嘱主题"
+"form.ws_path":
+  en: "WS Path"
+  zh-CN: "WS 路径"
+"form.ws_path_required":
+  en: "WS path is required for WS/WSS transport"
+  zh-CN: "WS/WSS 传输下 WS 路径不能为空"
+"io.exported":
+  en: "Exported {n} connections to {path}"
+  zh-CN: "导出 {n} 条连接到 {path}"
+"io.imported":
+  en: "Imported {n}, skipped {n2}"
+  zh-CN: "导入 {n} 条，跳过 {n2} 条"
+"kv.add":
+  en: "Add property"
+  zh-CN: "添加属性"
+"kv.remove":
+  en: "Remove this property"
+  zh-CN: "删除此属性"
+"msg.binary_hint":
+  en: " (binary — switch to Hex in details)"
+  zh-CN: "（非文本，详情可切 Hex）"
+"msg.clear_confirm":
+  en: "Clear all messages of this connection? This cannot be undone."
+  zh-CN: "确定清空当前连接的全部消息吗？此操作不可撤销。"
+"msg.clear_sub_filter":
+  en: "Clear subscription filter"
+  zh-CN: "清除订阅过滤"
+"msg.clear_title":
+  en: "Clear Messages"
+  zh-CN: "清空消息"
+"msg.clear_tooltip":
+  en: "Clear messages of this connection"
+  zh-CN: "清空当前连接的消息"
+"msg.copy_details":
+  en: "Copy full details (incl. MQTT 5 props)"
+  zh-CN: "复制完整详情（含 v5 属性）"
+"msg.copy_payload":
+  en: "Copy raw payload"
+  zh-CN: "复制负载原文"
+"msg.copy_topic":
+  en: "Copy topic"
+  zh-CN: "复制主题"
+"msg.count":
+  en: "{n} msgs"
+  zh-CN: "{n} 条"
+"msg.details":
+  en: "Details"
+  zh-CN: "详情"
+"msg.details_copied":
+  en: "Details copied"
+  zh-CN: "已复制详情"
+"msg.empty":
+  en: "No messages yet — they will appear here once you subscribe"
+  zh-CN: "暂无消息，订阅主题后消息会显示在这里"
+"msg.expiry":
+  en: "Message Expiry"
+  zh-CN: "消息过期"
+"msg.filter_placeholder":
+  en: "Filter by topic or content…"
+  zh-CN: "过滤主题或内容…"
+"msg.latest_only":
+  en: "Showing latest {n} only"
+  zh-CN: "仅显示最新 {n} 条"
+"msg.log_title":
+  en: "Connection Logs"
+  zh-CN: "连接日志"
+"msg.no_logs":
+  en: "No logs yet"
+  zh-CN: "暂无日志"
+"msg.no_match":
+  en: "No matching messages"
+  zh-CN: "没有匹配的消息"
+"msg.pause_tooltip":
+  en: "Pause message stream (messages keep arriving in background)"
+  zh-CN: "暂停消息流滚动（消息仍在后台接收）"
+"msg.payload":
+  en: "Payload"
+  zh-CN: "负载"
+"msg.payload_copied":
+  en: "Payload copied"
+  zh-CN: "已复制负载"
+"msg.resume_tooltip":
+  en: "Resume live scrolling"
+  zh-CN: "恢复实时滚动"
+"msg.seconds":
+  en: "{n}s"
+  zh-CN: "{n} 秒"
+"msg.topic":
+  en: "Topic"
+  zh-CN: "主题"
+"msg.topic_copied":
+  en: "Topic copied"
+  zh-CN: "已复制主题"
+"msg.truncated":
+  en: "Truncated {n}KB"
+  zh-CN: "已截断 {n}KB"
+"preset.default_name":
+  en: "New preset"
+  zh-CN: "新预设"
+"preset.default_name_n":
+  en: "New preset {n}"
+  zh-CN: "新预设 {n}"
+"preset.empty":
+  en: "No presets yet — click \"New\" above to create one"
+  zh-CN: "暂无发布预设，点击上方「新建」创建"
+"preset.list":
+  en: "Presets"
+  zh-CN: "预设列表"
+"preset.manage_title":
+  en: "Manage Publish Presets"
+  zh-CN: "管理发布预设"
+"preset.name_exists":
+  en: "Preset name \"{name}\" already exists"
+  zh-CN: "预设名称「{name}」已存在"
+"preset.new":
+  en: "New Preset"
+  zh-CN: "新建预设"
+"preset.payload_field":
+  en: "Payload (stored raw; variables rendered on send)"
+  zh-CN: "Payload（原文保存，发送时渲染变量）"
+"preset.payload_format":
+  en: "Payload format"
+  zh-CN: "Payload 格式"
+"preset.pick_delete_first":
+  en: "Select a preset to delete first"
+  zh-CN: "请先选择要删除的预设"
+"preset.pick_first":
+  en: "Select or create a preset first"
+  zh-CN: "请先选择或新建预设"
+"preset.saved":
+  en: "Preset \"{name}\" saved"
+  zh-CN: "预设「{name}」已保存"
+"preset.section":
+  en: "Publish Presets"
+  zh-CN: "发布预设"
+"preset.user_props":
+  en: "User Properties"
+  zh-CN: "用户属性"
+"pub.collapse":
+  en: "Collapse publish panel"
+  zh-CN: "收起发布面板"
+"pub.collapsed_hint":
+  en: "Publish panel collapsed"
+  zh-CN: "发布面板已收起"
+"pub.content_type_ph":
+  en: "Content-Type (optional)"
+  zh-CN: "Content-Type（可选）"
+"pub.correlation_ph":
+  en: "Correlation Data (optional)"
+  zh-CN: "Correlation Data（可选）"
+"pub.delete_confirm":
+  en: "Delete preset \"{name}\"? This cannot be undone."
+  zh-CN: "确定删除预设「{name}」吗？此操作不可撤销。"
+"pub.delete_item":
+  en: "Delete \"{name}\""
+  zh-CN: "删除「{name}」"
+"pub.delete_title":
+  en: "Delete Preset"
+  zh-CN: "删除预设"
+"pub.expand":
+  en: "Expand publish panel"
+  zh-CN: "展开发布面板"
+"pub.expiry_field":
+  en: "Expiry (s)"
+  zh-CN: "消息过期(秒)"
+"pub.expiry_invalid":
+  en: "Message expiry must be a non-negative integer (seconds)"
+  zh-CN: "消息过期须为非负整数（秒）"
+"pub.json_invalid":
+  en: "Invalid JSON: {e}"
+  zh-CN: "JSON 格式无效: {e}"
+"pub.manage_presets":
+  en: "Manage presets…"
+  zh-CN: "管理预设…"
+"pub.mqtt5_props":
+  en: "MQTT 5 Properties"
+  zh-CN: "MQTT 5 属性"
+"pub.offline_not_sent":
+  en: "Offline: message not sent"
+  zh-CN: "未连接：消息未发送"
+"pub.payload_placeholder":
+  en: "Message payload; supports {{variables}} and {{$ts}} {{$uuid}}"
+  zh-CN: "输入消息负载，支持 {{变量名}} 与 {{$ts}} {{$uuid}}"
+"pub.payload_preset_ph":
+  en: "Message payload; supports {{variables}}"
+  zh-CN: "消息负载，支持 {{变量名}}"
+"pub.preset_menu":
+  en: "Message Presets"
+  zh-CN: "消息预设"
+"pub.preset_name_hint":
+  en: "Preset name, e.g. temperature-report"
+  zh-CN: "预设名称，如 温度上报"
+"pub.preset_name_required":
+  en: "Preset name is required"
+  zh-CN: "请填写预设名称"
+"pub.preset_overwritten":
+  en: "Preset \"{name}\" overwritten"
+  zh-CN: "已覆盖预设「{name}」"
+"pub.preset_saved":
+  en: "Preset saved"
+  zh-CN: "预设已保存"
+"pub.response_topic_ph":
+  en: "Response Topic (optional)"
+  zh-CN: "Response Topic（可选）"
+"pub.save_preset":
+  en: "Save current as preset…"
+  zh-CN: "保存当前为预设…"
+"pub.save_title":
+  en: "Save Message Preset"
+  zh-CN: "保存消息预设"
+"pub.seconds_hint":
+  en: "seconds, e.g. 60"
+  zh-CN: "秒，如 60"
+"pub.send_disabled":
+  en: "Offline — cannot send"
+  zh-CN: "未连接，无法发送"
+"pub.sent_hidden":
+  en: "Sent (hidden by current filter — not shown in the stream)"
+  zh-CN: "已发送（被当前过滤条件隐藏，消息流中不显示）"
+"pub.topic_placeholder":
+  en: "Publish topic"
+  zh-CN: "发布主题"
+"pub.topic_preset_ph":
+  en: "Publish topic; supports {{variables}}"
+  zh-CN: "发布主题，支持 {{变量名}}"
+"pub.topic_required":
+  en: "Publish topic cannot be empty"
+  zh-CN: "发布主题不能为空"
+"pub.vars":
+  en: "Variable injection"
+  zh-CN: "变量注入"
+"pub.vars_count":
+  en: "Variable injection ({n} placeholders)"
+  zh-CN: "变量注入（{n} 个占位符）"
+"resmon.auto_refresh":
+  en: "Auto refresh"
+  zh-CN: "自动刷新"
+"resmon.budget":
+  en: "Budget {p}% used ({used} / {total})"
+  zh-CN: "预算占用 {p}%（{used} / {total}）"
+"resmon.committed":
+  en: "Committed memory"
+  zh-CN: "提交内存"
+"resmon.committed_hint":
+  en: "Physical pages committed by the process"
+  zh-CN: "进程独占的物理页承诺"
+"resmon.cpu":
+  en: "CPU usage"
+  zh-CN: "CPU 占用"
+"resmon.cpu_hint":
+  en: "Normalized by core count"
+  zh-CN: "按可用核数归一"
+"resmon.n_msgs":
+  en: "{n} msgs"
+  zh-CN: "{n} 条消息"
+"resmon.no_conn":
+  en: "No connections"
+  zh-CN: "暂无连接"
+"resmon.peak":
+  en: "Peak {v}"
+  zh-CN: "峰值 {v}"
+"resmon.refresh_now":
+  en: "Refresh now"
+  zh-CN: "立即刷新"
+"resmon.section":
+  en: "Messages & Connections"
+  zh-CN: "消息与连接"
+"resmon.stats":
+  en: "{n} connections ({m} connected) · {t} tabs · {msgs} messages in memory (cap {cap}/conn) · {logs} log lines"
+  zh-CN: "{n} 个连接（已连接 {m}）· 打开标签 {t} · 内存消息 {msgs} 条（每连接上限 {cap} 条）· 日志 {logs} 条"
+"resmon.threads_handles":
+  en: "Threads · handles"
+  zh-CN: "线程 · 句柄"
+"resmon.threads_hint":
+  en: "tokio engine + GPUI renderer"
+  zh-CN: "tokio 引擎 + GPUI 渲染"
+"resmon.title_hint":
+  en: "Self-process resource sampling"
+  zh-CN: "自身进程资源采样"
+"resmon.uptime":
+  en: "Up {t}"
+  zh-CN: "运行 {t}"
+"resmon.version_live":
+  en: "Version v{v} · refreshes every 1.5s"
+  zh-CN: "版本 v{v} · 每 1.5 秒自动刷新"
+"resmon.version_paused":
+  en: "Version v{v} · auto-refresh paused"
+  zh-CN: "版本 v{v} · 自动刷新已暂停"
+"resmon.working_set":
+  en: "Working set"
+  zh-CN: "工作集内存"
+"settings.about":
+  en: "About"
+  zh-CN: "关于"
+"settings.auto_update":
+  en: "Check for updates on start"
+  zh-CN: "自动检查更新（启动时）"
+"settings.byte_budget":
+  en: "Plus a per-connection byte budget of {n} MB: under heavy traffic, oldest messages are evicted by size first"
+  zh-CN: "另有每连接 {n}MB 的字节预算兜底：大报文流会优先按字节从最旧开始驱逐"
+"settings.data_dir":
+  en: "Data directory"
+  zh-CN: "数据目录"
+"settings.language":
+  en: "Language"
+  zh-CN: "界面语言"
+"settings.license":
+  en: "Apache-2.0 license"
+  zh-CN: "Apache-2.0 许可证"
+"settings.log_dir":
+  en: "Log directory"
+  zh-CN: "日志目录"
+"settings.max_messages":
+  en: "Messages kept in memory per connection (100-100000)"
+  zh-CN: "每条连接内存中保留的消息条数（100~100000）"
+"settings.mkdir_failed":
+  en: "Failed to create log folder: {e}"
+  zh-CN: "创建日志目录失败: {e}"
+"settings.open_dir":
+  en: "Open folder"
+  zh-CN: "打开目录"
+"settings.open_dir_failed":
+  en: "Failed to open folder: {e}"
+  zh-CN: "打开目录失败: {e}"
+"settings.open_log_dir":
+  en: "Open log folder"
+  zh-CN: "打开日志目录"
+"settings.show_millis":
+  en: "Show milliseconds in timestamps"
+  zh-CN: "时间戳显示毫秒"
+"settings.tagline":
+  en: "A cross-platform MQTT debug client built with GPUI, aiming at MQTTX"
+  zh-CN: "对标 MQTTX 的 GPUI 跨平台 MQTT 调试客户端"
+"settings.theme":
+  en: "Theme"
+  zh-CN: "界面主题"
+"settings.version_line":
+  en: "Version {v} (update source: {src})"
+  zh-CN: "版本 {v}（更新源 {src}）"
+"sidebar.collapse":
+  en: "Collapse sidebar (Ctrl+B)"
+  zh-CN: "收起侧栏（Ctrl+B）"
+"sidebar.collapse_short":
+  en: "Collapse sidebar"
+  zh-CN: "收起侧栏"
+"sidebar.connections":
+  en: "Connections"
+  zh-CN: "连接"
+"sidebar.delete":
+  en: "Delete Connection"
+  zh-CN: "删除连接"
+"sidebar.delete_confirm":
+  en: "Delete \"{name}\"? This also deletes {sub_count} subscriptions and disconnects. This cannot be undone."
+  zh-CN: "确定删除「{name}」？将同时删除 {sub_count} 个订阅，并断开当前连接，此操作不可撤销。"
+"sidebar.disconnect":
+  en: "Disconnect"
+  zh-CN: "断开"
+"sidebar.duplicate":
+  en: "Duplicate"
+  zh-CN: "复制连接"
+"sidebar.empty":
+  en: "No connections yet. Click + above to create one"
+  zh-CN: "还没有连接，点击上方 + 新建"
+"sidebar.expand":
+  en: "Expand sidebar (Ctrl+B)"
+  zh-CN: "展开连接侧栏（Ctrl+B）"
+"sidebar.no_match":
+  en: "No matching connections"
+  zh-CN: "没有匹配的连接"
+"sidebar.search":
+  en: "Search connections…"
+  zh-CN: "搜索连接…"
+"sidebar.ungrouped":
+  en: "Ungrouped"
+  zh-CN: "未分组"
+"ssl.ca":
+  en: "CA certificate (PEM)"
+  zh-CN: "CA 证书 (PEM)"
+"ssl.ca_ph":
+  en: "Path to CA certificate (PEM, optional)"
+  zh-CN: "CA 证书 PEM 路径（可选）"
+"ssl.cert":
+  en: "Client certificate (PEM)"
+  zh-CN: "客户端证书 (PEM)"
+"ssl.cert_ph":
+  en: "Path to client certificate (PEM, optional)"
+  zh-CN: "客户端证书 PEM 路径（可选）"
+"ssl.key":
+  en: "Client key (PEM)"
+  zh-CN: "客户端密钥 (PEM)"
+"ssl.key_ph":
+  en: "Path to client private key (PEM, optional)"
+  zh-CN: "客户端私钥 PEM 路径（可选）"
+"ssl.n_configured":
+  en: "{n} configured"
+  zh-CN: "已配置 {n} 项"
+"ssl.pick_file":
+  en: "Select certificate / key file"
+  zh-CN: "选择证书 / 密钥文件"
+"ssl.section":
+  en: "SSL/TLS"
+  zh-CN: "SSL/TLS"
+"ssl.skip_verify":
+  en: "Skip CA verification (trust any server cert)"
+  zh-CN: "忽略 CA 校验（不验证服务器证书）"
+"status.connected":
+  en: "Connected"
+  zh-CN: "已连接"
+"status.connecting":
+  en: "Connecting"
+  zh-CN: "连接中"
+"status.disconnected":
+  en: "Disconnected"
+  zh-CN: "未连接"
+"status.error":
+  en: "Error"
+  zh-CN: "错误"
+"sub.alias":
+  en: "Alias (optional)"
+  zh-CN: "别名（可选）"
+"sub.cancel_edit":
+  en: "Cancel editing"
+  zh-CN: "取消编辑"
+"sub.collapse":
+  en: "Collapse subscriptions panel"
+  zh-CN: "收起订阅面板"
+"sub.color":
+  en: "Subscription color"
+  zh-CN: "订阅颜色"
+"sub.color_clear":
+  en: "Clear color"
+  zh-CN: "清除颜色"
+"sub.color_random":
+  en: "Random color"
+  zh-CN: "随机颜色"
+"sub.disable":
+  en: "Disable subscription"
+  zh-CN: "停用订阅"
+"sub.edit":
+  en: "Edit subscription"
+  zh-CN: "编辑订阅"
+"sub.editing":
+  en: "Editing: {topic}"
+  zh-CN: "正在编辑：{topic}"
+"sub.empty_hint":
+  en: "Subscribe to a topic and messages will show up here"
+  zh-CN: "订阅主题后，消息会显示在右侧"
+"sub.enable":
+  en: "Enable subscription"
+  zh-CN: "启用订阅"
+"sub.expand":
+  en: "Expand subscriptions panel"
+  zh-CN: "展开订阅面板"
+"sub.failed":
+  en: "Subscribe failed: {e}"
+  zh-CN: "订阅失败: {e}"
+"sub.identifier":
+  en: "Subscription Identifier"
+  zh-CN: "订阅标识符"
+"sub.identifier_invalid":
+  en: "Subscription identifier must be a positive integer"
+  zh-CN: "订阅标识符须为正整数"
+"sub.mqtt5_options":
+  en: "MQTT 5 Subscription Options"
+  zh-CN: "MQTT 5 订阅选项"
+"sub.no_local":
+  en: "No Local"
+  zh-CN: "No Local"
+"sub.rap":
+  en: "Retain As Published"
+  zh-CN: "Retain As Published"
+"sub.retain_handling":
+  en: "Retain Handling"
+  zh-CN: "Retain Handling"
+"sub.rh0":
+  en: "0 Send at every subscribe"
+  zh-CN: "0 每次发送"
+"sub.rh1":
+  en: "1 Send only for new subscription"
+  zh-CN: "1 仅新订阅"
+"sub.rh2":
+  en: "2 Do not send"
+  zh-CN: "2 不发送"
+"sub.saved_offline":
+  en: "Offline: subscription saved"
+  zh-CN: "未连接：订阅已保存"
+"sub.saved_offline_resub":
+  en: "Offline: subscription saved, restored on connect"
+  zh-CN: "未连接：订阅已保存，连接后自动恢复"
+"sub.topic_placeholder":
+  en: "Topic filter, supports # +; separate multiple with commas/spaces"
+  zh-CN: "订阅主题，支持 # +，多个用逗号/空格分隔"
+"sub.topic_required":
+  en: "Topic filter cannot be empty"
+  zh-CN: "订阅主题不能为空"
+"sub.unsubscribe":
+  en: "Unsubscribe"
+  zh-CN: "取消订阅"
+"tab.welcome_hint":
+  en: "Pick a connection on the left, or create a new one to start debugging"
+  zh-CN: "从左侧选择一个连接，或新建连接开始调试"
+"tab.welcome_title":
+  en: "Get started with MQTTX"
+  zh-CN: "开始使用 MQTTX"
+"theme.dark":
+  en: "Dark"
+  zh-CN: "深色"
+"theme.light":
+  en: "Light"
+  zh-CN: "浅色"
+"theme.system":
+  en: "Follow system"
+  zh-CN: "跟随系统"
+"titlebar.aliyun":
+  en: "Alibaba Cloud Devices"
+  zh-CN: "阿里云设备"
+"titlebar.export":
+  en: "Export Connections"
+  zh-CN: "导出连接"
+"titlebar.import":
+  en: "Import Connections"
+  zh-CN: "导入连接"
+"titlebar.new_connection":
+  en: "New Connection"
+  zh-CN: "新建连接"
+"titlebar.pin":
+  en: "Pin window on top"
+  zh-CN: "置顶窗口"
+"titlebar.pin_failed":
+  en: "Failed to set always-on-top"
+  zh-CN: "置顶操作失败"
+"titlebar.resmon":
+  en: "Resource Monitor"
+  zh-CN: "资源监控"
+"titlebar.settings":
+  en: "Settings"
+  zh-CN: "设置"
+"titlebar.subtitle":
+  en: "MQTT debug client"
+  zh-CN: "MQTT 调试客户端"
+"titlebar.switch_dark":
+  en: "Switch to dark theme"
+  zh-CN: "切换为深色"
+"titlebar.switch_light":
+  en: "Switch to light theme"
+  zh-CN: "切换为浅色"
+"titlebar.unpin":
+  en: "Unpin window"
+  zh-CN: "取消窗口置顶"
+"titlebar.variables":
+  en: "Global Variables"
+  zh-CN: "全局变量"
+"update.apply":
+  en: "Update to v{v} now"
+  zh-CN: "立即更新到 v{v}"
+"update.check":
+  en: "Check for updates"
+  zh-CN: "检查更新"
+"update.check_hint":
+  en: "Check GitHub Releases for a new version"
+  zh-CN: "检查 GitHub Releases 上的新版本"
+"update.checking":
+  en: "Checking…"
+  zh-CN: "检查中…"
+"update.checking_long":
+  en: "Checking for updates…"
+  zh-CN: "正在检查更新…"
+"update.discard":
+  en: "Discard this update"
+  zh-CN: "放弃此次更新"
+"update.discarded":
+  en: "Staged update discarded"
+  zh-CN: "已删除暂存的更新包"
+"update.downloading":
+  en: "Downloading {pct}% ({done} / {total})"
+  zh-CN: "下载中 {pct}%（{done} / {total}）"
+"update.downloading_size":
+  en: "Downloading {done}"
+  zh-CN: "下载中 {done}"
+"update.failed":
+  en: "Update failed: {e}"
+  zh-CN: "更新失败：{e}"
+"update.found":
+  en: "New version v{v} found — downloads, replaces itself and restarts"
+  zh-CN: "发现新版本 v{v}，下载后自动替换重启"
+"update.install_failed":
+  en: "Install failed: {e}"
+  zh-CN: "安装失败：{e}"
+"update.install_later":
+  en: "Install on next start"
+  zh-CN: "下次启动安装"
+"update.install_now":
+  en: "Install now"
+  zh-CN: "立即安装"
+"update.not_now":
+  en: "Not now"
+  zh-CN: "暂不更新"
+"update.ready":
+  en: "Version v{v} downloaded and verified, ready to install"
+  zh-CN: "新版本 v{v} 已下载并通过校验，等待安装"
+"update.ready_body":
+  en: "Version v{v} has been downloaded (sha256 verified)."
+  zh-CN: "新版本 v{v} 已下载完成（已通过 sha256 校验）。"
+"update.ready_title":
+  en: "Update Ready"
+  zh-CN: "更新就绪"
+"update.recheck":
+  en: "Check again"
+  zh-CN: "重新检查"
+"update.staged":
+  en: "Staged — it will install on next start"
+  zh-CN: "已暂存，下次启动时将自动安装"
+"update.up_to_date":
+  en: "You are up to date"
+  zh-CN: "已是最新版本"
+"var.builtin_inline":
+  en: "Built-in: {{$ts}} (s), {{$ts_ms}} (ms), {{$uuid}} · injected on publish"
+  zh-CN: "内置：{{$ts}}（秒） {{$ts_ms}}（毫秒） {{$uuid}} · 发布时注入"
+"var.dialog_builtin":
+  en: "Built-in: {{$ts}} (s), {{$ts_ms}} (ms), {{$uuid}}"
+  zh-CN: "内置变量：{{$ts}}（秒）、{{$ts_ms}}（毫秒）、{{$uuid}}"
+"var.dialog_hint":
+  en: "Reference {{variables}} in publish topics and payloads."
+  zh-CN: "在发布主题、消息负载中使用 {{变量名}} 引用。"
+"var.no_reference":
+  en: "No {{variable}} reference in topic/payload"
+  zh-CN: "主题/负载中没有 {{变量}} 引用"
+"var.preview":
+  en: "Preview: {tp} | {pl}"
+  zh-CN: "预览：{tp} | {pl}"
+"var.reextract":
+  en: "Re-extract placeholders"
+  zh-CN: "重新提取占位符"
+"var.section":
+  en: "Variables ({n})"
+  zh-CN: "变量（{n}）"
+"var.value":
+  en: "Value"
+  zh-CN: "变量值"
+"will.enabled_hint":
+  en: "Enabled"
+  zh-CN: "已启用"
+"will.topic_required":
+  en: "Will topic cannot be empty"
+  zh-CN: "遗嘱主题不能为空"
+"will.topic_wildcard":
+  en: "Will topic cannot contain wildcards + or #"
+  zh-CN: "遗嘱主题不能包含通配符 + 或 #"

@@ -26,6 +26,7 @@ rumqttc-v4 = { package = "rumqttc-v4-next", version = "0.34", features = ["webso
 
 uuid = { version = "1", features = ["v4"] }
 sys-locale = "0.3"
+rust-i18n = "4.2"
 chrono = { version = "0.4", features = ["clock"] }
 dirs = "7"
 

@@ -90,7 +90,7 @@ impl ResourceMonitorDialog {
                         .get(&c.id)
                         .copied()
                         .map(|s| s.label())
-                        .unwrap_or(i18n::t("未连接")),
+                        .unwrap_or(i18n::t("status.disconnected")),
                     connected: app.engine.is_connected(&c.id),
                     messages,
                     bytes,
@@ -247,7 +247,7 @@ impl ResourceMonitorDialog {
                                 div()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child(i18n::tf("{n} 条消息", &[("n", &c.messages.to_string())])),
+                                    .child(i18n::tf("resmon.n_msgs", &[("n", &c.messages)])),
                             ),
                     )
                     .child(
@@ -263,11 +263,16 @@ impl ResourceMonitorDialog {
                                 div()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child(format!(
-                                        "预算占用 {:.0}%（{} / {}）",
-                                        pct,
-                                        Self::fmt_bytes(c.bytes as u64),
-                                        Self::fmt_bytes(MAX_CONNECTION_MESSAGE_BYTES as u64)
+                                    .child(i18n::tf(
+                                        "预算占用 {p}%（{used} / {total}）",
+                                        &[
+                                            ("p", &format!("{:.0}", pct)),
+                                            ("used", &Self::fmt_bytes(c.bytes as u64)),
+                                            (
+                                                "total",
+                                                &Self::fmt_bytes(MAX_CONNECTION_MESSAGE_BYTES as u64),
+                                            ),
+                                        ]
                                     )),
                             ),
                     ),
@@ -310,7 +315,7 @@ impl Render for ResourceMonitorDialog {
                         cx.theme().primary,
                         cx.theme().primary_foreground,
                     ))
-                    .child(div().text_base().font_semibold().child(i18n::t("资源监控")))
+                    .child(div().text_base().font_semibold().child(i18n::t("titlebar.resmon")))
                     .child(
                         div()
                             .text_xs()
@@ -319,7 +324,7 @@ impl Render for ResourceMonitorDialog {
                             .rounded_full()
                             .bg(cx.theme().muted)
                             .text_color(muted)
-                            .child(i18n::tf("运行 {t}", &[("t", &uptime_text)])),
+                            .child(i18n::tf("resmon.uptime", &[("t", &uptime_text)])),
                     ),
             )
             .child(
@@ -334,7 +339,7 @@ impl Render for ResourceMonitorDialog {
                                 div()
                                     .text_xs()
                                     .text_color(muted)
-                                    .child(i18n::t("自动刷新")),
+                                    .child(i18n::t("resmon.auto_refresh")),
                             )
                             .child(
                                 Switch::new("resmon-auto")
@@ -348,7 +353,7 @@ impl Render for ResourceMonitorDialog {
                     .child(
                         Button::new("resmon-refresh")
                             .icon(IconName::RefreshCw)
-                            .label(i18n::t("立即刷新"))
+                            .label(i18n::t("resmon.refresh_now"))
                             .outline()
                             .xsmall()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -367,16 +372,16 @@ impl Render for ResourceMonitorDialog {
             .child(self.tile(
                 "tile-cpu",
                 IconName::Cpu,
-                i18n::t("CPU 占用"),
+                i18n::t("resmon.cpu"),
                 format!("{cpu:.1}%"),
-                Some(i18n::t("按可用核数归一").into()),
+                Some(i18n::t("resmon.cpu_hint").into()),
                 Some(cpu),
                 cx,
             ))
             .child(self.tile(
                 "tile-ws",
                 IconName::MemoryStick,
-                i18n::t("工作集内存"),
+                i18n::t("resmon.working_set"),
                 Self::fmt_bytes(ws),
                 Some(i18n::tf(
                             "峰值 {v}",
@@ -388,18 +393,18 @@ impl Render for ResourceMonitorDialog {
             .child(self.tile(
                 "tile-private",
                 IconName::HardDrive,
-                i18n::t("提交内存"),
+                i18n::t("resmon.committed"),
                 Self::fmt_bytes(s.private_bytes),
-                Some(i18n::t("进程独占的物理页承诺").into()),
+                Some(i18n::t("resmon.committed_hint").into()),
                 None,
                 cx,
             ))
             .child(self.tile(
                 "tile-threads",
                 IconName::Layers,
-                i18n::t("线程 · 句柄"),
+                i18n::t("resmon.threads_handles"),
                 format!("{} / {}", s.threads, s.handles),
-                Some(i18n::t("tokio 引擎 + GPUI 渲染").into()),
+                Some(i18n::t("resmon.threads_hint").into()),
                 None,
                 cx,
             ));
@@ -416,7 +421,7 @@ impl Render for ResourceMonitorDialog {
                     .border_1()
                     .border_color(cx.theme().border)
                     .child(Icon::new(IconName::Info).size_4().text_color(muted))
-                    .child(div().text_sm().text_color(muted).child(i18n::t("暂无连接"))),
+                    .child(div().text_sm().text_color(muted).child(i18n::t("resmon.no_conn"))),
             );
         }
         for (i, c) in self.conns.iter().enumerate() {
@@ -431,19 +436,21 @@ impl Render for ResourceMonitorDialog {
             .child(
                 v_flex()
                     .gap_2()
-                    .child(self.section_header(IconName::Database, i18n::t("消息与连接"), cx))
+                    .child(self.section_header(IconName::Database, i18n::t("resmon.section"), cx))
                     .child(
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child(format!(
-                                "{} 个连接（已连接 {}）· 打开标签 {} · 内存消息 {} 条（每连接上限 {} 条）· 日志 {} 条",
-                                self.conns.len(),
-                                connected_count,
-                                self.tabs,
-                                self.total_messages,
-                                self.app.read(cx).settings.max_messages,
-                                self.logs
+                            .child(i18n::tf(
+                                "{n} 个连接（已连接 {m}）· 打开标签 {t} · 内存消息 {msgs} 条（每连接上限 {cap} 条）· 日志 {logs} 条",
+                                &[
+                                    ("n", &self.conns.len()),
+                                    ("m", &connected_count),
+                                    ("t", &self.tabs),
+                                    ("msgs", &self.total_messages),
+                                    ("cap", &self.app.read(cx).settings.max_messages),
+                                    ("logs", &self.logs),
+                                ]
                             )),
                     )
                     .child(conns_block),
@@ -458,14 +465,14 @@ impl Render for ResourceMonitorDialog {
                             .text_xs()
                             .text_color(muted)
                             .child(if self.auto_refresh {
-                                format!(
-                                    "版本 v{} · 每 1.5 秒自动刷新",
-                                    crate::update::current_version()
+                                i18n::tf(
+                                    "版本 v{v} · 每 1.5 秒自动刷新",
+                                    &[("v", &crate::update::current_version())],
                                 )
                             } else {
-                                format!(
-                                    "版本 v{} · 自动刷新已暂停",
-                                    crate::update::current_version()
+                                i18n::tf(
+                                    "版本 v{v} · 自动刷新已暂停",
+                                    &[("v", &crate::update::current_version())],
                                 )
                             }),
                     ),
@@ -506,7 +513,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .w(px(640.))
-            .title(i18n::t("资源监控"))
+            .title(i18n::t("titlebar.resmon"))
             .child(dialog_view.clone())
             .footer(
                 h_flex()
@@ -514,7 +521,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                     .w_full()
                     .child(
                         Button::new("res-close")
-                            .label(i18n::t("关闭"))
+                            .label(i18n::t("common.close"))
                             .outline()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),

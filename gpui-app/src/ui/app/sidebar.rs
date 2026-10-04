@@ -34,8 +34,8 @@ impl MqttXApp {
                     .icon(IconName::PanelLeftOpen)
                     .ghost()
                     .small()
-                    .tooltip(i18n::t("展开连接侧栏（Ctrl+B）"))
-                    .accessibility_label(i18n::t("展开连接侧栏（Ctrl+B）"))
+                    .tooltip(i18n::t("sidebar.expand"))
+                    .accessibility_label(i18n::t("sidebar.expand"))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
             )
             .child(
@@ -43,8 +43,8 @@ impl MqttXApp {
                     .icon(IconName::Plus)
                     .ghost()
                     .small()
-                    .tooltip(i18n::t("新建连接"))
-                    .accessibility_label(i18n::t("新建连接"))
+                    .tooltip(i18n::t("titlebar.new_connection"))
+                    .accessibility_label(i18n::t("titlebar.new_connection"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_connection_form(None, window, cx);
                     })),
@@ -174,7 +174,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(i18n::t("还没有连接，点击上方 + 新建")),
+                        .child(i18n::t("sidebar.empty")),
                 )
         } else if shown == 0 {
             v_flex()
@@ -186,7 +186,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(i18n::t("没有匹配的连接")),
+                        .child(i18n::t("sidebar.no_match")),
                 )
         } else {
             v_flex().flex_1().child(rows)
@@ -211,7 +211,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                         h_flex()
                             .gap_1p5()
                             .items_center()
-                            .child(div().text_sm().font_semibold().child(i18n::t("连接")))
+                            .child(div().text_sm().font_semibold().child(i18n::t("sidebar.connections")))
                             .child(
                                 div()
                                     .text_xs()
@@ -227,8 +227,8 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                                     .icon(IconName::PanelLeftClose)
                                     .ghost()
                                     .xsmall()
-                                    .tooltip(i18n::t("收起侧栏（Ctrl+B）"))
-                                    .accessibility_label(i18n::t("收起侧栏（Ctrl+B）"))
+                                    .tooltip(i18n::t("sidebar.collapse"))
+                                    .accessibility_label(i18n::t("sidebar.collapse"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_sidebar(cx)
                                     })),
@@ -236,8 +236,8 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                             .child(
                                 Button::new("sidebar-add")
                                     .icon(IconName::Plus)
-                                    .tooltip(i18n::t("新建连接"))
-                            .accessibility_label(i18n::t("新建连接"))
+                                    .tooltip(i18n::t("titlebar.new_connection"))
+                            .accessibility_label(i18n::t("titlebar.new_connection"))
                                     .ghost()
                                     .xsmall()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -281,13 +281,13 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
             .overflow_y_scrollbar();
         row = row.child(self.render_group_chip(
             "chip-all",
-            format!("{} {}", i18n::t("全部"), self.connections.len()),
+            format!("{} {}", i18n::t("common.all"), self.connections.len()),
             GroupFilter::All,
             cx,
         ));
         row = row.child(self.render_group_chip(
             "chip-ungrouped",
-            format!("{} {ungrouped}", i18n::t("未分组")),
+            format!("{} {ungrouped}", i18n::t("sidebar.ungrouped")),
             GroupFilter::Ungrouped,
             cx,
         ));
@@ -353,8 +353,8 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
             .icon(if connected { IconName::Square } else { IconName::PlugZap })
             .ghost()
             .xsmall()
-            .tooltip(if connected { i18n::t("断开") } else { i18n::t("连接") })
-            .accessibility_label(if connected { i18n::t("断开") } else { i18n::t("连接") })
+            .tooltip(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connections") })
+            .accessibility_label(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connections") })
             .on_click(cx.listener(move |this, _, _, _| {
                 this.toggle_connection(&cfg);
             }))
@@ -370,7 +370,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
             .dropdown_menu(move |menu, _, _| {
                 let (e1, e2, e3) = (eid.clone(), eid.clone(), eid.clone());
                 let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
-                menu.item(PopupMenuItem::new(i18n::t("编辑")).on_click(move |_, window, cx| {
+                menu.item(PopupMenuItem::new(i18n::t("common.edit")).on_click(move |_, window, cx| {
                     w1.update(cx, |app, cx| {
                         let cfg = app.connections.iter().find(|c| c.id == e1).cloned();
                         if let Some(cfg) = cfg {
@@ -379,7 +379,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                     })
                     .ok();
                 }))
-                .item(PopupMenuItem::new(i18n::t("复制连接")).on_click(move |_, _, cx| {
+                .item(PopupMenuItem::new(i18n::t("sidebar.duplicate")).on_click(move |_, _, cx| {
                     w2.update(cx, |app, cx| {
                         app.duplicate_connection(&e2);
                         cx.notify();
@@ -387,7 +387,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                     .ok();
                 }))
                 .separator()
-                .item(PopupMenuItem::new(i18n::t("删除")).on_click(move |_, window, cx| {
+                .item(PopupMenuItem::new(i18n::t("common.delete")).on_click(move |_, window, cx| {
                     let Some(app) = w3.upgrade() else {
                         return;
                     };
@@ -409,14 +409,14 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                         let app = app.clone();
                         let confirm_id = confirm_id.clone();
                         alert
-                            .title(i18n::t("删除连接"))
+                            .title(i18n::t("sidebar.delete"))
                             .description(SharedString::from(i18n::tf(
                                 "确定删除「{name}」？将同时删除 {sub_count} 个订阅，并断开当前连接，此操作不可撤销。",
-                                &[("name", &name), ("sub_count", &sub_count.to_string())],
+                                &[("name", &name), ("sub_count", &sub_count)],
                             )))
                             .button_props(
                                 DialogButtonProps::default()
-                                    .ok_text(i18n::t("删除"))
+                                    .ok_text(i18n::t("common.delete"))
                                     .ok_variant(ButtonVariant::Danger)
                                     .show_cancel(true),
                             )

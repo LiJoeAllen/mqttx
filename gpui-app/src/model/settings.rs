@@ -18,10 +18,10 @@ pub enum ConnectionStatus {
 impl ConnectionStatus {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Disconnected => "未连接",
-            Self::Connecting => "连接中",
-            Self::Connected => "已连接",
-            Self::Error => "错误",
+            Self::Disconnected => "status.disconnected",
+            Self::Connecting => "status.connecting",
+            Self::Connected => "status.connected",
+            Self::Error => "status.error",
         }
     }
 }
@@ -42,9 +42,9 @@ impl ThemeModePref {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::System => "跟随系统",
-            Self::Light => "浅色",
-            Self::Dark => "深色",
+            Self::System => "theme.system",
+            Self::Light => "theme.light",
+            Self::Dark => "theme.dark",
         }
     }
 }

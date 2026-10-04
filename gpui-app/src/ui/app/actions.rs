@@ -228,7 +228,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
             let testing = form_test.read(cx).is_testing();
             dialog
                 .w(px(680.))
-                .title(i18n::t("连接配置"))
+                .title(i18n::t("form.title"))
                 .child(form.clone())
                 .footer(
                     h_flex()
@@ -242,7 +242,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                 } else {
                                     IconName::PlugZap
                                 })
-                                .label(if testing { i18n::t("测试中…") } else { i18n::t("测试连接") })
+                                .label(if testing { i18n::t("form.testing") } else { i18n::t("form.test") })
                                 .outline()
                                 .loading(testing)
                                 .on_click(move |_, window, cx| {
@@ -252,13 +252,13 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                         .child(div().flex_1())
                         .child(
                             Button::new("form-cancel")
-                                .label(i18n::t("取消"))
+                                .label(i18n::t("common.cancel"))
                                 .outline()
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("form-ok")
-                                .label(i18n::t("保存"))
+                                .label(i18n::t("common.save"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     let built = form_ok.read(cx).build(cx);
@@ -288,7 +288,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                             window.close_dialog(cx);
                                             if stale {
                                                 window.push_notification(
-                                                    Notification::info(i18n::t("配置已保存，重连后生效")),
+                                                    Notification::info(i18n::t("form.saved_reconnect")),
                                                     cx,
                                                 );
                                             }

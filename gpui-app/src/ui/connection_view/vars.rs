@@ -21,7 +21,7 @@ pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Sel
         if keys.is_empty() {
             self.show_vars = false;
             window.push_notification(
-                Notification::warning(i18n::t("主题/负载中没有 {{变量}} 引用")),
+                Notification::warning(i18n::t("var.no_reference")),
                 cx,
             );
             cx.notify();
@@ -40,7 +40,7 @@ pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Sel
                 .map(|v| v.value.clone())
                 .unwrap_or_default();
             let input = cx.new(|cx| {
-                let mut s = InputState::new(window, cx).placeholder(i18n::t("变量值"));
+                let mut s = InputState::new(window, cx).placeholder(i18n::t("var.value"));
                 // set_value 不会触发 InputEvent::Change，不会误写回
                 if !initial.is_empty() {
                     s.set_value(initial.as_str(), window, cx);
@@ -120,7 +120,7 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .font_semibold()
                             .child(i18n::tf(
                                 "变量（{n}）",
-                                &[("n", &self.var_rows.len().to_string())],
+                                &[("n", &self.var_rows.len())],
                             )),
                     )
                     .child(div().flex_1())
@@ -129,8 +129,8 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .icon(IconName::RefreshCw)
                             .ghost()
                             .xsmall()
-                            .tooltip(i18n::t("重新提取占位符"))
-                            .accessibility_label(i18n::t("重新提取占位符"))
+                            .tooltip(i18n::t("var.reextract"))
+                            .accessibility_label(i18n::t("var.reextract"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.sync_var_rows(window, cx);
                             })),
@@ -140,8 +140,8 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .icon(IconName::ChevronUp)
                             .ghost()
                             .xsmall()
-                            .tooltip(i18n::t("收起"))
-                            .accessibility_label(i18n::t("收起"))
+                            .tooltip(i18n::t("common.collapse"))
+                            .accessibility_label(i18n::t("common.collapse"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_vars = false;
                                 cx.notify();
@@ -153,7 +153,7 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child(i18n::t("内置：{{$ts}}（秒） {{$ts_ms}}（毫秒） {{$uuid}} · 发布时注入")),
+                    .child(i18n::t("var.builtin_inline")),
             )
             .child(
                 div()

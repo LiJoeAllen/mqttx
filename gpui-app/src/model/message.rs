@@ -17,8 +17,8 @@ pub enum Direction {
 impl Direction {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Received => "接收",
-            Self::Published => "发布",
+            Self::Received => "dir.received",
+            Self::Published => "dir.published",
         }
     }
 }

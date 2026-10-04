@@ -41,23 +41,23 @@ const QOS: [&str; 3] = ["QoS 0", "QoS 1", "QoS 2"];
 const PAYLOAD_FORMATS: [&str; 4] = ["Plaintext", "JSON", "Base64", "Hex"];
 /// Retain Handling 0/1/2 的下拉文案
 fn retain_handling_labels() -> [&'static str; 3] {
-    [i18n::t("0 每次发送"), i18n::t("1 仅新订阅"), i18n::t("2 不发送")]
+    [i18n::t("sub.rh0"), i18n::t("sub.rh1"), i18n::t("sub.rh2")]
 }
 const MAX_RENDERED_MESSAGES: usize = 300;
 /// 日志渲染上限，与 app.rs 的 MAX_LOGS 保持一致
 const MAX_RENDERED_LOGS: usize = 3000;
 /// 订阅色板预设：色相（度）+ 名称
 const PRESET_HUES: [(f32, &str); 10] = [
-    (0., "红"),
-    (30., "橙"),
-    (60., "黄"),
-    (120., "绿"),
-    (160., "青"),
-    (200., "蓝"),
-    (240., "靛"),
-    (270., "紫"),
-    (300., "品红"),
-    (330., "玫红"),
+    (0., "color.red"),
+    (30., "color.orange"),
+    (60., "color.yellow"),
+    (120., "color.green"),
+    (160., "color.cyan"),
+    (200., "color.blue"),
+    (240., "color.indigo"),
+    (270., "color.purple"),
+    (300., "color.magenta"),
+    (330., "color.rose"),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -208,29 +208,29 @@ impl ConnectionView {
     ) -> Self {
 
         let sub_topic = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(i18n::t("订阅主题，支持 # +，多个用逗号/空格分隔"))
+            InputState::new(window, cx).placeholder(i18n::t("sub.topic_placeholder"))
         });
         let sub_qos = make_select(&QOS, 0, window, cx);
-        let sub_alias = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("别名（可选）")));
-        let sub_identifier = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("订阅标识符")));
+        let sub_alias = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sub.alias")));
+        let sub_identifier = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sub.identifier")));
         let sub_retain_handling = make_select(&retain_handling_labels(), 0, window, cx);
-        let pub_topic = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("发布主题")));
+        let pub_topic = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.topic_placeholder")));
         let payload = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder(i18n::t("输入消息负载，支持 {{变量名}} 与 {{$ts}} {{$uuid}}"))
+                .placeholder(i18n::t("pub.payload_placeholder"))
         });
         let pub_qos = make_select(&QOS, 0, window, cx);
         let payload_format = make_select(&PAYLOAD_FORMATS, 0, window, cx);
-        let content_type = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("Content-Type（可选）")));
-        let msg_expiry = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("秒，如 60")));
+        let content_type = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.content_type_ph")));
+        let msg_expiry = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.seconds_hint")));
         let response_topic =
-            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("Response Topic（可选）")));
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.response_topic_ph")));
         let correlation_data =
-            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("Correlation Data（可选）")));
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("过滤主题或内容…")));
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.correlation_ph")));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("msg.filter_placeholder")));
         let user_props = cx.new(|cx| KvEditor::new("pub", &[], window, cx));
         let preset_name =
-            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("预设名称，如 温度上报")));
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.preset_name_hint")));
 
         Self {
             conn_id,
@@ -332,7 +332,7 @@ impl Render for ConnectionView {
                                     .selected_index(if panel == Panel::Messages { 0 } else { 1 })
                                     .child(
                                         Tab::new()
-                                            .label(i18n::t("消息流"))
+                                            .label(i18n::t("connview.messages"))
                                             .selected(panel == Panel::Messages)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.panel = Panel::Messages;
@@ -341,7 +341,7 @@ impl Render for ConnectionView {
                                     )
                                     .child(
                                         Tab::new()
-                                            .label(i18n::t("日志"))
+                                            .label(i18n::t("connview.logs"))
                                             .selected(panel == Panel::Logs)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.panel = Panel::Logs;

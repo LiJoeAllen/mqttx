@@ -26,10 +26,10 @@ use crate::ui::i18n;
 use crate::update::{self, UpdateInfo};
 
 fn theme_labels() -> [&'static str; 3] {
-    [i18n::t("跟随系统"), i18n::t("浅色"), i18n::t("深色")]
+    [i18n::t("theme.system"), i18n::t("theme.light"), i18n::t("theme.dark")]
 }
 fn language_labels() -> [&'static str; 3] {
-    [i18n::t("跟随系统 / System"), "中文", "English"]
+    ["跟随系统 / System", "中文", "English"]
 }
 
 /// 消息缓存条数的合法范围：太少不够回看，太多占内存
@@ -179,32 +179,32 @@ impl SettingsDialog {
         match &self.update {
             UpdateUi::Idle => row(
                 Button::new("check-update")
-                    .label(i18n::t("检查更新"))
+                    .label(i18n::t("update.check"))
                     .outline()
                     .xsmall()
                     .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
                     .into_any_element(),
-                i18n::t("检查 GitHub Releases 上的新版本").into_any_element(),
+                i18n::t("update.check_hint").into_any_element(),
                 false,
             ),
             UpdateUi::Checking => row(
                 Button::new("check-update")
-                    .label(i18n::t("检查中…"))
+                    .label(i18n::t("update.checking"))
                     .outline()
                     .xsmall()
                     .loading(true)
                     .into_any_element(),
-                i18n::t("正在检查更新…").into_any_element(),
+                i18n::t("update.checking_long").into_any_element(),
                 false,
             ),
             UpdateUi::UpToDate => row(
                 Button::new("check-update")
-                    .label(i18n::t("重新检查"))
+                    .label(i18n::t("update.recheck"))
                     .outline()
                     .xsmall()
                     .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
                     .into_any_element(),
-                i18n::t("已是最新版本").into_any_element(),
+                i18n::t("update.up_to_date").into_any_element(),
                 false,
             ),
             UpdateUi::Available(info) => {
@@ -249,7 +249,7 @@ impl SettingsDialog {
                             .gap_1p5()
                             .child(
                                 Button::new("upd-now")
-                                    .label(i18n::t("立即安装"))
+                                    .label(i18n::t("update.install_now"))
                                     .primary()
                                     .xsmall()
                                     .on_click(move |_, window, cx| {
@@ -267,7 +267,7 @@ impl SettingsDialog {
                             )
                             .child(
                                 Button::new("upd-later")
-                                    .label(i18n::t("下次启动安装"))
+                                    .label(i18n::t("update.install_later"))
                                     .outline()
                                     .xsmall()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -288,7 +288,7 @@ impl SettingsDialog {
                             )
                             .child(
                                 Button::new("upd-discard")
-                                    .label(i18n::t("放弃此次更新"))
+                                    .label(i18n::t("update.discard"))
                                     .outline()
                                     .xsmall()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -297,7 +297,7 @@ impl SettingsDialog {
                                         }
                                         this.update = UpdateUi::Idle;
                                         window.push_notification(
-                                            Notification::info(i18n::t("已删除暂存的更新包")),
+                                            Notification::info(i18n::t("update.discarded")),
                                             cx,
                                         );
                                         cx.notify();
@@ -341,12 +341,12 @@ impl SettingsDialog {
             }
             UpdateUi::Failed(e) => row(
                 Button::new("check-update")
-                    .label(i18n::t("重试"))
+                    .label(i18n::t("common.retry"))
                     .outline()
                     .xsmall()
                     .on_click(cx.listener(|this, _, window, cx| this.run_check(window, cx)))
                     .into_any_element(),
-                i18n::tf("更新失败：{e}", &[("e", &e)]).into_any_element(),
+                i18n::tf("update.failed", &[("e", &e)]).into_any_element(),
                 false,
             ),
         }
@@ -401,7 +401,7 @@ fn open_in_file_manager(path: &Path, window: &mut Window, cx: &mut App) {
 
     cmd.arg(path);
     if let Err(e) = cmd.spawn() {
-        window.push_notification(Notification::error(i18n::tf("打开目录失败: {e}", &[("e", &e.to_string())])), cx);
+        window.push_notification(Notification::error(i18n::tf("settings.open_dir_failed", &[("e", &e)])), cx);
     }
 }
 
@@ -415,10 +415,10 @@ impl Render for SettingsDialog {
         v_flex()
             .gap_4()
             .w(px(500.))
-            .child(field(i18n::t("界面主题"), Select::new(&self.theme)))
-            .child(field(i18n::t("界面语言"), Select::new(&self.language)))
+            .child(field(i18n::t("settings.theme"), Select::new(&self.theme)))
+            .child(field(i18n::t("settings.language"), Select::new(&self.language)))
             .child(field(
-                i18n::t("每条连接内存中保留的消息条数（100~100000）"),
+                i18n::t("settings.max_messages"),
                 Input::new(&self.max_messages),
             ))
             .child(
@@ -435,7 +435,7 @@ impl Render for SettingsDialog {
             .child(
                 h_flex()
                     .justify_between()
-                    .child(div().text_sm().child(i18n::t("时间戳显示毫秒")))
+                    .child(div().text_sm().child(i18n::t("settings.show_millis")))
                     .child(
                         Switch::new("show-millis")
                             .checked(self.show_millis)
@@ -448,7 +448,7 @@ impl Render for SettingsDialog {
             .child(
                 h_flex()
                     .justify_between()
-                    .child(div().text_sm().child(i18n::t("自动检查更新（启动时）")))
+                    .child(div().text_sm().child(i18n::t("settings.auto_update")))
                     .child(
                         Switch::new("auto-check-update")
                             .checked(self.auto_check_update)
@@ -460,7 +460,7 @@ impl Render for SettingsDialog {
             )
             .child(div().h(px(1.)).bg(cx.theme().border).w_full())
             .child(field(
-                i18n::t("数据目录"),
+                i18n::t("settings.data_dir"),
                 h_flex()
                     .gap_1()
                     .w_full()
@@ -479,7 +479,7 @@ impl Render for SettingsDialog {
                     .child(
                         Button::new("open-data-dir")
                             .icon(IconName::FolderOpen)
-                            .label(i18n::t("打开目录"))
+                            .label(i18n::t("settings.open_dir"))
                             .outline()
                             .xsmall()
                             .on_click(move |_, window, cx| {
@@ -488,7 +488,7 @@ impl Render for SettingsDialog {
                     ),
             ))
             .child(field(
-                i18n::t("日志目录"),
+                i18n::t("settings.log_dir"),
                 h_flex()
                     .gap_1()
                     .w_full()
@@ -506,14 +506,14 @@ impl Render for SettingsDialog {
                     .child(
                         Button::new("open-log-dir")
                             .icon(IconName::FolderOpen)
-                            .label(i18n::t("打开日志目录"))
+                            .label(i18n::t("settings.open_log_dir"))
                             .outline()
                             .xsmall()
                             .on_click(move |_, window, cx| {
                                 // 日志目录可能尚未创建（从未产生过日志）
                                 if let Err(e) = std::fs::create_dir_all(&log_dir_for_open) {
                                     window.push_notification(
-                                        Notification::error(i18n::tf("创建日志目录失败: {e}", &[("e", &e.to_string())])),
+                                        Notification::error(i18n::tf("settings.mkdir_failed", &[("e", &e)])),
                                         cx,
                                     );
                                     return;
@@ -527,7 +527,7 @@ impl Render for SettingsDialog {
                 v_flex().gap_1().child(
                     v_flex()
                         .gap_1()
-                        .child(div().text_sm().font_semibold().child(i18n::t("关于")))
+                        .child(div().text_sm().font_semibold().child(i18n::t("settings.about")))
                         .child(
                             h_flex()
                                 .gap_2()
@@ -536,18 +536,18 @@ impl Render for SettingsDialog {
                                 .child(i18n::tf(
                                     "版本 {v}（更新源 {src}）",
                                     &[
-                                        ("v", &update::current_version().to_string()),
-                                        ("src", update::UPDATE_SOURCE),
+                                        ("v", &update::current_version()),
+                                        ("src", &update::UPDATE_SOURCE),
                                     ],
                                 ))
-                                .child(i18n::t("Apache-2.0 许可证")),
+                                .child(i18n::t("settings.license")),
                         )
                         .child(self.render_update_row(window, cx))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(i18n::t("对标 MQTTX 的 GPUI 跨平台 MQTT 调试客户端")),
+                                .child(i18n::t("settings.tagline")),
                         )
                         .child(
                             h_flex().gap_1().child(
@@ -605,13 +605,13 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
                     .w_full()
                     .child(
                         Button::new("settings-cancel")
-                            .label(i18n::t("取消"))
+                            .label(i18n::t("common.cancel"))
                             .outline()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("settings-ok")
-                            .label(i18n::t("保存"))
+                            .label(i18n::t("common.save"))
                             .primary()
                             .on_click(move |_, window, cx| {
                                 let result = for_collect.read(cx).collect(cx);

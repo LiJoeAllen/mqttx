@@ -4264,6 +4264,7 @@ dependencies = [
  "rfd",
  "rumqttc-v4-next",
  "rumqttc-v5-next",
+ "rust-i18n",
  "rustls",
  "rustls-native-certs",
  "sentry",

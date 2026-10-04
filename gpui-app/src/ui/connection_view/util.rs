@@ -125,7 +125,7 @@ pub(super) fn format_payload_detail(payload: &str, raw: Option<&[u8]>, format: D
 pub(super) fn details_copy_text(record: &MqttRecord, show_millis: bool) -> String {
     let mut out = String::new();
     out.push_str(&format!("Topic: {}\n", record.topic));
-    out.push_str(&format!("Direction: {}\n", record.direction.label()));
+    out.push_str(&format!("Direction: {}\n", crate::ui::i18n::t(record.direction.label())));
     out.push_str(&format!("QoS: {}\n", record.qos));
     out.push_str(&format!("Retain: {}\n", record.retain));
     out.push_str(&format!(

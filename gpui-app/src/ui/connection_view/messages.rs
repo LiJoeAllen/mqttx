@@ -92,11 +92,11 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         IconName::PlugZap
                     })
                     .label(if connected {
-                        i18n::t("断开")
+                        i18n::t("sidebar.disconnect")
                     } else if connecting {
-                        i18n::t("连接中")
+                        i18n::t("status.connecting")
                     } else {
-                        i18n::t("连接")
+                        i18n::t("sidebar.connections")
                     })
                     .when(connected, |b| b.danger().ghost())
                     .when(!connected, |b| b.primary().ghost())
@@ -151,7 +151,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
-        let direction_label = if received { i18n::t("接收") } else { i18n::t("发布") };
+        let direction_label = if received { i18n::t("dir.received") } else { i18n::t("dir.published") };
 
         let header = h_flex()
             .gap_2()
@@ -223,7 +223,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         .rounded_sm()
                         .bg(cx.theme().warning.alpha(0.15))
                         .text_color(cx.theme().warning)
-                        .child(format!("已截断 {}KB", MAX_PAYLOAD_RETAIN / 1024)),
+                        .child(i18n::tf("msg.truncated", &[("n", &(MAX_PAYLOAD_RETAIN / 1024))])),
                 )
             })
             .child(
@@ -291,43 +291,43 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                 .child(
                     Button::new(SharedString::from(format!("msg-copy-topic-{}", seq)))
                         .icon(IconName::Copy)
-                        .label(i18n::t("主题"))
+                        .label(i18n::t("msg.topic"))
                         .ghost()
                         .xsmall()
-                        .tooltip(i18n::t("复制主题"))
-                        .accessibility_label(i18n::t("复制主题"))
+                        .tooltip(i18n::t("msg.copy_topic"))
+                        .accessibility_label(i18n::t("msg.copy_topic"))
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
                             cx.write_to_clipboard(ClipboardItem::new_string(copy_topic.to_string()));
-                            window.push_notification(Notification::success(i18n::t("已复制主题")), cx);
+                            window.push_notification(Notification::success(i18n::t("msg.topic_copied")), cx);
                         }),
                 )
                 .child(
                     Button::new(SharedString::from(format!("msg-copy-payload-{}", seq)))
                         .icon(IconName::Copy)
-                        .label(i18n::t("负载"))
+                        .label(i18n::t("msg.payload"))
                         .ghost()
                         .xsmall()
-                        .tooltip(i18n::t("复制负载原文"))
-                        .accessibility_label(i18n::t("复制负载原文"))
+                        .tooltip(i18n::t("msg.copy_payload"))
+                        .accessibility_label(i18n::t("msg.copy_payload"))
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
                             cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.to_string()));
-                            window.push_notification(Notification::success(i18n::t("已复制负载")), cx);
+                            window.push_notification(Notification::success(i18n::t("msg.payload_copied")), cx);
                         }),
                 )
                 .child(
                     Button::new(SharedString::from(format!("msg-copy-detail-{}", seq)))
                         .icon(IconName::Copy)
-                        .label(i18n::t("详情"))
+                        .label(i18n::t("msg.details"))
                         .ghost()
                         .xsmall()
-                        .tooltip(i18n::t("复制完整详情（含 v5 属性）"))
-                        .accessibility_label(i18n::t("复制完整详情（含 v5 属性）"))
+                        .tooltip(i18n::t("msg.copy_details"))
+                        .accessibility_label(i18n::t("msg.copy_details"))
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
                             cx.write_to_clipboard(ClipboardItem::new_string(copy_detail.clone()));
-                            window.push_notification(Notification::success(i18n::t("已复制详情")), cx);
+                            window.push_notification(Notification::success(i18n::t("msg.details_copied")), cx);
                         }),
                 );
             details = details.child(detail_toolbar).child(
@@ -350,7 +350,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                     .collect::<Vec<_>>()
                     .join("\n");
                 details = details
-                    .child(div().text_xs().font_semibold().child(i18n::t("用户属性")))
+                    .child(div().text_xs().font_semibold().child(i18n::t("preset.user_props")))
                     .child(
                         div()
                             .font_family(mono.clone())
@@ -363,10 +363,10 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                 ("Response Topic", record.response_topic.clone()),
                 ("Correlation Data", record.correlation_data.clone()),
                 (
-                    i18n::t("消息过期"),
+                    i18n::t("msg.expiry"),
                     record
                         .message_expiry_interval
-                        .map(|v| i18n::tf("{n} 秒", &[("n", &v.to_string())])),
+                        .map(|v| i18n::tf("msg.seconds", &[("n", &v)])),
                 ),
                 (
                     "订阅标识符",
@@ -513,9 +513,9 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(if filtering {
-                                i18n::t("没有匹配的消息")
+                                i18n::t("msg.no_match")
                             } else {
-                                i18n::t("暂无消息，订阅主题后消息会显示在这里")
+                                i18n::t("msg.empty")
                             }),
                     ),
             );
@@ -585,8 +585,8 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                     .icon(IconName::Close)
                     .ghost()
                     .xsmall()
-                    .tooltip(i18n::t("清除订阅过滤"))
-                    .accessibility_label(i18n::t("清除订阅过滤"))
+                    .tooltip(i18n::t("msg.clear_sub_filter"))
+                    .accessibility_label(i18n::t("msg.clear_sub_filter"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.sub_filter = None;
                         cx.notify();
@@ -635,7 +635,7 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                             .px_1p5()
                             .text_color(cx.theme().muted_foreground)
                             // 计数显示过滤命中总数，不受渲染截断影响
-                            .child(i18n::tf("{n} 条", &[("n", &matched_total.to_string())])),
+                            .child(i18n::tf("msg.count", &[("n", &matched_total)])),
                     )
                     .when(matched_total > records.len(), |h| {
                         h.child(
@@ -645,7 +645,7 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                                 .text_color(cx.theme().muted_foreground)
                                 .child(i18n::tf(
                                 "仅显示最新 {n} 条",
-                                &[("n", &MAX_RENDERED_MESSAGES.to_string())],
+                                &[("n", &MAX_RENDERED_MESSAGES)],
                             )),
                         )
                     })
@@ -662,19 +662,19 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                         } else {
                             IconName::Pause
                         })
-                        .label(if paused { i18n::t("恢复") } else { i18n::t("暂停") })
+                        .label(if paused { i18n::t("common.resume") } else { i18n::t("common.pause") })
                         .ghost()
                         .small()
                         .when(paused, |b| b.selected(true))
                         .tooltip(if paused {
-                            i18n::t("恢复实时滚动")
+                            i18n::t("msg.resume_tooltip")
                         } else {
-                            i18n::t("暂停消息流滚动（消息仍在后台接收）")
+                            i18n::t("msg.pause_tooltip")
                         })
                         .accessibility_label(if paused {
-                            i18n::t("恢复")
+                            i18n::t("common.resume")
                         } else {
-                            i18n::t("暂停")
+                            i18n::t("common.pause")
                         })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.paused = !this.paused;
@@ -689,12 +689,12 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                         let empty = total == 0;
                         Button::new(SharedString::from(format!("msg-clear-{}", self.conn_id)))
                             .icon(IconName::Eraser)
-                            .label(i18n::t("清空"))
+                            .label(i18n::t("common.clear"))
                             .ghost()
                             .small()
                             .disabled(empty)
-                            .tooltip(i18n::t("清空当前连接的消息"))
-                            .accessibility_label(i18n::t("清空当前连接的消息"))
+                            .tooltip(i18n::t("msg.clear_tooltip"))
+                            .accessibility_label(i18n::t("msg.clear_tooltip"))
                             .on_click(move |_, window, cx| {
                                 // 清空不可撤销，先弹二次确认
                                 let weak = weak.clone();
@@ -703,13 +703,13 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                                     let weak = weak.clone();
                                     let clear_id = clear_id.clone();
                                     alert
-                                        .title(i18n::t("清空消息"))
-                                        .description(i18n::t("确定清空当前连接的全部消息吗？此操作不可撤销。"))
+                                        .title(i18n::t("msg.clear_title"))
+                                        .description(i18n::t("msg.clear_confirm"))
                                         .button_props(
                                             DialogButtonProps::default()
                                                 .show_cancel(true)
-                                                .cancel_text(i18n::t("取消"))
-                                                .ok_text(i18n::t("清空"))
+                                                .cancel_text(i18n::t("common.cancel"))
+                                                .ok_text(i18n::t("common.clear"))
                                                 .ok_variant(ButtonVariant::Danger),
                                         )
                                         .on_ok(move |_, _, cx| {
@@ -769,7 +769,7 @@ pub(super) fn render_logs(&self, cx: &mut Context<Self>) -> impl IntoElement {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(i18n::t("暂无日志")),
+                            .child(i18n::t("msg.no_logs")),
                     ),
             );
         }
@@ -830,7 +830,7 @@ pub(super) fn render_logs(&self, cx: &mut Context<Self>) -> impl IntoElement {
                             .text_xs()
                             .text_color(muted)
                             .font_family(cx.theme().mono_font_family.clone())
-                            .child(i18n::t("连接日志")),
+                            .child(i18n::t("msg.log_title")),
                     ),
             )
             .child(body)

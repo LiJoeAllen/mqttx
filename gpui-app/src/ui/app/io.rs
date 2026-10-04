@@ -80,8 +80,8 @@ impl MqttXApp {
                         Notification::success(i18n::tf(
                             "导出 {n} 条连接到 {path}",
                             &[
-                                ("n", &count.to_string()),
-                                ("path", &path.display().to_string()),
+                                ("n", &count),
+                                ("path", &path.display()),
                             ],
                         )),
                         cx,
@@ -136,8 +136,8 @@ impl MqttXApp {
                         Notification::success(i18n::tf(
                             "导入 {n} 条，跳过 {n2} 条",
                             &[
-                                ("n", &added.to_string()),
-                                ("n2", &skipped.to_string()),
+                                ("n", &added),
+                                ("n2", &skipped),
                             ],
                         )),
                         cx,

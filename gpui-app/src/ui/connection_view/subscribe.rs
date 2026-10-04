@@ -35,8 +35,8 @@ impl ConnectionView {
                     .icon(IconName::PanelLeftOpen)
                     .ghost()
                     .small()
-                    .tooltip(i18n::t("展开订阅面板"))
-                    .accessibility_label(i18n::t("展开订阅面板"))
+                    .tooltip(i18n::t("sub.expand"))
+                    .accessibility_label(i18n::t("sub.expand"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.subs_collapsed = false;
                         cx.notify();
@@ -169,7 +169,7 @@ impl ConnectionView {
         let raw = self.sub_topic.read(cx).value().to_string();
         let topics = split_topic_list(&raw);
         if topics.is_empty() {
-            window.push_notification(Notification::warning(i18n::t("订阅主题不能为空")), cx);
+            window.push_notification(Notification::warning(i18n::t("sub.topic_required")), cx);
             return;
         }
         let qos = self.sub_qos.read(cx).selected_value().copied().unwrap_or(0) as u8;
@@ -189,7 +189,7 @@ impl ConnectionView {
                     Ok(v) if v > 0 => sub_identifier = Some(v),
                     _ => {
                         window.push_notification(
-                            Notification::warning(i18n::t("订阅标识符须为正整数")),
+                            Notification::warning(i18n::t("sub.identifier_invalid")),
                             cx,
                         );
                         return;
@@ -303,9 +303,9 @@ impl ConnectionView {
                 .map(|c| c.auto_resubscribe)
                 .unwrap_or(true)
             {
-                i18n::t("未连接：订阅已保存，连接后自动恢复")
+                i18n::t("sub.saved_offline_resub")
             } else {
-                i18n::t("未连接：订阅已保存")
+                i18n::t("sub.saved_offline")
             };
             window.push_notification(Notification::warning(hint), cx);
         }
@@ -364,7 +364,7 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                             .bg(cx.theme().warning.alpha(0.15))
                             .text_xs()
                             .text_color(cx.theme().warning)
-                            .child(i18n::tf("正在编辑：{topic}", &[("topic", &topic)])),
+                            .child(i18n::tf("sub.editing", &[("topic", &topic)])),
                     )
                 })
                 .child(
@@ -403,12 +403,12 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                     h.child(
                         Button::new(SharedString::from(format!("sub-adv-{}", self.conn_id)))
                             .icon(IconName::SlidersHorizontal)
-                            .label(i18n::t("高级"))
+                            .label(i18n::t("common.advanced"))
                             .ghost()
                             .small()
                             .when(show_advanced, |b| b.selected(true))
-                            .tooltip(i18n::t("MQTT 5 订阅选项"))
-                            .accessibility_label(i18n::t("MQTT 5 订阅选项"))
+                            .tooltip(i18n::t("sub.mqtt5_options"))
+                            .accessibility_label(i18n::t("sub.mqtt5_options"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.sub_show_advanced = !this.sub_show_advanced;
                                 cx.notify();
@@ -418,7 +418,7 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                 .child(
                     Button::new(SharedString::from(format!("subscribe-{}", self.conn_id)))
                         .icon(if editing { IconName::Check } else { IconName::Plus })
-                        .label(if editing { i18n::t("更新") } else { i18n::t("订阅") })
+                        .label(if editing { i18n::t("common.update") } else { i18n::t("connview.subscriptions") })
                         // 编辑用 warning 色与新增的 primary 区分
                         .when(editing, |b| b.warning())
                         .when(!editing, |b| b.primary())
@@ -431,8 +431,8 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                             .icon(IconName::Close)
                             .ghost()
                             .small()
-                            .tooltip(i18n::t("取消编辑"))
-                            .accessibility_label(i18n::t("取消编辑"))
+                            .tooltip(i18n::t("sub.cancel_edit"))
+                            .accessibility_label(i18n::t("sub.cancel_edit"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.editing = None;
                                 // 清空回填到输入框的主题/别名/高级字段，回到新增态
@@ -470,7 +470,7 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                                     cx.notify();
                                 }),
                             ))
-                            .child(div().text_xs().child(i18n::t("No Local"))),
+                            .child(div().text_xs().child(i18n::t("sub.no_local"))),
                     )
                     .child(
                         h_flex()
@@ -483,11 +483,11 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                                     cx.notify();
                                 }),
                             ))
-                            .child(div().text_xs().child(i18n::t("Retain As Published"))),
+                            .child(div().text_xs().child(i18n::t("sub.rap"))),
                     )
                     .child(
                         div().w(px(150.)).child(field(
-                            i18n::t("Retain Handling"),
+                            i18n::t("sub.retain_handling"),
                             Select::new(&sub_retain_handling).small(),
                         )),
                     ),
@@ -527,7 +527,7 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .text_center()
-                            .child(i18n::t("订阅主题后，消息会显示在右侧")),
+                            .child(i18n::t("sub.empty_hint")),
                     ),
             );
         }
@@ -548,8 +548,8 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     Button::new(trigger_id)
                         .ghost()
                         .xsmall()
-                        .tooltip(i18n::t("订阅颜色"))
-                        .accessibility_label(i18n::t("订阅颜色"))
+                        .tooltip(i18n::t("sub.color"))
+                        .accessibility_label(i18n::t("sub.color"))
                         .child(
                             div()
                                 .size(px(11.))
@@ -562,8 +562,8 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     Button::new(trigger_id)
                         .ghost()
                         .xsmall()
-                        .tooltip(i18n::t("订阅颜色"))
-                        .accessibility_label(i18n::t("订阅颜色"))
+                        .tooltip(i18n::t("sub.color"))
+                        .accessibility_label(i18n::t("sub.color"))
                         .child(
                             div()
                                 .size(px(11.))
@@ -583,7 +583,7 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                         let sid = sid.clone();
                         let swatch = hue_color(hue);
                         // 菜单只显示颜色名，角度数值对用户没有意义
-                        let label = SharedString::from(name);
+                        let label = SharedString::from(crate::ui::i18n::t(name));
                         menu = menu.item(
                             PopupMenuItem::element(move |_, _| {
                                 h_flex()
@@ -611,7 +611,7 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     menu = menu.separator();
                     let weak_rand = weak_menu.clone();
                     let sid_rand = sid.clone();
-                    menu = menu.item(PopupMenuItem::new(i18n::t("随机颜色")).on_click(move |_, _, cx| {
+                    menu = menu.item(PopupMenuItem::new(i18n::t("sub.color_random")).on_click(move |_, _, cx| {
                         let hue = (uuid::Uuid::new_v4().as_u128() % 360) as f32;
                         weak_rand
                             .update(cx, |view, cx| {
@@ -621,7 +621,7 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     }));
                     let weak_clear = weak_menu.clone();
                     let sid_clear = sid.clone();
-                    menu = menu.item(PopupMenuItem::new(i18n::t("清除颜色")).on_click(move |_, _, cx| {
+                    menu = menu.item(PopupMenuItem::new(i18n::t("sub.color_clear")).on_click(move |_, _, cx| {
                         weak_clear
                             .update(cx, |view, cx| {
                                 view.set_subscription_color(&sid_clear, None, cx);
@@ -637,8 +637,8 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                 .icon(if enabled { IconName::Eye } else { IconName::EyeOff })
                 .ghost()
                 .xsmall()
-                .tooltip(if enabled { i18n::t("停用订阅") } else { i18n::t("启用订阅") })
-                .accessibility_label(if enabled { i18n::t("停用订阅") } else { i18n::t("启用订阅") })
+                .tooltip(if enabled { i18n::t("sub.disable") } else { i18n::t("sub.enable") })
+                .accessibility_label(if enabled { i18n::t("sub.disable") } else { i18n::t("sub.enable") })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_subscription_enabled(&eye_sid, cx);
                 }));
@@ -648,8 +648,8 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                 .icon(IconName::Pencil)
                 .ghost()
                 .xsmall()
-                .tooltip(i18n::t("编辑订阅"))
-                .accessibility_label(i18n::t("编辑订阅"))
+                .tooltip(i18n::t("sub.edit"))
+                .accessibility_label(i18n::t("sub.edit"))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let sub = this
                         .with_app(cx, |app| {
@@ -670,8 +670,8 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                 .icon(IconName::Close)
                 .ghost()
                 .xsmall()
-                .tooltip(i18n::t("取消订阅"))
-                .accessibility_label(i18n::t("取消订阅"))
+                .tooltip(i18n::t("sub.unsubscribe"))
+                .accessibility_label(i18n::t("sub.unsubscribe"))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     // 若删除的是当前过滤主题，一并清掉消息过滤
                     if this.sub_filter.as_deref() == Some(del_topic.as_str()) {
@@ -778,14 +778,14 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     .px_3()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().font_semibold().child(i18n::t("订阅")))
+                    .child(div().text_sm().font_semibold().child(i18n::t("connview.subscriptions")))
                     .child(
                         Button::new("subs-collapse")
                             .icon(IconName::PanelLeftClose)
                             .ghost()
                             .xsmall()
-                            .tooltip(i18n::t("收起订阅面板"))
-                            .accessibility_label(i18n::t("收起订阅面板"))
+                            .tooltip(i18n::t("sub.collapse"))
+                            .accessibility_label(i18n::t("sub.collapse"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.subs_collapsed = true;
                                 cx.notify();

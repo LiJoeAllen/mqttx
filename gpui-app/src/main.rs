@@ -59,6 +59,8 @@ fn main() {
         // 其余 IconName（MailOpen/SlidersHorizontal 等）运行时会渲染空白
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx: &mut App| {
+                // gpui-kit 组件内置文案（按钮/日历/空态等）并入当前语言包
+            mqttx_desktop::init_i18n();
             gpui_kit::init(cx);
 
             let options = WindowOptions {

@@ -27,14 +27,14 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                     .ghost()
                     .small()
                     .tooltip(if self.pinned {
-                        i18n::t("取消窗口置顶")
+                        i18n::t("titlebar.unpin")
                     } else {
-                        i18n::t("置顶窗口")
+                        i18n::t("titlebar.pin")
                     })
                     .accessibility_label(if self.pinned {
-                        i18n::t("取消窗口置顶")
+                        i18n::t("titlebar.unpin")
                     } else {
-                        i18n::t("置顶窗口")
+                        i18n::t("titlebar.pin")
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         let next = !this.pinned;
@@ -43,7 +43,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                             cx.notify();
                         } else {
                             window.push_notification(
-                                Notification::error(i18n::t("置顶操作失败")),
+                                Notification::error(i18n::t("titlebar.pin_failed")),
                                 cx,
                             );
                         }
@@ -74,7 +74,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(i18n::t("MQTT 调试客户端")),
+                                .child(i18n::t("titlebar.subtitle")),
                         ),
                 )
                 .child(
@@ -90,7 +90,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                         .child(
                             Button::new("new-connection")
                                 .icon(IconName::Plus)
-                                .label(i18n::t("新建连接"))
+                                .label(i18n::t("titlebar.new_connection"))
                                 .primary()
                                 .small()
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -112,21 +112,21 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                     let w5 = app_weak.clone();
                                     let w6 = app_weak.clone();
                                     menu.item(
-                                        PopupMenuItem::new(i18n::t("阿里云设备"))
+                                        PopupMenuItem::new(i18n::t("titlebar.aliyun"))
                                             .on_click(move |_, window, cx| {
                                                 if let Some(entity) = w1.upgrade() {
                                                     crate::ui::dialogs::aliyun_dialog::open(entity, window, cx);
                                                 }
                                             }),
                                     )
-                                    .item(PopupMenuItem::new(i18n::t("全局变量")).on_click(
+                                    .item(PopupMenuItem::new(i18n::t("titlebar.variables")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w2.upgrade() {
                                                 crate::ui::dialogs::variables_dialog::open(entity, window, cx);
                                             }
                                         },
                                     ))
-                                    .item(PopupMenuItem::new(i18n::t("资源监控")).on_click(
+                                    .item(PopupMenuItem::new(i18n::t("titlebar.resmon")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w6.upgrade() {
                                                 crate::ui::dialogs::resource_dialog::open(entity, window, cx);
@@ -134,7 +134,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                         },
                                     ))
                                     .separator()
-                                    .item(PopupMenuItem::new(i18n::t("导出连接")).on_click(
+                                    .item(PopupMenuItem::new(i18n::t("titlebar.export")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w4.upgrade() {
                                                 entity.update(cx, |app, cx| {
@@ -143,7 +143,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                             }
                                         },
                                     ))
-                                    .item(PopupMenuItem::new(i18n::t("导入连接")).on_click(
+                                    .item(PopupMenuItem::new(i18n::t("titlebar.import")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w5.upgrade() {
                                                 entity.update(cx, |app, cx| {
@@ -153,7 +153,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                         },
                                     ))
                                     .separator()
-                                    .item(PopupMenuItem::new(i18n::t("设置")).on_click(
+                                    .item(PopupMenuItem::new(i18n::t("titlebar.settings")).on_click(
                                         move |_, window, cx| {
                                             if let Some(entity) = w3.upgrade() {
                                                 crate::ui::dialogs::settings_dialog::open(entity, window, cx);
@@ -173,14 +173,14 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
             .ghost()
             .small()
             .tooltip(if dark {
-                i18n::t("切换为浅色")
+                i18n::t("titlebar.switch_light")
             } else {
-                i18n::t("切换为深色")
+                i18n::t("titlebar.switch_dark")
             })
             .accessibility_label(if dark {
-                i18n::t("切换为浅色")
+                i18n::t("titlebar.switch_light")
             } else {
-                i18n::t("切换为深色")
+                i18n::t("titlebar.switch_dark")
             })
             .on_click(cx.listener(|this, _, window, cx| {
                 let next = if cx.theme().mode == ThemeMode::Dark {

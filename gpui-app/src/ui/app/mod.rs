@@ -216,7 +216,7 @@ impl MqttXApp {
                             let staged_consent = staged.clone();
                             dialog
                                     .w(px(440.))
-                                    .title(i18n::t("更新就绪"))
+                                    .title(i18n::t("update.ready_title"))
                                     .child(
                                         v_flex().gap_2().child(
                                             div().text_sm().child(i18n::tf(
@@ -232,7 +232,7 @@ impl MqttXApp {
                                             .w_full()
                                             .child(
                                                 Button::new("upd-skip")
-                                                    .label(i18n::t("暂不更新"))
+                                                    .label(i18n::t("update.not_now"))
                                                     .outline()
                                                     .on_click(move |_, window, cx| {
                                                         // 拒绝本次更新：删除暂存包，
@@ -243,7 +243,7 @@ impl MqttXApp {
                                             )
                                             .child(
                                                 Button::new("upd-later")
-                                                    .label(i18n::t("下次启动安装"))
+                                                    .label(i18n::t("update.install_later"))
                                                     .outline()
                                                     .on_click(move |_, window, cx| {
                                                         // 同意标记：启动时据此自动安装；
@@ -254,7 +254,7 @@ impl MqttXApp {
                                             )
                                             .child(
                                                 Button::new("upd-now")
-                                                    .label(i18n::t("立即安装"))
+                                                    .label(i18n::t("update.install_now"))
                                                     .primary()
                                                     .on_click(move |_, window, cx| {
                                                         window.close_dialog(cx);
@@ -292,7 +292,7 @@ impl MqttXApp {
             .detach();
         }
 
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("搜索连接…")));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sidebar.search")));
 
         // 自验后门：MQTTX_OPEN_RESMON=1 启动时直接打开资源监控
         // （与 MQTTX_VERSION_OVERRIDE 同类的测试入口，供自动化验证 UI）。

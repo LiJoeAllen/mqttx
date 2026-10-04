@@ -27,18 +27,18 @@ pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self
                     cx.theme().muted,
                     cx.theme().muted_foreground,
                 ))
-                .child(div().text_base().font_medium().child(i18n::t("开始使用 MQTTX")))
+                .child(div().text_base().font_medium().child(i18n::t("tab.welcome_title")))
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .text_center()
-                        .child(i18n::t("从左侧选择一个连接，或新建连接开始调试")),
+                        .child(i18n::t("tab.welcome_hint")),
                 )
                 .child(
                     Button::new("empty-new")
                         .icon(IconName::Plus)
-                        .label(i18n::t("新建连接"))
+                        .label(i18n::t("titlebar.new_connection"))
                         .outline()
                         .small()
                         .mt_1()

@@ -36,8 +36,8 @@ impl ConnectionView {
                     .icon(IconName::PanelBottomOpen)
                     .ghost()
                     .small()
-                    .tooltip(i18n::t("展开发布面板"))
-                    .accessibility_label(i18n::t("展开发布面板"))
+                    .tooltip(i18n::t("pub.expand"))
+                    .accessibility_label(i18n::t("pub.expand"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.publish_collapsed = false;
                         cx.notify();
@@ -47,7 +47,7 @@ impl ConnectionView {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(i18n::t("发布面板已收起")),
+                    .child(i18n::t("pub.collapsed_hint")),
             )
     }
 
@@ -56,18 +56,18 @@ impl ConnectionView {
     pub(crate) fn do_publish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // 未连接时消息发不出去，先拦截给出与订阅路径一致的提示
         if !self.engine.is_connected(&self.conn_id) {
-            window.push_notification(Notification::warning(i18n::t("未连接：消息未发送")), cx);
+            window.push_notification(Notification::warning(i18n::t("pub.offline_not_sent")), cx);
             return;
         }
         let mut params = self.collect_publish_params(cx);
         if params.topic.trim().is_empty() {
-            window.push_notification(Notification::warning(i18n::t("发布主题不能为空")), cx);
+            window.push_notification(Notification::warning(i18n::t("pub.topic_required")), cx);
             return;
         }
         // 过期秒数输入非法时 collect 会静默得到 None，这里显式拦截避免误发
         let expiry_raw = self.msg_expiry.read(cx).value().to_string();
         if !expiry_raw.trim().is_empty() && params.message_expiry_interval.is_none() {
-            window.push_notification(Notification::warning(i18n::t("消息过期须为非负整数（秒）")), cx);
+            window.push_notification(Notification::warning(i18n::t("pub.expiry_invalid")), cx);
             return;
         }
 
@@ -76,7 +76,7 @@ impl ConnectionView {
         params.payload = render_template(&params.payload, &vars);
         // {{topic}} 等变量渲染后可能变空串，渲染完成后再校验一次
         if params.topic.trim().is_empty() {
-            window.push_notification(Notification::warning(i18n::t("发布主题不能为空")), cx);
+            window.push_notification(Notification::warning(i18n::t("pub.topic_required")), cx);
             return;
         }
         // {{变量}} 同样作用于用户属性的 key/value
@@ -93,7 +93,7 @@ impl ConnectionView {
         if let PayloadFormat::Json = params.payload_format
             && let Err(e) = serde_json::from_str::<serde_json::Value>(&params.payload) {
                 window.push_notification(
-                    Notification::warning(i18n::tf("JSON 格式无效: {e}", &[("e", &e.to_string())])),
+                    Notification::warning(i18n::tf("pub.json_invalid", &[("e", &e)])),
                     cx,
                 );
                 return;
@@ -129,7 +129,7 @@ impl ConnectionView {
         self.engine.publish(self.conn_id.clone(), params);
         if hidden {
             window.push_notification(
-                Notification::success(i18n::t("已发送（被当前过滤条件隐藏，消息流中不显示）")),
+                Notification::success(i18n::t("pub.sent_hidden")),
                 cx,
             );
         }
@@ -281,12 +281,12 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .tooltip(if count > 0 {
                             i18n::tf(
                                 "变量注入（{n} 个占位符）",
-                                &[("n", &count.to_string())],
+                                &[("n", &count)],
                             )
                         } else {
-                            i18n::t("变量注入").to_string()
+                            i18n::t("pub.vars").to_string()
                         })
-                        .accessibility_label(i18n::t("变量注入").to_string())
+                        .accessibility_label(i18n::t("pub.vars").to_string())
                         .on_click(cx.listener(|this, _, window, cx| {
                             if this.show_vars {
                                 this.show_vars = false;
@@ -315,8 +315,8 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                             .ghost()
                             .small()
                             .when(show_props, |b| b.selected(true))
-                            .tooltip(i18n::t("MQTT 5 属性"))
-                            .accessibility_label(i18n::t("MQTT 5 属性"))
+                            .tooltip(i18n::t("pub.mqtt5_props"))
+                            .accessibility_label(i18n::t("pub.mqtt5_props"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_props = !this.show_props;
                                 cx.notify();
@@ -326,12 +326,12 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                 .child(
                     Button::new(SharedString::from(format!("publish-{}", self.conn_id)))
                         .icon(IconName::SendHorizontal)
-                        .label(i18n::t("发送"))
+                        .label(i18n::t("common.send"))
                         .primary()
                         .small()
                         // 未连接时禁用，Ctrl+Enter 路径由 do_publish 内的前置检查兜底
                         .disabled(!connected)
-                        .when(!connected, |b| b.tooltip(i18n::t("未连接，无法发送")))
+                        .when(!connected, |b| b.tooltip(i18n::t("pub.send_disabled")))
                         .on_click(cx.listener(|this, _, window, cx| this.do_publish(window, cx))),
                 )
                 // 发布栏抽屉把手：收起整个底部面板
@@ -340,8 +340,8 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .icon(IconName::PanelBottom)
                         .ghost()
                         .small()
-                        .tooltip(i18n::t("收起发布面板"))
-                        .accessibility_label(i18n::t("收起发布面板"))
+                        .tooltip(i18n::t("pub.collapse"))
+                        .accessibility_label(i18n::t("pub.collapse"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.publish_collapsed = true;
                             cx.notify();
@@ -420,8 +420,8 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
             .icon(IconName::Bookmark)
             .ghost()
             .small()
-            .tooltip(i18n::t("消息预设"))
-            .accessibility_label(i18n::t("消息预设"))
+            .tooltip(i18n::t("pub.preset_menu"))
+            .accessibility_label(i18n::t("pub.preset_menu"))
             .dropdown_menu(move |mut menu, window, cx| {
                 // 应用预设
                 for p in &presets {
@@ -445,7 +445,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                 // 保存当前
                 let weak_save = weak_view.clone();
                 let name_input = preset_name.clone();
-                menu = menu.item(PopupMenuItem::new(i18n::t("保存当前为预设…")).on_click(
+                menu = menu.item(PopupMenuItem::new(i18n::t("pub.save_preset")).on_click(
                     move |_ev, window, cx| {
                         if let Some(view) = weak_save.upgrade() {
                             view.update(cx, |view, cx| {
@@ -456,7 +456,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                 ));
                 // 打开预设管理对话框（新建 / 编辑 / 删除）
                 let manage_app = app_weak.clone();
-                menu = menu.item(PopupMenuItem::new(i18n::t("管理预设…")).on_click(
+                menu = menu.item(PopupMenuItem::new(i18n::t("pub.manage_presets")).on_click(
                     move |_ev, window, cx| {
                         if let Some(app) = manage_app.upgrade() {
                             crate::ui::dialogs::presets_dialog::open(app, window, cx);
@@ -477,7 +477,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                 let weak2 = weak_del.clone();
                                 let id = p.id.clone();
                                 let name = p.name.clone();
-                                let label = i18n::tf("删除「{name}」", &[("name", &p.name)]);
+                                let label = i18n::tf("pub.delete_item", &[("name", &p.name)]);
                                 submenu = submenu.item(
                                     PopupMenuItem::new(SharedString::from(label)).on_click(
                                         move |_ev, window, cx| {
@@ -489,7 +489,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                 let weak = weak.clone();
                                                 let pid = pid.clone();
                                                 alert
-                                                    .title(i18n::t("删除预设"))
+                                                    .title(i18n::t("pub.delete_title"))
                                                     .description(i18n::tf(
                                                         "确定删除预设「{name}」吗？此操作不可撤销。",
                                                         &[("name", &pname)],
@@ -497,8 +497,8 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                     .button_props(
                                                         DialogButtonProps::default()
                                                             .show_cancel(true)
-                                                            .cancel_text(i18n::t("取消"))
-                                                            .ok_text(i18n::t("删除"))
+                                                            .cancel_text(i18n::t("common.cancel"))
+                                                            .ok_text(i18n::t("common.delete"))
                                                             .ok_variant(ButtonVariant::Danger),
                                                     )
                                                     .on_ok(move |_, _, cx| {
@@ -548,9 +548,9 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
                 .w(px(420.))
-                .title(i18n::t("保存消息预设"))
+                .title(i18n::t("pub.save_title"))
                 .child(v_flex().gap_3().child(
-                    crate::ui::widgets::field(i18n::t("预设名称"), Input::new(&name_for_ok)),
+                    crate::ui::widgets::field(i18n::t("aliyun.preset_name"), Input::new(&name_for_ok)),
                 ))
                 .footer(
                     h_flex()
@@ -559,13 +559,13 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .w_full()
                         .child(
                             Button::new("preset-save-cancel")
-                                .label(i18n::t("取消"))
+                                .label(i18n::t("common.cancel"))
                                 .outline()
                                 .on_click(move |_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("preset-save-ok")
-                                .label(i18n::t("保存"))
+                                .label(i18n::t("common.save"))
                                 .primary()
                                 .on_click({
                                     let name_input = name_for_ok.clone();
@@ -578,7 +578,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                             .to_string();
                                         if name.is_empty() {
                                             window.push_notification(
-                                                Notification::warning(i18n::t("请填写预设名称")),
+                                                Notification::warning(i18n::t("pub.preset_name_required")),
                                                 cx,
                                             );
                                             return;
@@ -604,7 +604,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                 && params.message_expiry_interval.is_none()
                                             {
                                                 window.push_notification(
-                                                    Notification::warning(i18n::t("消息过期须为非负整数（秒）")),
+                                                    Notification::warning(i18n::t("pub.expiry_invalid")),
                                                     cx,
                                                 );
                                                 return;
@@ -621,9 +621,9 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                     cx.notify();
                                                 });
                                                 let msg = if existed {
-                                                    i18n::tf("已覆盖预设「{name}」", &[("name", &name)])
+                                                    i18n::tf("pub.preset_overwritten", &[("name", &name)])
                                                 } else {
-                                                    i18n::t("预设已保存").to_string()
+                                                    i18n::t("pub.preset_saved").to_string()
                                                 };
                                                 window.push_notification(
                                                     Notification::success(msg),
