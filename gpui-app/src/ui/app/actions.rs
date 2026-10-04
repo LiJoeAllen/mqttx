@@ -29,7 +29,7 @@ impl MqttXApp {
         };
         let mut copy = src;
         copy.id = uuid::Uuid::new_v4().to_string();
-        copy.name = format!("{} 副本", copy.name);
+        copy.name = i18n::tf("sidebar.dup_suffix", &[("name", &copy.name)]);
         copy.client_id =
             format!("mqttx_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         self.connections.push(copy);

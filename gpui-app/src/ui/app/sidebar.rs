@@ -411,7 +411,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                         alert
                             .title(i18n::t("sidebar.delete"))
                             .description(SharedString::from(i18n::tf(
-                                "确定删除「{name}」？将同时删除 {sub_count} 个订阅，并断开当前连接，此操作不可撤销。",
+                                "sidebar.delete_confirm",
                                 &[("name", &name), ("sub_count", &sub_count)],
                             )))
                             .button_props(

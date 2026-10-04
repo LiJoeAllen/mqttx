@@ -112,7 +112,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                     if let Some(e) = error {
                         window.push_notification(
                             Notification::error(i18n::tf(
-                                "订阅失败: {e}",
+                                "sub.failed",
                                 &[("e", &e)],
                             )),
                             cx,

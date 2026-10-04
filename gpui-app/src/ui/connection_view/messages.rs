@@ -644,7 +644,7 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                                 .px_1p5()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(i18n::tf(
-                                "仅显示最新 {n} 条",
+                                "msg.latest_only",
                                 &[("n", &MAX_RENDERED_MESSAGES)],
                             )),
                         )

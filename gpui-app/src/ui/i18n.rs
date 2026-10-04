@@ -250,20 +250,26 @@ mod tests {
         }
     }
 
-    /// 手写扫描（避免引入 regex 依赖）：找 `::t("` / `::tf("` 后的字面量。
-    /// 两个针互不误伤：`::t("` 要求引号紧跟 t，不会命中 `::tf("`。
+    /// 手写扫描（避免引入 regex 依赖）：找 `::t(` / `::tf(` 后的字面量。
+    /// `(` 与 `"` 之间允许空白/换行——覆盖多行调用的写法
+    /// `i18n::tf(\n    "key",\n    &[...]`；`::t(` 针不会命中 `::tf(`
+    /// （f 不是空白，也到不了引号分支）。
     fn extract_t_literals(src: &str) -> Vec<String> {
         let b = src.as_bytes();
         let mut out = Vec::new();
-        for needle in [b"::tf(\"".as_slice(), b"::t(\"".as_slice()] {
+        for needle in [b"::tf(".as_slice(), b"::t(".as_slice()] {
             let mut i = 0;
             while let Some(rel) = find(b, i, needle) {
-                let start = rel + needle.len();
-                let (lit, end) = read_string(b, start);
-                if let Some(lit) = lit {
+                let mut start = rel + needle.len();
+                while start < b.len() && b[start].is_ascii_whitespace() {
+                    start += 1;
+                }
+                if start < b.len() && b[start] == b'"'
+                    && let Some(lit) = read_string(b, start).0
+                {
                     out.push(lit);
                 }
-                i = end.max(i + 1);
+                i = rel + needle.len();
             }
         }
         out

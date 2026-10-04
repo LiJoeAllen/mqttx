@@ -53,23 +53,23 @@ impl PayloadFormat {
                 use base64::Engine as _;
                 base64::engine::general_purpose::STANDARD
                     .decode(text.trim())
-                    .map_err(|e| format!("Base64 解码失败: {e}"))
+                    .map_err(|e| crate::ui::i18n::tf("encode.base64_failed", &[("e", &e.to_string())]))
             }
             Self::Hex => {
                 let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
                 if !cleaned.len().is_multiple_of(2) {
-                    return Err("Hex 长度必须为偶数（每两个字符一个字节）".into());
+                    return Err(crate::ui::i18n::t("encode.hex_odd").into());
                 }
                 // 必须先做全字节校验：长度检查按字节计数，多字节字符（如中文）
                 // 可凑成偶数字节，直接按字节索引切片会落在字符边界内而 panic。
                 if !cleaned.bytes().all(|b| b.is_ascii_hexdigit()) {
-                    return Err("Hex 解码失败: 含非十六进制字符".into());
+                    return Err(crate::ui::i18n::t("encode.hex_invalid").into());
                 }
                 (0..cleaned.len())
                     .step_by(2)
                     .map(|i| {
                         u8::from_str_radix(&cleaned[i..i + 2], 16)
-                            .map_err(|e| format!("Hex 解码失败: {e}"))
+                            .map_err(|e| crate::ui::i18n::tf("encode.hex_failed", &[("e", &e.to_string())]))
                     })
                     .collect()
             }
@@ -154,7 +154,7 @@ pub fn compute_preview(payload: &str) -> String {
         }
     };
     if payload.contains('\u{FFFD}') {
-        out.push_str("（非文本，详情可切 Hex）");
+        out.push_str(crate::ui::i18n::t("msg.binary_hint"));
     }
     out
 }

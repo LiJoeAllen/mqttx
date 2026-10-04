@@ -220,7 +220,7 @@ impl MqttXApp {
                                     .child(
                                         v_flex().gap_2().child(
                                             div().text_sm().child(i18n::tf(
-                                                "新版本 v{v} 已下载完成（已通过 sha256 校验）。",
+                                                "update.ready_body",
                                                 &[("v", &staged.version)],
                                             )),
                                         ),
@@ -263,7 +263,7 @@ impl MqttXApp {
                                                         {
                                                             window.push_notification(
                                                                 Notification::error(i18n::tf(
-                                                                    "安装失败：{e}",
+                                                                    "update.install_failed",
                                                                     &[("e", &e),
                                                                 ])),
                                                                 cx,

@@ -119,7 +119,7 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .text_xs()
                             .font_semibold()
                             .child(i18n::tf(
-                                "变量（{n}）",
+                                "var.section",
                                 &[("n", &self.var_rows.len())],
                             )),
                     )
@@ -160,7 +160,7 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                     .text_xs()
                     .text_color(muted)
                     .child(i18n::tf(
-                                "预览：{tp} | {pl}",
+                                "var.preview",
                                 &[("tp", &topic_rendered), ("pl", &payload_preview)],
                             )),
             )

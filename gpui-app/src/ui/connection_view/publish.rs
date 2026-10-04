@@ -280,7 +280,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .when(show_vars, |b| b.selected(true))
                         .tooltip(if count > 0 {
                             i18n::tf(
-                                "变量注入（{n} 个占位符）",
+                                "pub.vars_count",
                                 &[("n", &count)],
                             )
                         } else {
@@ -491,7 +491,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                 alert
                                                     .title(i18n::t("pub.delete_title"))
                                                     .description(i18n::tf(
-                                                        "确定删除预设「{name}」吗？此操作不可撤销。",
+                                                        "pub.delete_confirm",
                                                         &[("name", &pname)],
                                                     ))
                                                     .button_props(

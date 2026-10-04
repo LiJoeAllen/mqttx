@@ -457,7 +457,7 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                     .child(
                         div()
                             .w(px(150.))
-                            .child(field("订阅标识符", Input::new(&sub_identifier).small())),
+                            .child(field(i18n::t("sub.identifier_field"), Input::new(&sub_identifier).small())),
                     )
                     .child(
                         h_flex()

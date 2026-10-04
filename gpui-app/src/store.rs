@@ -72,7 +72,7 @@ impl Storage {
 
     fn read_json_inner<T: for<'de> serde::Deserialize<'de>>(&self, p: &Path) -> Result<Option<T>> {
         let mut text = std::fs::read_to_string(p)
-            .with_context(|| format!("读取 {} 失败", p.display()))?;
+            .with_context(|| crate::ui::i18n::tf("io.err_read", &[("p", &p.display().to_string())]))?;
         // 容忍 Windows 编辑器/PowerShell 写入的 UTF-8 BOM（BOM 只有 1 个字符，逐字符剥离）
         if let Some(rest) = text.strip_prefix('\u{feff}') {
             text = rest.to_string();
@@ -81,7 +81,7 @@ impl Storage {
             return Ok(None);
         }
         let value =
-            serde_json::from_str(&text).with_context(|| format!("解析 {} 失败", p.display()))?;
+            serde_json::from_str(&text).with_context(|| crate::ui::i18n::tf("io.err_parse_json_path", &[("p", &p.display().to_string())]))?;
         Ok(Some(value))
     }
 
@@ -245,8 +245,8 @@ impl Default for Storage {
 /// 导出连接为 JSON 数组（与 connections.json 同构：缩进格式化、UTF-8 无 BOM）。
 pub fn export_connections_to(path: &Path, conns: &[ConnectionConfig]) -> Result<(), String> {
     let text = serde_json::to_string_pretty(conns)
-        .map_err(|e| format!("序列化连接失败: {e}"))?;
-    std::fs::write(path, text).map_err(|e| format!("写入 {} 失败: {e}", path.display()))
+        .map_err(|e| crate::ui::i18n::tf("io.err_serialize", &[("e", &e.to_string())]))?;
+    std::fs::write(path, text).map_err(|e| crate::ui::i18n::tf("io.err_write", &[("p", &path.display().to_string()), ("e", &e.to_string())]))
 }
 
 /// 从 JSON 文件导入连接。
@@ -254,21 +254,21 @@ pub fn export_connections_to(path: &Path, conns: &[ConnectionConfig]) -> Result<
 /// 容错规则：容忍 UTF-8 BOM；顶层允许是数组，也可能是 `{ "connections": [...] }` 对象；
 /// 任一项不是合法连接配置、或 `id` 为空白时，返回带序号的错误信息。
 pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| crate::ui::i18n::tf("io.err_read", &[("p", &path.display().to_string()), ("e", &e.to_string())]))?;
     let mut text =
-        String::from_utf8(bytes).map_err(|_| format!("{} 不是有效的 UTF-8 文件", path.display()))?;
+        String::from_utf8(bytes).map_err(|_| crate::ui::i18n::tf("io.err_utf8", &[("p", &path.display().to_string())]))?;
     if let Some(rest) = text.strip_prefix('\u{feff}') {
         text = rest.to_string();
     }
     let value: serde_json::Value =
-        serde_json::from_str(text.trim()).map_err(|e| format!("解析 JSON 失败: {e}"))?;
+        serde_json::from_str(text.trim()).map_err(|e| crate::ui::i18n::tf("io.err_parse_json", &[("e", &e.to_string())]))?;
     let items = match value {
         serde_json::Value::Array(items) => items,
         serde_json::Value::Object(mut map) => match map.remove("connections") {
             Some(serde_json::Value::Array(items)) => items,
             _ => {
                 return Err(
-                    "JSON 对象中缺少 \"connections\" 数组字段".to_string(),
+                    crate::ui::i18n::t("io.err_missing_field").to_string(),
                 );
             }
         },
@@ -280,11 +280,11 @@ pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, Str
             Ok(c) => {
                 // 空 id 会在去重/订阅关联时产生悬空引用，导入层直接拒绝
                 if c.id.trim().is_empty() {
-                    return Err(format!("第 {} 项的 id 不能为空", i + 1));
+                    return Err(crate::ui::i18n::tf("io.err_item_id", &[("n", &(i + 1))]));
                 }
                 conns.push(c);
             }
-            Err(e) => return Err(format!("第 {} 项不是合法的连接配置: {e}", i + 1)),
+            Err(e) => return Err(crate::ui::i18n::tf("io.err_item_invalid", &[("n", &(i + 1)), ("e", &e.to_string())])),
         }
     }
     Ok(conns)

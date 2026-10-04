@@ -264,7 +264,7 @@ impl ResourceMonitorDialog {
                                     .text_xs()
                                     .text_color(muted)
                                     .child(i18n::tf(
-                                        "预算占用 {p}%（{used} / {total}）",
+                                        "resmon.budget",
                                         &[
                                             ("p", &format!("{:.0}", pct)),
                                             ("used", &Self::fmt_bytes(c.bytes as u64)),
@@ -384,7 +384,7 @@ impl Render for ResourceMonitorDialog {
                 i18n::t("resmon.working_set"),
                 Self::fmt_bytes(ws),
                 Some(i18n::tf(
-                            "峰值 {v}",
+                            "resmon.peak",
                             &[("v", &Self::fmt_bytes(s.peak_working_set))],
                         )),
                 Some(ws as f32 / peak as f32 * 100.),
@@ -442,7 +442,7 @@ impl Render for ResourceMonitorDialog {
                             .text_xs()
                             .text_color(muted)
                             .child(i18n::tf(
-                                "{n} 个连接（已连接 {m}）· 打开标签 {t} · 内存消息 {msgs} 条（每连接上限 {cap} 条）· 日志 {logs} 条",
+                                "resmon.stats",
                                 &[
                                     ("n", &self.conns.len()),
                                     ("m", &connected_count),
@@ -466,12 +466,12 @@ impl Render for ResourceMonitorDialog {
                             .text_color(muted)
                             .child(if self.auto_refresh {
                                 i18n::tf(
-                                    "版本 v{v} · 每 1.5 秒自动刷新",
+                                    "resmon.version_live",
                                     &[("v", &crate::update::current_version())],
                                 )
                             } else {
                                 i18n::tf(
-                                    "版本 v{v} · 自动刷新已暂停",
+                                    "resmon.version_paused",
                                     &[("v", &crate::update::current_version())],
                                 )
                             }),

@@ -668,7 +668,7 @@ impl ConnectionForm {
                 form.testing = false;
                 match result {
                     Ok(()) => window.push_notification(
-                        Notification::success("连接测试成功"),
+                        Notification::success(i18n::t("form.test_ok")),
                         cx,
                     ),
                     Err(e) => window.push_notification(Notification::error(format!(

@@ -213,7 +213,7 @@ impl SettingsDialog {
                 row(
                     Button::new("apply-update")
                         .label(i18n::tf(
-                            "立即更新到 v{v}",
+                            "update.apply",
                             &[("v", &ver)],
                         ))
                         .primary()
@@ -223,7 +223,7 @@ impl SettingsDialog {
                         }))
                         .into_any_element(),
                     i18n::tf(
-                        "发现新版本 v{v}，下载后自动替换重启",
+                        "update.found",
                         &[("v", &ver)],
                     )
                     .into_any_element(),
@@ -240,7 +240,7 @@ impl SettingsDialog {
                             .text_xs()
                             .text_color(cx.theme().accent)
                             .child(i18n::tf(
-                                "新版本 v{v} 已下载并通过校验，等待安装",
+                                "update.ready",
                                 &[("v", &ver)],
                             )),
                     )
@@ -279,7 +279,7 @@ impl SettingsDialog {
                                         this.update = UpdateUi::Idle;
                                         window.push_notification(
                                             Notification::info(i18n::t(
-                                                "已暂存，下次启动时将自动安装",
+                                                "update.staged",
                                             )),
                                             cx,
                                         );
@@ -313,7 +313,7 @@ impl SettingsDialog {
                 };
                 let status = if *total > 0 {
                     i18n::tf(
-                        "下载中 {pct}%（{done} / {total}）",
+                        "update.downloading",
                         &[
                             ("pct", &format!("{:.0}", pct * 100.)),
                             ("done", &Self::fmt_mb(*downloaded)),
@@ -322,7 +322,7 @@ impl SettingsDialog {
                     )
                 } else {
                     i18n::tf(
-                        "下载中 {done}",
+                        "update.downloading_size",
                         &[("done", &Self::fmt_mb(*downloaded))],
                     )
                 };
@@ -426,7 +426,7 @@ impl Render for SettingsDialog {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(i18n::tf(
-                        "另有每连接 {n}MB 的字节预算兜底：大报文流会优先按字节从最旧开始驱逐",
+                        "settings.byte_budget",
                         &[
                             ("n", &format!("{}", MAX_CONNECTION_MESSAGE_BYTES / (1024 * 1024))),
                         ],
@@ -534,7 +534,7 @@ impl Render for SettingsDialog {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(i18n::tf(
-                                    "版本 {v}（更新源 {src}）",
+                                    "settings.version_line",
                                     &[
                                         ("v", &update::current_version()),
                                         ("src", &update::UPDATE_SOURCE),
@@ -596,7 +596,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
         let app_for_save = app_save.clone();
         dialog
             .w(px(560.))
-            .title("设置")
+            .title(i18n::t("titlebar.settings"))
             .child(body)
             .footer(
                 h_flex()

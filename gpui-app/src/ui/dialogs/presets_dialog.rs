@@ -300,7 +300,7 @@ impl PresetsDialog {
         {
             window.push_notification(
                 Notification::error(i18n::tf(
-                    "预设名称「{name}」已存在",
+                    "preset.name_exists",
                     &[("name", &name)],
                 )),
                 cx,
@@ -324,7 +324,7 @@ impl PresetsDialog {
         }
         self.persist(cx);
         window.push_notification(Notification::success(i18n::tf(
-                "预设「{name}」已保存",
+                "preset.saved",
                 &[("name", &name)],
             )), cx);
     }
@@ -345,7 +345,7 @@ impl PresetsDialog {
             alert
                 .title(i18n::t("pub.delete_title"))
                 .description(i18n::tf(
-                    "确定删除预设「{name}」吗？此操作不可撤销。",
+                    "pub.delete_confirm",
                     &[("name", &pname)],
                 ))
                 .button_props(

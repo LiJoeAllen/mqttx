@@ -130,27 +130,18 @@ _version: 2
 "common.new":
   en: "New"
   zh-CN: "新建"
-"common.ok":
-  en: "OK"
-  zh-CN: "确定"
 "common.pause":
   en: "Pause"
   zh-CN: "暂停"
 "common.resume":
   en: "Resume"
   zh-CN: "恢复"
-"common.retain":
-  en: "Retain"
-  zh-CN: "Retain"
 "common.retry":
   en: "Retry"
   zh-CN: "重试"
 "common.save":
   en: "Save"
   zh-CN: "保存"
-"common.saved":
-  en: "Saved"
-  zh-CN: "已保存"
 "common.send":
   en: "Send"
   zh-CN: "发送"
@@ -160,9 +151,6 @@ _version: 2
 "common.update":
   en: "Update"
   zh-CN: "更新"
-"connview.connecting":
-  en: "Connecting…"
-  zh-CN: "连接中…"
 "connview.logs":
   en: "Logs"
   zh-CN: "日志"
@@ -247,9 +235,6 @@ _version: 2
 "form.keep_alive":
   en: "Keep Alive (s)"
   zh-CN: "Keep Alive (秒)"
-"form.keep_alive_invalid":
-  en: "Keep Alive must be an integer 0-65535"
-  zh-CN: "Keep Alive (秒) 需要是 0~65535 的整数"
 "form.keep_alive_short":
   en: "Keep Alive"
   zh-CN: "Keep Alive"
@@ -400,9 +385,6 @@ _version: 2
 "kv.add":
   en: "Add property"
   zh-CN: "添加属性"
-"kv.remove":
-  en: "Remove this property"
-  zh-CN: "删除此属性"
 "msg.binary_hint":
   en: " (binary — switch to Hex in details)"
   zh-CN: "（非文本，详情可切 Hex）"
@@ -490,18 +472,12 @@ _version: 2
 "preset.empty":
   en: "No presets yet — click \"New\" above to create one"
   zh-CN: "暂无发布预设，点击上方「新建」创建"
-"preset.list":
-  en: "Presets"
-  zh-CN: "预设列表"
 "preset.manage_title":
   en: "Manage Publish Presets"
   zh-CN: "管理发布预设"
 "preset.name_exists":
   en: "Preset name \"{name}\" already exists"
   zh-CN: "预设名称「{name}」已存在"
-"preset.new":
-  en: "New Preset"
-  zh-CN: "新建预设"
 "preset.payload_field":
   en: "Payload (stored raw; variables rendered on send)"
   zh-CN: "Payload（原文保存，发送时渲染变量）"
@@ -661,9 +637,6 @@ _version: 2
 "resmon.threads_hint":
   en: "tokio engine + GPUI renderer"
   zh-CN: "tokio 引擎 + GPUI 渲染"
-"resmon.title_hint":
-  en: "Self-process resource sampling"
-  zh-CN: "自身进程资源采样"
 "resmon.uptime":
   en: "Up {t}"
   zh-CN: "运行 {t}"
@@ -727,9 +700,6 @@ _version: 2
 "sidebar.collapse":
   en: "Collapse sidebar (Ctrl+B)"
   zh-CN: "收起侧栏（Ctrl+B）"
-"sidebar.collapse_short":
-  en: "Collapse sidebar"
-  zh-CN: "收起侧栏"
 "sidebar.connections":
   en: "Connections"
   zh-CN: "连接"
@@ -1033,3 +1003,36 @@ _version: 2
 "will.topic_wildcard":
   en: "Will topic cannot contain wildcards + or #"
   zh-CN: "遗嘱主题不能包含通配符 + 或 #"
+"io.err_item_id":
+  en: "Item {n}: id must not be empty"
+  zh-CN: "第 {n} 项的 id 不能为空"
+"io.err_item_invalid":
+  en: "Item {n} is not a valid connection: {e}"
+  zh-CN: "第 {n} 项不是合法的连接配置: {e}"
+"io.err_missing_field":
+  en: "JSON object lacks the \"connections\" array"
+  zh-CN: "JSON 对象中缺少 \"connections\" 数组字段"
+"io.err_parse_json":
+  en: "Failed to parse JSON: {e}"
+  zh-CN: "解析 JSON 失败: {e}"
+"io.err_read":
+  en: "Failed to read {p}: {e}"
+  zh-CN: "读取 {p} 失败: {e}"
+"io.err_serialize":
+  en: "Failed to serialize connections: {e}"
+  zh-CN: "序列化连接失败: {e}"
+"io.err_utf8":
+  en: "{p} is not valid UTF-8"
+  zh-CN: "{p} 不是有效的 UTF-8 文件"
+"io.err_write":
+  en: "Failed to write {p}: {e}"
+  zh-CN: "写入 {p} 失败: {e}"
+"sidebar.dup_suffix":
+  en: "{name} (copy)"
+  zh-CN: "{name} 副本"
+"sub.identifier_field":
+  en: "Subscription Identifier"
+  zh-CN: "订阅标识符"
+"io.err_parse_json_path":
+  en: "Failed to parse {p}"
+  zh-CN: "解析 {p} 失败"

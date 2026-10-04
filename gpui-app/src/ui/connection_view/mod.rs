@@ -75,11 +75,12 @@ enum DirFilter {
 }
 
 impl DirFilter {
+    /// 返回 i18n 语义 key；Hex/Base64 为语言中性字面量。
     fn label(self) -> &'static str {
         match self {
-            Self::All => "全部",
-            Self::Received => "接收",
-            Self::Published => "发布",
+            Self::All => "common.all",
+            Self::Received => "dir.received",
+            Self::Published => "dir.published",
         }
     }
 
@@ -111,10 +112,11 @@ enum DetailFormat {
 }
 
 impl DetailFormat {
+    /// 返回 i18n 语义 key；Hex/Base64 为语言中性字面量。
     fn label(self) -> &'static str {
         match self {
-            Self::Auto => "自动",
-            Self::Text => "文本",
+            Self::Auto => "common.auto",
+            Self::Text => "common.text",
             Self::Hex => "Hex",
             Self::Base64 => "Base64",
         }

@@ -64,7 +64,7 @@ impl MqttXApp {
         self.spawn_file_dialog(
             move || {
                 rfd::FileDialog::new()
-                    .set_title("导出连接")
+                    .set_title(i18n::t("titlebar.export"))
                     .set_directory(dir)
                     .set_file_name("connections-export.json")
                     .add_filter("JSON", &["json"])
@@ -78,7 +78,7 @@ impl MqttXApp {
                 match crate::store::export_connections_to(&path, &app.connections) {
                     Ok(()) => window.push_notification(
                         Notification::success(i18n::tf(
-                            "导出 {n} 条连接到 {path}",
+                            "io.exported",
                             &[
                                 ("n", &count),
                                 ("path", &path.display()),
@@ -100,7 +100,7 @@ impl MqttXApp {
         self.spawn_file_dialog(
             move || {
                 let Some(path) = rfd::FileDialog::new()
-                    .set_title("导入连接")
+                    .set_title(i18n::t("titlebar.import"))
                     .set_directory(dir)
                     .add_filter("JSON", &["json"])
                     .pick_file()
@@ -134,7 +134,7 @@ impl MqttXApp {
                     }
                     window.push_notification(
                         Notification::success(i18n::tf(
-                            "导入 {n} 条，跳过 {n2} 条",
+                            "io.imported",
                             &[
                                 ("n", &added),
                                 ("n2", &skipped),
