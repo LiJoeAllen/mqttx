@@ -61,7 +61,6 @@ pub const LINEAR_PRESET_LABEL: &str = "Linear";
 /// Linear Light/Dark（重名跳过，幂等）→ 把当前明暗对指向 Linear → 再 `change`
 /// 应用其颜色/字号/圆角。
 pub fn apply_theme(pref: ThemeModePref, cx: &mut App) {
-    eprintln!("[THM] apply_theme enter");
     let mode = match pref {
         ThemeModePref::Light => ThemeMode::Light,
         ThemeModePref::Dark => ThemeMode::Dark,
@@ -89,21 +88,10 @@ pub fn apply_theme(pref: ThemeModePref, cx: &mut App) {
 /// 注册全部官方捆绑预设（幂等，重名由 ThemeRegistry 覆盖/跳过）。
 /// 启动时调用一次。
 pub fn register_bundled_themes(cx: &mut App) {
-    eprintln!("[THM] register START");
-    // [bisect] 只注册 catppuccin 4 个
-    if let Err(e) = ThemeRegistry::global_mut(cx)
-        .load_themes_from_str(include_str!("../../../themes/catppuccin.json"))
-    {
-        eprintln!("加载捆绑主题预设失败: {e}");
-    }
-    eprintln!("[THM] register catppuccin done");
-    #[allow(clippy::needless_range_loop)]
-    for _i in 0..0 {
     for json in BUNDLED_THEME_FILES {
         if let Err(e) = ThemeRegistry::global_mut(cx).load_themes_from_str(json) {
             eprintln!("加载捆绑主题预设失败: {e}");
         }
-    }
     }
 }
 
@@ -112,7 +100,6 @@ pub fn register_bundled_themes(cx: &mut App) {
 /// 经 Theme::update 走官方 reconcile + sync + 全窗刷新。
 /// 名字不存在（理论不可达，测试拦截）时返回 false 回退 Linear。
 pub fn apply_theme_preset(name: &str, cx: &mut App) -> bool {
-    eprintln!("[THM] apply_theme_preset enter ({name})");
     let config = ThemeRegistry::global(cx).themes().get(name).cloned();
     let Some(config) = config else {
         return false;
@@ -123,7 +110,6 @@ pub fn apply_theme_preset(name: &str, cx: &mut App) -> bool {
 
 /// 预设展示名单：Linear 在首，其余按名字排序（与 ThemeRegistry 一致）。
 pub fn theme_preset_names(cx: &App) -> Vec<String> {
-    eprintln!("[THM] theme_preset_names enter");
     let mut names: Vec<String> = ThemeRegistry::global(cx)
         .themes()
         .keys()
