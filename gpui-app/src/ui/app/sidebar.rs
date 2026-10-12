@@ -52,14 +52,8 @@ impl MqttXApp {
     }
 pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {        let query = self.search.read(cx).value().to_lowercase();
         let search = self.search.clone();
-        // 分组被改名/删除后过滤器可能悬空（列表恒空），渲染前复位到「全部」
-        let dangling = matches!(&self.group_filter, GroupFilter::Named(name)
-            if !self.connections.iter().any(|c| {
-                c.group.as_deref().map(str::trim) == Some(name.as_str())
-            }));
-        if dangling {
-            self.group_filter = GroupFilter::All;
-        }
+        // 分组过滤器复位发生在删除/保存连接的 action 路径（normalize_group_filter），
+        // render 只读——规范禁止渲染期突变状态
         let filter = self.group_filter.clone();
 
         let total = self.connections.len();

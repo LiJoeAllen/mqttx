@@ -10,6 +10,7 @@ use crate::model::ThemeModePref;
 use crate::ui::IconName;
 
 use super::*;
+use gpui_kit::Action as _;
 use crate::ui::i18n;
 
 impl MqttXApp {
@@ -107,11 +108,7 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                 .dropdown_menu(move |menu, _, _| {
                                     let w1 = app_weak.clone();
                                     let w2 = app_weak.clone();
-                                    let w3 = app_weak.clone();
-                                    let w4 = app_weak.clone();
-                                    let w5 = app_weak.clone();
-                                    let w6 = app_weak.clone();
-                                    menu.item(
+                                                                                                                                                                                    menu.item(
                                         PopupMenuItem::new(i18n::t("titlebar.aliyun"))
                                             .on_click(move |_, window, cx| {
                                                 if let Some(entity) = w1.upgrade() {
@@ -128,36 +125,27 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                     ))
                                     .item(PopupMenuItem::new(i18n::t("titlebar.resmon")).on_click(
                                         move |_, window, cx| {
-                                            if let Some(entity) = w6.upgrade() {
-                                                crate::ui::dialogs::resource_dialog::open(entity, window, cx);
-                                            }
+                                            window.dispatch_action(
+                                                OpenResourceMonitor.boxed_clone(),
+                                                cx,
+                                            );
                                         },
                                     ))
                                     .separator()
                                     .item(PopupMenuItem::new(i18n::t("titlebar.export")).on_click(
                                         move |_, window, cx| {
-                                            if let Some(entity) = w4.upgrade() {
-                                                entity.update(cx, |app, cx| {
-                                                    app.export_connections(window, cx)
-                                                });
-                                            }
+                                            window.dispatch_action(ExportConnections.boxed_clone(), cx);
                                         },
                                     ))
                                     .item(PopupMenuItem::new(i18n::t("titlebar.import")).on_click(
                                         move |_, window, cx| {
-                                            if let Some(entity) = w5.upgrade() {
-                                                entity.update(cx, |app, cx| {
-                                                    app.import_connections(window, cx)
-                                                });
-                                            }
+                                            window.dispatch_action(ImportConnections.boxed_clone(), cx);
                                         },
                                     ))
                                     .separator()
                                     .item(PopupMenuItem::new(i18n::t("titlebar.settings")).on_click(
                                         move |_, window, cx| {
-                                            if let Some(entity) = w3.upgrade() {
-                                                crate::ui::dialogs::settings_dialog::open(entity, window, cx);
-                                            }
+                                            window.dispatch_action(OpenSettings.boxed_clone(), cx);
                                         },
                                     ))
                                 }),

@@ -1,9 +1,11 @@
 //! i18n 门面：语义键（`ns.key`）+ rust-i18n（gpui-kit 官方方案）。
 //!
 //! # 架构
-//! - 语言包在 `locales/ui.yml`（en / zh-CN 双语并排，`_version: 2`），
+//! - 语言包在 `locales/`，**按语言一分文件**（`en.yml` / `zh-CN.yml`，
+//!   rust-i18n 以文件名 stem 识别 locale，扁平 `"ns.key": "文案"` 格式），
 //!   由 crate 根的 `rust_i18n::i18n!("locales", fallback = "en")` 编译期内嵌；
-//!   gpui-kit 组件内置文案经 main.rs 的 `rust_i18n::extend!` 随语言切换。
+//!   gpui-kit 组件内置文案经 lib.rs 的 `init_i18n()`（`rust_i18n::extend!`）
+//!   随语言切换。
 //! - 调用点写 `t("common.save")` / `tf("msg.count", &[("n", &count)])`，
 //!   key 是**稳定标识符**，与任何自然语言解耦——改文案措辞不动代码，
 //!   也不存在「一词多义撞 key」。
@@ -12,7 +14,8 @@
 //!   值同样可查。
 //!
 //! # 规则（单元测试强制，违反即测试失败）
-//! 1. 新增文案：调用点 `t("ns.key")`，`locales/ui.yml` 加 key 块（en/zh-CN 必填）。
+//! 1. 新增文案：调用点 `t("ns.key")`，`locales/en.yml` 与 `locales/zh-CN.yml`
+//!    各加一行（两文件键集合必须一致）。
 //! 2. 源码每个 `t("…")` / `tf("…")` 字面量必须在语言包中存在。
 //! 3. 模型 `label()` 返回的 key 必须有**非自映射**的 en 词条。
 //! 4. 同一 key 的 zh-CN 与 en 占位符 `{name}` 集合必须一致
@@ -127,43 +130,33 @@ fn placeholders(s: &str) -> Vec<String> {
     out
 }
 
-/// 解析生成器产出的规整 YAML（key 行 + 缩进的 en/zh-CN 值行）。
+/// 解析 `locales/{locale}.yml`（规整格式：每行 `"key": "value"`，# 注释）。
 /// 格式意外时 panic——语言包是构建产物，格式受控。
 #[cfg(test)]
-fn load_ui_yml() -> std::collections::BTreeMap<String, (String, String)> {
-    let text = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales/ui.yml"),
-    )
-    .expect("locales/ui.yml 应存在");
-    let unquote = |v: &str| -> String {
-        let v = v.trim();
-        let inner = v
-            .strip_prefix('"')
-            .and_then(|s| s.strip_suffix('"'))
-            .unwrap_or(v);
-        inner.replace("\\\"", "\"").replace("\\\\", "\\")
-    };
+fn load_locale_yml(locale: &str) -> std::collections::BTreeMap<String, String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("locales")
+        .join(format!("{locale}.yml"));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} 应存在: {e}", path.display()));
     let mut map = std::collections::BTreeMap::new();
-    let mut key: Option<String> = None;
-    let mut en: Option<String> = None;
-    let mut zh: Option<String> = None;
     for line in text.lines() {
-        if line.starts_with('#') || line.starts_with("_version") || line.trim().is_empty() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if !line.starts_with(' ') {
-            if let (Some(k), Some(e), Some(z)) = (key.take(), en.take(), zh.take()) {
-                map.insert(k, (e, z));
-            }
-            key = Some(unquote(line.trim_end_matches(':')));
-        } else if let Some(v) = line.trim().strip_prefix("en:") {
-            en = Some(unquote(v));
-        } else if let Some(v) = line.trim().strip_prefix("zh-CN:") {
-            zh = Some(unquote(v));
-        }
-    }
-    if let (Some(k), Some(e), Some(z)) = (key, en, zh) {
-        map.insert(k, (e, z));
+        let rest = line.strip_prefix('"').unwrap_or_else(|| panic!("行缺开引号: {line:?}"));
+        let (key, value) = rest
+            .split_once("\": ")
+            .unwrap_or_else(|| panic!("行缺 `\": ` 分隔: {line:?}"));
+        let unquote_value = |v: &str| {
+            let inner = v
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or_else(|| panic!("值缺引号: {v:?}"));
+            inner.replace("\\\"", "\"").replace("\\\\", "\\")
+        };
+        map.insert(key.to_string(), unquote_value(value));
     }
     map
 }
@@ -172,17 +165,26 @@ fn load_ui_yml() -> std::collections::BTreeMap<String, (String, String)> {
 mod tests {
     use super::*;
 
-    /// 每个 key 都必须有非空 en 与 zh-CN；占位符两侧集合一致。
+    /// 两个语言文件键集合必须一致；每个 key 的 en/zh-CN 非空且
+    /// 占位符两侧集合一致。
     #[test]
     fn yml_complete_and_placeholder_parity() {
-        let map = load_ui_yml();
-        assert!(!map.is_empty(), "语言包不能为空");
-        for (k, (en, zh)) in &map {
-            assert!(!en.trim().is_empty(), "en 为空: {k:?}");
-            assert!(!zh.trim().is_empty(), "zh-CN 为空: {k:?}");
+        let en = load_locale_yml("en");
+        let zh = load_locale_yml("zh-CN");
+        assert!(!en.is_empty(), "en 语言包不能为空");
+        let en_only: Vec<_> = en.keys().filter(|k| !zh.contains_key(*k)).collect();
+        let zh_only: Vec<_> = zh.keys().filter(|k| !en.contains_key(*k)).collect();
+        assert!(
+            en_only.is_empty() && zh_only.is_empty(),
+            "键集合不一致: en 独有 {en_only:?}, zh 独有 {zh_only:?}"
+        );
+        for (k, en_v) in &en {
+            let zh_v = &zh[k];
+            assert!(!en_v.trim().is_empty(), "en 为空: {k:?}");
+            assert!(!zh_v.trim().is_empty(), "zh-CN 为空: {k:?}");
             assert_eq!(
-                placeholders(zh),
-                placeholders(en),
+                placeholders(zh_v),
+                placeholders(en_v),
                 "占位符两侧不一致: {k:?}"
             );
         }
@@ -190,9 +192,10 @@ mod tests {
 
     /// 扫描 src/ 全部源码里的 `t("…")` / `tf("…")` 字面量，
     /// 逐一断言语言包有词条——漏翻是测试失败，不再是静默回退。
+    /// `(` 与 `"` 之间允许空白/换行（覆盖多行调用写法）。
     #[test]
     fn call_sites_covered_by_yml() {
-        let map = load_ui_yml();
+        let map = load_locale_yml("en");
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
         collect_rs(&root, &mut files);
@@ -251,9 +254,8 @@ mod tests {
     }
 
     /// 手写扫描（避免引入 regex 依赖）：找 `::t(` / `::tf(` 后的字面量。
-    /// `(` 与 `"` 之间允许空白/换行——覆盖多行调用的写法
-    /// `i18n::tf(\n    "key",\n    &[...]`；`::t(` 针不会命中 `::tf(`
-    /// （f 不是空白，也到不了引号分支）。
+    /// `(` 与 `"` 之间允许空白/换行——覆盖多行调用的写法；`::t(` 针不会
+    /// 命中 `::tf(`（f 不是空白，也到不了引号分支）。
     fn extract_t_literals(src: &str) -> Vec<String> {
         let b = src.as_bytes();
         let mut out = Vec::new();

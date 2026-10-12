@@ -165,8 +165,34 @@ fn tag_from_releases_url(uri: &str) -> Option<&str> {
     (tag.starts_with('v') && !tag.contains('/')).then_some(tag)
 }
 
+/// 自动检查的节流窗口：24h 内启动不再重复请求 GitHub（官方 auto-update
+/// 指南建议缓存上次检查时间）。手动「检查更新」不受此限制。
+const AUTO_CHECK_INTERVAL_SECS: i64 = 24 * 60 * 60;
+
+fn stamp_path() -> std::path::PathBuf {
+    crate::store::Storage::new().dir().join(".last-update-check")
+}
+
+fn last_check_recent() -> bool {
+    let Ok(meta) = std::fs::metadata(stamp_path()) else { return false };
+    let Ok(modified) = meta.modified() else { return false };
+    modified
+        .elapsed()
+        .map(|d| d.as_secs() < AUTO_CHECK_INTERVAL_SECS as u64)
+        .unwrap_or(false)
+}
+
+fn touch_check_stamp() {
+    let _ = std::fs::write(stamp_path(), chrono::Local::now().to_rfc3339());
+}
+
 /// 返回 Ok(None) 表示已是最新；错误仅记录、不打扰用户。
+/// 走 24h 节流：距上次自动检查不足一天时直接跳过（返回 None）。
 pub fn check_and_download() -> Result<Option<StagedUpdate>, String> {
+    if last_check_recent() {
+        return Ok(None);
+    }
+    touch_check_stamp();
     let Some(info) = check_latest()? else {
         return Ok(None);
     };

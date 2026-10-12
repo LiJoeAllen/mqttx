@@ -21,6 +21,7 @@ impl MqttXApp {
             self.connections.push(cfg);
         }
         self.storage.save_connections(&self.connections);
+        self.normalize_group_filter();
     }
 
     pub fn duplicate_connection(&mut self, id: &str) {
@@ -34,6 +35,18 @@ impl MqttXApp {
             format!("mqttx_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         self.connections.push(copy);
         self.storage.save_connections(&self.connections);
+    }
+
+    /// 分组被改名/删除后过滤器可能悬空（列表恒空），在数据变更的 action
+    /// 路径复位到「全部」；render 只读，不做突变。
+    fn normalize_group_filter(&mut self) {
+        if let GroupFilter::Named(name) = &self.group_filter
+            && !self.connections.iter().any(|c| {
+                c.group.as_deref().map(str::trim) == Some(name.as_str())
+            })
+        {
+            self.group_filter = GroupFilter::All;
+        }
     }
 
     pub fn delete_connection(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -50,6 +63,7 @@ impl MqttXApp {
         }
         self.storage.save_connections(&self.connections);
         self.storage.save_subscriptions(&self.subscriptions);
+        self.normalize_group_filter();
         self.persist_ui_state();
         cx.notify();
     }

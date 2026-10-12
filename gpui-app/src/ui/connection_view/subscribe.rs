@@ -8,7 +8,7 @@ use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ h_flex, notification::Notification, v_flex,  };
 use crate::ui::IconName;
-use gpui_kit::{ div, hsla, px, Context, IntoElement, SharedString, Window,  };
+use gpui_kit::{ div, px, Context, IntoElement, SharedString, Window,  };
 use gpui_kit::component::IndexPath;
 
 use crate::model::{ SubscribeOptions, Subscription,  };
@@ -577,6 +577,9 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                                 .child("+"),
                         )
                 };
+                // 色点描边用主题底色（双主题下都是「与背景的缝隙」语义）；
+                // 闭包签名拿不到带主题的 cx，提前在 render 取值捕获
+                let swatch_border = cx.theme().background;
                 trigger.dropdown_menu(move |mut menu, _, _| {
                     for (hue, name) in PRESET_HUES {
                         let weak = weak_menu.clone();
@@ -595,7 +598,7 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                                             .rounded_full()
                                             .bg(swatch)
                                             .border_1()
-                                            .border_color(hsla(0., 0., 1., 0.6)),
+                                            .border_color(swatch_border),
                                     )
                                     .child(div().text_sm().child(label.clone()))
                             })

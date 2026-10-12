@@ -6,7 +6,7 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::{ h_flex, notification::Notification, v_flex,  };
 use crate::ui::IconName;
-use gpui_kit::{ div, hsla, px, ClipboardItem, Context, IntoElement, SharedString,  };
+use gpui_kit::{ div, px, ClipboardItem, Context, IntoElement, SharedString,  };
 
 use crate::model::{ render_will_templates, ConnectionStatus, Direction, LogLevel, MqttRecord, Subscription, MAX_PAYLOAD_RETAIN,  };
 use crate::ui::widgets::format_time;
@@ -408,7 +408,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
             .border_color(border)
             .hover(move |this| this.bg(hover_bg))
             .cursor_pointer()
-            // 左侧色条：有订阅色时显示，否则透明以保持行内对齐；
+            // 左侧色条：有订阅色时条件上色（无色不设 bg，天然透明保持行内对齐）；
             // 上下留 2px 间隙，避免相邻行的色条连成一整条竖线
             .child(
                 div()
@@ -416,7 +416,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                     .self_stretch()
                     .my_0p5()
                     .rounded_full()
-                    .bg(sub_color.map(hue_color).unwrap_or(hsla(0., 0., 0., 0.))),
+                    .when_some(sub_color, |bar, hue| bar.bg(hue_color(hue))),
             )
             .child(body)
             .on_click(cx.listener(move |this, _, _, cx| {
