@@ -81,6 +81,10 @@ pub struct AppSettings {
     /// 界面语言（跟随系统 / 中文 / English）
     #[serde(default)]
     pub language: LanguagePref,
+    /// 主题预设名："linear"（默认，受外观模式控制）或官方捆绑预设名
+    /// （自带明暗，外观模式开关对其无效）
+    #[serde(default = "default_theme_preset")]
+    pub theme_preset: String,
     /// 每条连接在内存中保留的最大消息条数
     #[serde(default = "default_max_messages")]
     pub max_messages: usize,
@@ -96,11 +100,16 @@ fn default_max_messages() -> usize {
     2000
 }
 
+fn default_theme_preset() -> String {
+    "linear".to_string()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: ThemeModePref::default(),
             language: LanguagePref::default(),
+            theme_preset: default_theme_preset(),
             max_messages: default_max_messages(),
             show_millis: true,
             auto_check_update: true,

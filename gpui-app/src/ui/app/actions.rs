@@ -202,7 +202,13 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
     }
 
     pub fn save_settings(&mut self, settings: AppSettings, window: &mut Window, cx: &mut App) {
-        apply_theme(settings.theme, cx);
+        // 主题按预设分派："linear" 走外观模式（跟随系统/浅/深），官方捆绑
+        // 预设整包应用（自带明暗，apply_config 连 mode 一起生效）
+        if settings.theme_preset == crate::ui::app::theme::DEFAULT_PRESET {
+            apply_theme(settings.theme, cx);
+        } else if !crate::ui::app::theme::apply_theme_preset(&settings.theme_preset, cx) {
+            apply_theme(settings.theme, cx);
+        }
         // 语言即时生效（含跟随系统）
         crate::ui::i18n::set_lang(match settings.language {
             crate::model::LanguagePref::Zh => crate::ui::i18n::Lang::Zh,
@@ -211,8 +217,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         });
         self.settings = settings;
         self.storage.save_settings(&self.settings);
-        // 切主题只更新全局令牌，不触发整窗重绘，未损坏区域会长期滞留旧主题
-        // 像素（实测发布栏黑底不收敛），这里强制重画
+        // 预设切换/主题变更后强制整窗重画，避免未损坏区域滞留旧主题像素
         window.refresh();
     }
 

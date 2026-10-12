@@ -39,7 +39,7 @@ mod events;
 mod io;
 mod main_area;
 mod sidebar;
-mod theme;
+pub(crate) mod theme;
 mod titlebar;
 
 use theme::apply_theme;
@@ -130,7 +130,14 @@ impl MqttXApp {
         let aliyun_presets = storage.load_aliyun();
         let settings = storage.load_settings();
 
-        apply_theme(settings.theme, cx);
+        // 官方捆绑预设已在 bootstrap（main）注册，这里按保存的选择分派
+        if settings.theme_preset != theme::DEFAULT_PRESET {
+            if !theme::apply_theme_preset(&settings.theme_preset, cx) {
+                apply_theme(settings.theme, cx);
+            }
+        } else {
+            apply_theme(settings.theme, cx);
+        }
         // 界面语言：设置显式指定优先，跟随系统时按系统 locale 解析
         i18n::set_lang(match settings.language {
             crate::model::LanguagePref::Zh => Lang::Zh,
@@ -310,6 +317,10 @@ impl MqttXApp {
             let Some(app) = appearance_weak.upgrade() else {
                 return;
             };
+            // 官方捆绑预设自带明暗，系统深浅切换不干预（避免冲掉用户选择）
+            if app.read(cx).settings.theme_preset != theme::DEFAULT_PRESET {
+                return;
+            }
             if app.read(cx).settings.theme != ThemeModePref::System {
                 return;
             }

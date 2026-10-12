@@ -44,9 +44,11 @@ impl OptionDelegate {
 impl SearchableListDelegate for OptionDelegate {
     type Item = OptionItem;
     fn items_count(&self, _section: usize) -> usize {
+        eprintln!("[SEL] items_count={}", self.items.len());
         self.items.len()
     }
     fn item(&self, ix: IndexPath) -> Option<&Self::Item> {
+        eprintln!("[SEL] item row={}", ix.row);
         self.items.get(ix.row)
     }
     fn position<V>(&self, value: &V) -> Option<IndexPath>

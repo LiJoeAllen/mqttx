@@ -11,6 +11,14 @@ pub fn init_i18n() {
     rust_i18n::extend!(gpui_component);
 }
 
+/// 注册官方捆绑主题预设（38 个）。必须在 `gpui_kit::init` 之后、
+/// 打开窗口之前调用（bootstrap 阶段）：注册触发 ThemeRegistry 的
+/// 全局观察者回调（Theme::change + 全窗刷新），在窗口已挂满 UI 时
+/// 连续注册会引发大规模重绘级联。
+pub fn init_themes(cx: &mut gpui_kit::App) {
+    ui::app::theme::register_bundled_themes(cx);
+}
+
 pub mod aliyun;
 pub mod model;
 pub mod mqtt;

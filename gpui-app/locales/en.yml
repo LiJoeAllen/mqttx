@@ -1,5 +1,3 @@
-# MQTTX en 文案（rust-i18n：文件名即 locale，扁平 key: value）。
-# key = 语义标识符 ns.name；en/zh-CN 两文件键集合必须一致——单测强制。
 "aliyun.access_key_id": "AccessKey ID"
 "aliyun.access_key_secret": "AccessKey Secret"
 "aliyun.auth_mode": "Auth mode"
@@ -240,6 +238,7 @@
 "settings.show_millis": "Show milliseconds in timestamps"
 "settings.tagline": "A cross-platform MQTT debug client built with GPUI, aiming at MQTTX"
 "settings.theme": "Theme"
+"settings.theme_preset": "Theme preset"
 "settings.version_line": "Version {v} (update source: {src})"
 "sidebar.collapse": "Collapse sidebar (Ctrl+B)"
 "sidebar.connections": "Connections"
@@ -345,3 +344,5 @@
 "will.enabled_hint": "Enabled"
 "will.topic_required": "Will topic cannot be empty"
 "will.topic_wildcard": "Will topic cannot contain wildcards + or #"
+# MQTTX en 文案（rust-i18n：文件名即 locale，扁平 key: value）。
+# key = 语义标识符 ns.name；en/zh-CN 两文件键集合必须一致——单测强制。

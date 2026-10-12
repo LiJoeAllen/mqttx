@@ -19,6 +19,11 @@ fn init_sentry() -> sentry::ClientInitGuard {
 }
 
 fn main() {
+    // [debug] 栈溢出排查：捕获库内 tracing（registry observer 的 Reload 日志）
+    tracing_subscriber::fmt()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::INFO)
+        .with_writer(std::io::stderr)
+        .init();
     // 资源监控的运行时长基准
     mqttx_desktop::sysmon::init();
     // OTA 收尾：清理遗留文件；若暂存区有待安装的新版本且用户已同意
@@ -62,6 +67,8 @@ fn main() {
             // gpui-kit 组件内置文案（按钮/日历/空态等）并入当前语言包
             mqttx_desktop::init_i18n();
             gpui_kit::init(cx);
+            // 官方捆绑主题预设注册（bootstrap 阶段，窗口创建前）
+            mqttx_desktop::init_themes(cx);
 
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(

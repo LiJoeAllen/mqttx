@@ -1,5 +1,3 @@
-# MQTTX zh-CN 文案（rust-i18n：文件名即 locale，扁平 key: value）。
-# key = 语义标识符 ns.name；en/zh-CN 两文件键集合必须一致——单测强制。
 "aliyun.access_key_id": "AccessKey ID"
 "aliyun.access_key_secret": "AccessKey Secret"
 "aliyun.auth_mode": "鉴权方式"
@@ -240,6 +238,7 @@
 "settings.show_millis": "时间戳显示毫秒"
 "settings.tagline": "对标 MQTTX 的 GPUI 跨平台 MQTT 调试客户端"
 "settings.theme": "界面主题"
+"settings.theme_preset": "主题预设"
 "settings.version_line": "版本 {v}（更新源 {src}）"
 "sidebar.collapse": "收起侧栏（Ctrl+B）"
 "sidebar.connections": "连接"
@@ -345,3 +344,5 @@
 "will.enabled_hint": "已启用"
 "will.topic_required": "遗嘱主题不能为空"
 "will.topic_wildcard": "遗嘱主题不能包含通配符 + 或 #"
+# MQTTX zh-CN 文案（rust-i18n：文件名即 locale，扁平 key: value）。
+# key = 语义标识符 ns.name；en/zh-CN 两文件键集合必须一致——单测强制。

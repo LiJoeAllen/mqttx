@@ -55,6 +55,10 @@ enum UpdateUi {
 struct SettingsDialog {
     engine: Arc<MqttEngine>,
     theme: Entity<SelectState<OptionDelegate>>,
+    /// 官方捆绑预设选择（"Linear" + 38 个注册名），与外观模式互斥
+    theme_preset: Entity<SelectState<OptionDelegate>>,
+    /// 预设下拉的选项名（SelectState 只回索引，展示名由此表查）
+    preset_names: Vec<String>,
     language: Entity<SelectState<OptionDelegate>>,
     max_messages: Entity<InputState>,
     show_millis: bool,
@@ -68,6 +72,7 @@ impl SettingsDialog {
     fn new(
         engine: Arc<MqttEngine>,
         initial: AppSettings,
+        preset_names: Vec<String>,
         data_dir: PathBuf,
         log_dir: PathBuf,
         window: &mut Window,
@@ -78,6 +83,17 @@ impl SettingsDialog {
             ThemeModePref::Light => 1,
             ThemeModePref::Dark => 2,
         };
+        // 预设下拉选项：Linear 在首，其余为 ThemeRegistry 全部注册名（open() 传入）
+        let preset_idx = preset_names
+            .iter()
+            .position(|n| {
+                n == &initial.theme_preset
+                    || (initial.theme_preset == crate::ui::app::theme::DEFAULT_PRESET
+                        && n == crate::ui::app::theme::LINEAR_PRESET_LABEL)
+            })
+            .unwrap_or(0);
+        let preset_labels: Vec<&str> = preset_names.iter().map(String::as_str).collect();
+        let preset_select = make_select(&preset_labels, preset_idx, window, cx);
         let lang_idx = match initial.language {
             LanguagePref::System => 0,
             LanguagePref::Zh => 1,
@@ -85,7 +101,9 @@ impl SettingsDialog {
         };
         Self {
             engine,
+            preset_names,
             theme: make_select(&theme_labels(), theme_idx, window, cx),
+            theme_preset: preset_select,
             language: make_select(&language_labels(), lang_idx, window, cx),
             max_messages: cx.new(|cx| {
                 InputState::new(window, cx).default_value(initial.max_messages.to_string())
@@ -364,6 +382,16 @@ impl SettingsDialog {
             Some(2) => LanguagePref::En,
             _ => LanguagePref::System,
         };
+        // 展示名 → 存储名（Linear ↔ "linear"，官方预设用注册名）。
+        // SelectState 只回索引，展示名从构造时的选项表查
+        let theme_preset = self
+            .theme_preset
+            .read(cx)
+            .selected_value()
+            .copied()
+            .and_then(|idx| self.preset_names.get(idx))
+            .map(|l| crate::ui::app::theme::preset_storage_name(l))
+            .unwrap_or_else(|| crate::ui::app::theme::DEFAULT_PRESET.to_string());
         // 显式校验范围而非静默钳制：越界直接报错，不落盘
         let max_messages = self
             .max_messages
@@ -383,6 +411,7 @@ impl SettingsDialog {
         Ok(AppSettings {
             theme,
             language,
+            theme_preset,
             max_messages,
             show_millis: self.show_millis,
             auto_check_update: self.auto_check_update,
@@ -415,6 +444,10 @@ impl Render for SettingsDialog {
         v_flex()
             .gap_4()
             .w(px(500.))
+            .child(field(
+                i18n::t("settings.theme_preset"),
+                Select::new(&self.theme_preset),
+            ))
             .child(field(i18n::t("settings.theme"), Select::new(&self.theme)))
             .child(field(i18n::t("settings.language"), Select::new(&self.language)))
             .child(field(
@@ -577,17 +610,18 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
     if window.has_active_dialog(cx) {
         return;
     }
-    let (engine, initial, data_dir, log_dir) = {
+    let (engine, initial, preset_names, data_dir, log_dir) = {
         let state = app.read(cx);
         (
             state.engine.clone(),
             state.settings.clone(),
+            crate::ui::app::theme::theme_preset_names(cx),
             state.data_dir(),
             state.log_dir(),
         )
     };
     let dialog_view: Entity<SettingsDialog> = cx.new(|cx| {
-        SettingsDialog::new(engine, initial, data_dir, log_dir, window, cx)
+        SettingsDialog::new(engine, initial, preset_names, data_dir, log_dir, window, cx)
     });
     let app_save = app.clone();
     window.open_dialog(cx, move |dialog, _window, _cx| {

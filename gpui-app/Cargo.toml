@@ -26,6 +26,8 @@ rumqttc-v4 = { package = "rumqttc-v4-next", version = "0.34", features = ["webso
 
 uuid = { version = "1", features = ["v4"] }
 sys-locale = "0.3"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 rust-i18n = "4.2"
 chrono = { version = "0.4", features = ["clock"] }
 dirs = "7"
@@ -70,6 +72,6 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-# 嵌入窗口图标（gpui 从 exe 资源 ID 1 加载，缺失则任务栏显示默认图标）
 [target.'cfg(target_os = "windows")'.build-dependencies]
+# 嵌入窗口图标（gpui 从 exe 资源 ID 1 加载，缺失则任务栏显示默认图标）
 embed-resource = "3"
