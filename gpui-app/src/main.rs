@@ -1,3 +1,7 @@
+// 发布构建不创建控制台窗口（GUI 子系统）；debug 构建保留控制台，
+// 便于直接查看 eprintln / tracing 日志输出。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
