@@ -20,7 +20,8 @@ use tokio::sync::watch;
 
 use crate::model::{
     ConnectionConfig, ConnectionStatus, LogEntry, LogLevel, MqttRecord, PublishParams, SubscribeOptions, Subscription,
-};// ─── 引擎事件 ────────────────────────────────────────────────────────────────
+};
+use crate::ui::i18n;// ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 
 mod tls;
@@ -151,9 +152,7 @@ impl MqttEngine {
                             connection_id: String::new(),
                             level: LogLevel::Warn,
                             event: "events_dropped".into(),
-                            message: format!(
-                                "UI 处理不过来，已累计丢弃 {dropped} 条高频事件（消息/日志）"
-                            ),
+                            message: i18n::tf("engine.events_dropped", &[("n", &dropped)]),
                             details: None,
                         }));
                     }
@@ -221,12 +220,14 @@ impl MqttEngine {
             &id,
             LogLevel::Info,
             "connect",
-            format!(
-                "正在连接 {}:{} ({}, {})",
-                cfg.host,
-                cfg.port,
-                cfg.protocol.label(),
-                cfg.transport.label()
+            i18n::tf(
+                "engine.connecting",
+                &[
+                    ("host", &cfg.host),
+                    ("port", &cfg.port),
+                    ("protocol", &cfg.protocol.label()),
+                    ("transport", &cfg.transport.label()),
+                ],
             ),
             None,
         );
@@ -259,7 +260,13 @@ impl MqttEngine {
                     reason_code: None,
                     session_present: None,
                 });
-                engine.log(id, LogLevel::Error, "connect_error", format!("连接失败: {e}"), None);
+                engine.log(
+                    id,
+                    LogLevel::Error,
+                    "connect_error",
+                    i18n::tf("engine.connect_failed", &[("e", &e)]),
+                    None,
+                );
             };
             let (client, eventloop) = match build {
                 Ok(Ok(pair)) => pair,
@@ -268,7 +275,12 @@ impl MqttEngine {
                     return;
                 }
                 Err(j) => {
-                    build_error(&engine, &id, generation, format!("内部任务失败: {j}"));
+                    build_error(
+                        &engine,
+                        &id,
+                        generation,
+                        i18n::tf("engine.internal_task_failed", &[("e", &j)]),
+                    );
                     return;
                 }
             };
@@ -335,7 +347,13 @@ impl MqttEngine {
                 connected.store(false, Ordering::SeqCst);
             });
             if user_initiated {
-                self.log(id, LogLevel::Info, "disconnect", "用户请求断开连接".into(), None);
+                self.log(
+                    id,
+                    LogLevel::Info,
+                    "disconnect",
+                    i18n::t("engine.user_disconnect").into(),
+                    None,
+                );
                 self.emit(EngineEvent::Status {
                     connection_id: id.to_string(),
                     status: ConnectionStatus::Disconnected,
@@ -357,7 +375,7 @@ impl MqttEngine {
                     &connection_id,
                     LogLevel::Error,
                     "publish_error",
-                    "发布失败: 连接不存在".into(),
+                    i18n::t("engine.publish_no_connection").into(),
                     None,
                 );
                 return;
@@ -405,9 +423,13 @@ impl MqttEngine {
                         &connection_id,
                         LogLevel::Info,
                         "publish_sent",
-                        format!(
-                            "发布消息到 {} (QoS {}, retain={})",
-                            params.topic, params.qos, params.retain
+                        i18n::tf(
+                            "engine.publish_sent",
+                            &[
+                                ("topic", &params.topic),
+                                ("qos", &params.qos),
+                                ("retain", &params.retain),
+                            ],
                         ),
                         None,
                     );
@@ -429,7 +451,7 @@ impl MqttEngine {
                         &connection_id,
                         LogLevel::Error,
                         "publish_error",
-                        format!("发布失败: {e}"),
+                        i18n::tf("engine.publish_failed", &[("e", &e)]),
                         None,
                     );
                 }
@@ -460,7 +482,7 @@ impl MqttEngine {
                     topic: sub.topic,
                     qos: sub.qos,
                     ok: false,
-                    error: Some("连接不存在".into()),
+                    error: Some(i18n::t("engine.connection_not_found").into()),
                 });
                 return;
             };
@@ -468,7 +490,7 @@ impl MqttEngine {
                 &connection_id,
                 LogLevel::Info,
                 "subscribe",
-                format!("订阅主题: {} (QoS {})", sub.topic, sub.qos),
+                i18n::tf("engine.subscribe_topic", &[("topic", &sub.topic), ("qos", &sub.qos)]),
                 None,
             );
             let result = match &client {
@@ -493,9 +515,9 @@ impl MqttEngine {
                         .await
                     {
                         Ok(notice) => notice.wait_completion_async().await.map_err(|e| {
-                            format!("订阅被拒绝: {e}")
+                            i18n::tf("engine.subscribe_rejected", &[("e", &e)])
                         }),
-                        Err(e) => Err(format!("订阅请求失败: {e}")),
+                        Err(e) => Err(i18n::tf("engine.subscribe_request_failed", &[("e", &e)])),
                     }
                 }
                 ClientKind::V4(client) => {
@@ -504,9 +526,9 @@ impl MqttEngine {
                         .await
                     {
                         Ok(notice) => notice.wait_completion_async().await.map_err(|e| {
-                            format!("订阅被拒绝: {e}")
+                            i18n::tf("engine.subscribe_rejected", &[("e", &e)])
                         }),
-                        Err(e) => Err(format!("订阅请求失败: {e}")),
+                        Err(e) => Err(i18n::tf("engine.subscribe_request_failed", &[("e", &e)])),
                     }
                 }
             };
@@ -555,7 +577,7 @@ impl MqttEngine {
                         &connection_id,
                         LogLevel::Info,
                         "unsubscribe",
-                        format!("取消订阅: {topic}"),
+                        i18n::tf("engine.unsubscribe_ok", &[("topic", &topic)]),
                         None,
                     );
                 }
@@ -564,7 +586,7 @@ impl MqttEngine {
                         &connection_id,
                         LogLevel::Error,
                         "unsubscribe_error",
-                        format!("取消订阅失败: {e}"),
+                        i18n::tf("engine.unsubscribe_failed", &[("e", &e)]),
                         None,
                     );
                 }
@@ -618,9 +640,7 @@ impl MqttEngine {
             .await;
             let reply = match result {
                 Ok(inner) => inner,
-                Err(_) => Err(format!(
-                    "连接测试超时（{secs} 秒），请检查主机地址与端口"
-                )),
+                Err(_) => Err(i18n::tf("engine.test_timeout", &[("secs", &secs)])),
             };
             let _ = tx.try_send(reply);
         });

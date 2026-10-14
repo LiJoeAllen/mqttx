@@ -19,6 +19,7 @@ use sha1::Sha1;
 use sha2::Sha256;
 
 use crate::model::{ConnectionConfig, ProtocolVersion, TransportKind};
+use crate::ui::i18n;
 
 type HmacSha1 = Hmac<Sha1>;
 type HmacSha256 = Hmac<Sha256>;
@@ -38,8 +39,8 @@ impl AliyunAuthMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Token => "Group 令牌 (Token)",
-            Self::DeviceCredential => "一机一密",
+            Self::Token => i18n::t("aliyun.auth_token_mode"),
+            Self::DeviceCredential => i18n::t("aliyun.auth_triple_mode"),
         }
     }
 }
@@ -83,7 +84,7 @@ impl AliyunPreset {
     pub fn new() -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
-            name: "阿里云设备".into(),
+            name: i18n::t("aliyun.default_preset_name").into(),
             group: String::new(),
             instance_id: String::new(),
             region: String::new(),
@@ -99,16 +100,16 @@ impl AliyunPreset {
 
     /// HMAC-SHA1(secret, client_id) 的 Base64 编码（Token 模式签名）。
     pub fn signature(secret: &str, client_id: &str) -> Result<String, String> {
-        let mut mac =
-            HmacSha1::new_from_slice(secret.as_bytes()).map_err(|e| format!("HMAC 初始化失败: {e}"))?;
+        let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
+            .map_err(|e| i18n::tf("aliyun.hmac_init_failed", &[("e", &e)]))?;
         mac.update(client_id.as_bytes());
         Ok(base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes()))
     }
 
     /// HMAC-SHA256(secret, msg) 的小写 hex（一机一密签名）。
     fn hmac_sha256_hex(secret: &str, msg: &str) -> Result<String, String> {
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| format!("HMAC 初始化失败: {e}"))?;
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+            .map_err(|e| i18n::tf("aliyun.hmac_init_failed", &[("e", &e)]))?;
         mac.update(msg.as_bytes());
         Ok(mac
             .finalize()
@@ -152,15 +153,15 @@ impl AliyunPreset {
                     || self.access_key_id.is_empty()
                     || self.access_key_secret.is_empty()
                 {
-                    return Err("Group ID、AccessKey ID 与 AccessKey Secret 不能为空".into());
+                    return Err(i18n::t("aliyun.token_required_fields").into());
                 }
                 // 空 instance_id 会拼出 ".mqtt.aliyuncs.com" 这样的非法接入点，DNS 报错难懂
                 if self.instance_id.trim().is_empty() {
-                    return Err("Instance ID 不能为空".into());
+                    return Err(i18n::t("aliyun.instance_id_required").into());
                 }
                 // 空 DeviceName 会拼出 "group@@@" 这样的非法 clientId，服务端报错难懂
                 if self.device_id.trim().is_empty() {
-                    return Err("Device ID 不能为空".into());
+                    return Err(i18n::t("aliyun.device_id_required").into());
                 }
                 conn.host = self.host();
                 let client_id = format!("{}@@@{}", self.group_id, self.device_id);
@@ -172,11 +173,11 @@ impl AliyunPreset {
             }
             AliyunAuthMode::DeviceCredential => {
                 if self.product_key.is_empty() || self.device_secret.is_empty() {
-                    return Err("一机一密需要 ProductKey 与 DeviceSecret (设备密钥)".into());
+                    return Err(i18n::t("aliyun.triple_requires_pk_ds").into());
                 }
                 // 空 DeviceName 会拼出 "pk.|securemode=..." 与 "&pk"，服务端报错难懂
                 if self.device_id.trim().is_empty() {
-                    return Err("一机一密需要 DeviceName（设备名）".into());
+                    return Err(i18n::t("aliyun.triple_requires_device_name").into());
                 }
                 conn.host = self.host();
                 // 物联网平台「一机一密」直连三元组（见模块文档），DeviceName 复用 device_id

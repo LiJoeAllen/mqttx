@@ -19,6 +19,7 @@ use crate::model::{
 
 
 use super::*;
+use crate::ui::i18n;
 
 pub(super) fn build_v5(
     cfg: &ConnectionConfig,
@@ -55,7 +56,7 @@ pub(super) fn build_v5(
             None => {
                 opts.set_transport(
                     V5Transport::try_tls_with_default_config()
-                        .map_err(|e| format!("TLS 初始化失败: {e:?}"))?,
+                        .map_err(|e| i18n::tf("tls.init_failed", &[("e", &format!("{e:?}"))]))?,
                 );
             }
         };
@@ -208,7 +209,14 @@ pub(super) fn spawn_v5_loop(
                                 &id,
                                 LogLevel::Info,
                                 "publish_received",
-                                format!("收到消息: {topic} ({} 字节, QoS {})", p.payload.len(), v5_qos_u8(p.qos)),
+                                i18n::tf(
+                                    "engine.received_message_qos",
+                                    &[
+                                        ("topic", &topic),
+                                        ("n", &p.payload.len()),
+                                        ("qos", &v5_qos_u8(p.qos)),
+                                    ],
+                                ),
                                 None,
                             );
                             engine.emit(EngineEvent::Message(record));
@@ -225,7 +233,7 @@ pub(super) fn spawn_v5_loop(
                                     &id,
                                     LogLevel::Info,
                                     "connack",
-                                    format!("连接成功 (session_present: {})", ack.session_present),
+                                    i18n::tf("engine.connect_ok", &[("sp", &ack.session_present)]),
                                     None,
                                 );
                                 engine.emit(EngineEvent::Status {
@@ -240,7 +248,10 @@ pub(super) fn spawn_v5_loop(
                                     &id,
                                     LogLevel::Error,
                                     "connack",
-                                    format!("连接被拒绝: {:?} (code {code})", ack.code),
+                                    i18n::tf(
+                                        "engine.connack_rejected_code",
+                                        &[("code", &format!("{:?}", ack.code)), ("n", &code)],
+                                    ),
                                     None,
                                 );
                                 engine.emit(EngineEvent::Status {
@@ -259,7 +270,13 @@ pub(super) fn spawn_v5_loop(
                                 &id,
                                 LogLevel::Warn,
                                 "disconnect_received",
-                                format!("收到断开连接: {:?} (code {})", d.reason_code, d.reason_code as u8),
+                                i18n::tf(
+                                    "engine.disconnect_received",
+                                    &[
+                                        ("code", &format!("{:?}", d.reason_code)),
+                                        ("n", &(d.reason_code as u8)),
+                                    ],
+                                ),
                                 None,
                             );
                             engine.emit(EngineEvent::Status {
@@ -278,26 +295,26 @@ pub(super) fn spawn_v5_loop(
                                 .map(|c| format!("{c:?}"))
                                 .collect();
                             engine.log(&id, LogLevel::Info, "suback",
-                                format!("订阅确认 (packet {}): {}", s.pkid, granted.join(", ")), None);
+                                i18n::tf("engine.suback_codes", &[("n", &s.pkid), ("codes", &granted.join(", "))]), None);
                         }
                         Ok(V5Event::Incoming(V5Packet::UnsubAck(_))) => {
-                            engine.log(&id, LogLevel::Info, "unsuback", "取消订阅确认".into(), None);
+                            engine.log(&id, LogLevel::Info, "unsuback", i18n::t("engine.unsuback").into(), None);
                         }
                         Ok(V5Event::Incoming(V5Packet::PubAck(a))) => {
                             engine.log(&id, LogLevel::Debug, "puback",
-                                format!("发布确认 (packet {}, reason {:?})", a.pkid, a.reason), None);
+                                i18n::tf("engine.puback_reason", &[("n", &a.pkid), ("reason", &format!("{:?}", a.reason))]), None);
                         }
                         Ok(V5Event::Incoming(V5Packet::PubRec(a))) => {
                             engine.log(&id, LogLevel::Debug, "pubrec",
-                                format!("QoS2 发布收到 (packet {})", a.pkid), None);
+                                i18n::tf("engine.pubrec", &[("n", &a.pkid)]), None);
                         }
                         Ok(V5Event::Incoming(V5Packet::PubComp(a))) => {
                             engine.log(&id, LogLevel::Debug, "pubcomp",
-                                format!("QoS2 发布完成 (packet {})", a.pkid), None);
+                                i18n::tf("engine.pubcomp", &[("n", &a.pkid)]), None);
                         }
                         Ok(V5Event::Outgoing(V5Outgoing::Publish(pkid))) => {
                             engine.log(&id, LogLevel::Debug, "publish_outgoing",
-                                format!("消息已发出 (packet {pkid})"), None);
+                                i18n::tf("engine.publish_outgoing", &[("n", &pkid)]), None);
                         }
                         Ok(_) => {}
                         Err(V5Error::RequestsDone) => {
@@ -322,19 +339,20 @@ pub(super) fn spawn_v5_loop(
                             });
                             if !auto_reconnect || first_connect {
                                 engine.log(&id, LogLevel::Error, "connection_error",
-                                    format!("连接错误: {e}"), None);
+                                    i18n::tf("engine.connection_error", &[("e", &e)]), None);
                                 break;
                             }
                             // max_reconnect_times>0 时按次数停止重试；0 表示无限重连
                             if max_reconnect_times > 0 && reconnect_attempts >= max_reconnect_times {
                                 engine.log(&id, LogLevel::Error, "reconnect_give_up",
-                                    format!("已重连 {reconnect_attempts} 次仍失败，达到最大重连次数 {max_reconnect_times}，停止重连: {e}"), None);
+                                    i18n::tf("engine.reconnect_give_up", &[("attempts", &reconnect_attempts), ("max", &max_reconnect_times), ("e", &e)]), None);
                                 break;
                             }
                             reconnect_attempts += 1;
                             let delay = reconnect_delay(reconnect_attempts);
+                            let delay_s = format!("{:.1}", delay.as_secs_f32());
                             engine.log(&id, LogLevel::Warn, "connection_error",
-                                format!("连接错误，{:.1} 秒后重连（第 {reconnect_attempts} 次）: {e}", delay.as_secs_f32()), None);
+                                i18n::tf("engine.reconnect_retry", &[("delay", &delay_s), ("attempts", &reconnect_attempts), ("e", &e)]), None);
                             // 退避等待也必须可取消：否则 close() 的取消信号要等一整个
                             // 退避周期才可见，期间会对用户已关闭的连接继续重连。
                             tokio::select! {
@@ -345,7 +363,7 @@ pub(super) fn spawn_v5_loop(
                     }
                 }
                 _ = cancel_rx.changed() => {
-                    engine.log(&id, LogLevel::Info, "disconnect_cancelled", "连接已取消".into(), None);
+                    engine.log(&id, LogLevel::Info, "disconnect_cancelled", i18n::t("engine.cancelled").into(), None);
                     break;
                 }
             }

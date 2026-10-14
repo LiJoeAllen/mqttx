@@ -16,6 +16,7 @@ use crate::model::{
 
 
 use super::*;
+use crate::ui::i18n;
 
 pub(super) fn build_v4(
     cfg: &ConnectionConfig,
@@ -54,7 +55,7 @@ pub(super) fn build_v4(
             None => {
                 opts.set_transport(
                     V4Transport::try_tls_with_default_config()
-                        .map_err(|e| format!("TLS 初始化失败: {e:?}"))?,
+                        .map_err(|e| i18n::tf("tls.init_failed", &[("e", &format!("{e:?}"))]))?,
                 );
             }
         };
@@ -107,7 +108,7 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
         let owned = cfg.clone();
         let (client, mut eventloop) = tokio::task::spawn_blocking(move || build_v5(&owned))
             .await
-            .map_err(|e| format!("内部任务失败: {e}"))??;
+            .map_err(|e| i18n::tf("engine.internal_task_failed", &[("e", &e)]))??;
         loop {
             match eventloop.poll().await {
                 Ok(V5Event::Incoming(V5Packet::ConnAck(ack))) => {
@@ -123,12 +124,18 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
                         }
                         return Ok(());
                     }
-                    return Err(format!("连接被拒绝: {:?}", ack.code));
+                    return Err(i18n::tf(
+                        "engine.connack_rejected",
+                        &[("code", &format!("{:?}", ack.code))],
+                    ));
                 }
                 Ok(V5Event::Incoming(V5Packet::Disconnect(d))) => {
-                    return Err(format!("服务端断开: {:?}", d.reason_code));
+                    return Err(i18n::tf(
+                        "engine.disconnected_by_server_code",
+                        &[("code", &format!("{:?}", d.reason_code))],
+                    ));
                 }
-                Err(e) => return Err(format!("连接失败: {e}")),
+                Err(e) => return Err(i18n::tf("engine.connect_failed", &[("e", &e)])),
                 _ => {}
             }
         }
@@ -137,7 +144,7 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
         let owned = cfg.clone();
         let (client, mut eventloop) = tokio::task::spawn_blocking(move || build_v4(&owned))
             .await
-            .map_err(|e| format!("内部任务失败: {e}"))??;
+            .map_err(|e| i18n::tf("engine.internal_task_failed", &[("e", &e)]))??;
         loop {
             match eventloop.poll().await {
                 Ok(rv4::Event::Incoming(rv4::Packet::ConnAck(ack))) => {
@@ -151,12 +158,15 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
                         }
                         return Ok(());
                     }
-                    return Err(format!("连接被拒绝: {:?}", ack.code));
+                    return Err(i18n::tf(
+                        "engine.connack_rejected",
+                        &[("code", &format!("{:?}", ack.code))],
+                    ));
                 }
                 Ok(rv4::Event::Incoming(rv4::Packet::Disconnect)) => {
-                    return Err("服务端主动断开".into());
+                    return Err(i18n::t("engine.disconnected_by_server_active").into());
                 }
-                Err(e) => return Err(format!("连接失败: {e}")),
+                Err(e) => return Err(i18n::tf("engine.connect_failed", &[("e", &e)])),
                 _ => {}
             }
         }
@@ -213,7 +223,7 @@ pub(super) fn spawn_v4_loop(
                             };
                             engine.log(
                                 &id, LogLevel::Info, "publish_received",
-                                format!("收到消息: {} ({} 字节)", record.topic, p.payload.len()), None);
+                                i18n::tf("engine.received_message", &[("topic", &record.topic), ("n", &p.payload.len())]), None);
                             engine.emit(EngineEvent::Message(record));
                         }
                         Ok(rv4::Event::Incoming(rv4::Packet::ConnAck(ack))) => {
@@ -224,7 +234,7 @@ pub(super) fn spawn_v4_loop(
                                 // 「连续失败次数」，不能把历史错误累计进来
                                 reconnect_attempts = 0;
                                 engine.log(&id, LogLevel::Info, "connack",
-                                    format!("连接成功 (session_present: {})", ack.session_present), None);
+                                    i18n::tf("engine.connect_ok", &[("sp", &ack.session_present)]), None);
                                 engine.emit(EngineEvent::Status {
                                     connection_id: id.clone(),
                                     status: ConnectionStatus::Connected,
@@ -234,7 +244,7 @@ pub(super) fn spawn_v4_loop(
                                 });
                             } else {
                                 engine.log(&id, LogLevel::Error, "connack",
-                                    format!("连接被拒绝: {:?}", ack.code), None);
+                                    i18n::tf("engine.connack_rejected", &[("code", &format!("{:?}", ack.code))]), None);
                                 engine.emit(EngineEvent::Status {
                                     connection_id: id.clone(),
                                     status: ConnectionStatus::Error,
@@ -251,7 +261,7 @@ pub(super) fn spawn_v4_loop(
                             engine.emit(EngineEvent::Status {
                                 connection_id: id.clone(),
                                 status: ConnectionStatus::Disconnected,
-                                error: Some("服务端断开".into()),
+                                error: Some(i18n::t("engine.disconnected_by_server").into()),
                                 reason_code: None,
                                 session_present: None,
                             });
@@ -259,19 +269,19 @@ pub(super) fn spawn_v4_loop(
                         }
                         Ok(rv4::Event::Incoming(rv4::Packet::SubAck(s))) => {
                             engine.log(&id, LogLevel::Info, "suback",
-                                format!("订阅确认 (packet {})", s.pkid), None);
+                                i18n::tf("engine.suback", &[("n", &s.pkid)]), None);
                         }
                         Ok(rv4::Event::Incoming(rv4::Packet::UnsubAck(a))) => {
                             engine.log(&id, LogLevel::Info, "unsuback",
-                                format!("取消订阅确认 (packet {})", a.pkid), None);
+                                i18n::tf("engine.unsuback_packet", &[("n", &a.pkid)]), None);
                         }
                         Ok(rv4::Event::Incoming(rv4::Packet::PubAck(a))) => {
                             engine.log(&id, LogLevel::Debug, "puback",
-                                format!("发布确认 (packet {})", a.pkid), None);
+                                i18n::tf("engine.puback", &[("n", &a.pkid)]), None);
                         }
                         Ok(rv4::Event::Outgoing(rv4::Outgoing::Publish(pkid))) => {
                             engine.log(&id, LogLevel::Debug, "publish_outgoing",
-                                format!("消息已发出 (packet {pkid})"), None);
+                                i18n::tf("engine.publish_outgoing", &[("n", &pkid)]), None);
                         }
                         Ok(_) => {}
                         Err(rv4::ConnectionError::RequestsDone) => {
@@ -293,19 +303,20 @@ pub(super) fn spawn_v4_loop(
                             });
                             if !auto_reconnect || first_connect {
                                 engine.log(&id, LogLevel::Error, "connection_error",
-                                    format!("连接错误: {e}"), None);
+                                    i18n::tf("engine.connection_error", &[("e", &e)]), None);
                                 break;
                             }
                             // max_reconnect_times>0 时按次数停止重试；0 表示无限重连
                             if max_reconnect_times > 0 && reconnect_attempts >= max_reconnect_times {
                                 engine.log(&id, LogLevel::Error, "reconnect_give_up",
-                                    format!("已重连 {reconnect_attempts} 次仍失败，达到最大重连次数 {max_reconnect_times}，停止重连: {e}"), None);
+                                    i18n::tf("engine.reconnect_give_up", &[("attempts", &reconnect_attempts), ("max", &max_reconnect_times), ("e", &e)]), None);
                                 break;
                             }
                             reconnect_attempts += 1;
                             let delay = reconnect_delay(reconnect_attempts);
+                            let delay_s = format!("{:.1}", delay.as_secs_f32());
                             engine.log(&id, LogLevel::Warn, "connection_error",
-                                format!("连接错误，{:.1} 秒后重连（第 {reconnect_attempts} 次）: {e}", delay.as_secs_f32()), None);
+                                i18n::tf("engine.reconnect_retry", &[("delay", &delay_s), ("attempts", &reconnect_attempts), ("e", &e)]), None);
                             // 退避等待也必须可取消：否则 close() 的取消信号要等一整个
                             // 退避周期才可见，期间会对用户已关闭的连接继续重连。
                             tokio::select! {
@@ -316,7 +327,7 @@ pub(super) fn spawn_v4_loop(
                     }
                 }
                 _ = cancel_rx.changed() => {
-                    engine.log(&id, LogLevel::Info, "disconnect_cancelled", "连接已取消".into(), None);
+                    engine.log(&id, LogLevel::Info, "disconnect_cancelled", i18n::t("engine.cancelled").into(), None);
                     break;
                 }
             }

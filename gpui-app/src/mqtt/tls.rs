@@ -5,10 +5,8 @@ use std::sync::Arc;
 use rumqttc::TlsConfiguration;
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
-use crate::model::{
-    ConnectionConfig,
-    SslConfig,
-};// ─── 引擎事件 ────────────────────────────────────────────────────────────────
+use crate::model::{ConnectionConfig, SslConfig};
+use crate::ui::i18n;// ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 
 
@@ -28,7 +26,7 @@ pub(super) fn resolve_tls_config(cfg: &ConnectionConfig) -> Result<Option<TlsCon
 pub(super) fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientConfig>, String> {
     // 只填证书或只填私钥必然握手失败，提前给出明确错误
     if ssl.client_cert_file.is_empty() != ssl.client_key_file.is_empty() {
-        return Err("客户端证书与客户端密钥必须同时配置".into());
+        return Err(i18n::t("tls.cert_key_pair_required").into());
     }
     let provider = ensure_crypto_provider();
     let builder = rustls::ClientConfig::builder();
@@ -48,7 +46,7 @@ pub(super) fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientC
                 .map(|e| e.to_string())
                 .collect::<Vec<_>>()
                 .join("; ");
-            return Err(format!("加载系统根证书失败: {detail}"));
+            return Err(i18n::tf("tls.native_roots_failed", &[("detail", &detail)]));
         }
         // 个别系统证书加载失败不阻断连接：自定义 CA 与其余根证书仍参与校验
         for cert in native.certs {
@@ -56,17 +54,19 @@ pub(super) fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientC
         }
         if !ssl.ca_file.is_empty() {
             let pem = std::fs::read(&ssl.ca_file)
-                .map_err(|e| format!("读取 CA 文件 {} 失败: {e}", ssl.ca_file))?;
+                .map_err(|e| i18n::tf("tls.ca_read_failed", &[("p", &ssl.ca_file), ("e", &e)]))?;
             let mut added = 0usize;
             for cert in CertificateDer::pem_slice_iter(&pem) {
-                let cert = cert.map_err(|e| format!("解析 CA 文件 {} 失败: {e}", ssl.ca_file))?;
-                roots
-                    .add(cert)
-                    .map_err(|e| format!("CA 文件 {} 中存在无效证书: {e}", ssl.ca_file))?;
+                let cert = cert.map_err(|e| {
+                    i18n::tf("tls.ca_parse_failed", &[("p", &ssl.ca_file), ("e", &e)])
+                })?;
+                roots.add(cert).map_err(|e| {
+                    i18n::tf("tls.ca_invalid_cert", &[("p", &ssl.ca_file), ("e", &e)])
+                })?;
                 added += 1;
             }
             if added == 0 {
-                return Err(format!("CA 文件 {} 中没有找到任何证书", ssl.ca_file));
+                return Err(i18n::tf("tls.ca_no_certs", &[("p", &ssl.ca_file)]));
             }
         }
         builder.with_root_certificates(roots)
@@ -76,24 +76,28 @@ pub(super) fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientC
         builder.with_no_client_auth()
     } else {
         let chain_pem = std::fs::read(&ssl.client_cert_file).map_err(|e| {
-            format!("读取客户端证书文件 {} 失败: {e}", ssl.client_cert_file)
+            i18n::tf("tls.client_cert_read_failed", &[("p", &ssl.client_cert_file), ("e", &e)])
         })?;
-        let key_pem = std::fs::read(&ssl.client_key_file)
-            .map_err(|e| format!("读取客户端私钥文件 {} 失败: {e}", ssl.client_key_file))?;
+        let key_pem = std::fs::read(&ssl.client_key_file).map_err(|e| {
+            i18n::tf("tls.client_key_read_failed", &[("p", &ssl.client_key_file), ("e", &e)])
+        })?;
         let certs = CertificateDer::pem_slice_iter(&chain_pem)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("解析客户端证书文件 {} 失败: {e}", ssl.client_cert_file))?;
+            .map_err(|e| {
+                i18n::tf("tls.client_cert_parse_failed", &[("p", &ssl.client_cert_file), ("e", &e)])
+            })?;
         if certs.is_empty() {
-            return Err(format!(
-                "客户端证书文件 {} 中没有找到证书",
-                ssl.client_cert_file
+            return Err(i18n::tf(
+                "tls.client_cert_no_certs",
+                &[("p", &ssl.client_cert_file)],
             ));
         }
-        let key = PrivateKeyDer::from_pem_slice(&key_pem)
-            .map_err(|e| format!("解析客户端私钥文件 {} 失败: {e}", ssl.client_key_file))?;
+        let key = PrivateKeyDer::from_pem_slice(&key_pem).map_err(|e| {
+            i18n::tf("tls.client_key_parse_failed", &[("p", &ssl.client_key_file), ("e", &e)])
+        })?;
         builder
             .with_client_auth_cert(certs, key)
-            .map_err(|e| format!("加载客户端证书/私钥失败: {e}"))?
+            .map_err(|e| i18n::tf("tls.client_auth_failed", &[("e", &e)]))?
     };
     Ok(Arc::new(config))
 }
