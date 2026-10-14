@@ -307,6 +307,7 @@
 "ssl.ca_ph": "CA 证书 PEM 路径（可选）"
 "ssl.cert": "客户端证书 (PEM)"
 "ssl.cert_ph": "客户端证书 PEM 路径（可选）"
+"ssl.file_filter": "证书 / 密钥 (PEM)"
 "ssl.key": "客户端密钥 (PEM)"
 "ssl.key_ph": "客户端私钥 PEM 路径（可选）"
 "ssl.n_configured": "已配置 {n} 项"

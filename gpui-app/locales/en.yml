@@ -307,6 +307,7 @@
 "ssl.ca_ph": "Path to CA certificate (PEM, optional)"
 "ssl.cert": "Client certificate (PEM)"
 "ssl.cert_ph": "Path to client certificate (PEM, optional)"
+"ssl.file_filter": "Certificate / key (PEM)"
 "ssl.key": "Client key (PEM)"
 "ssl.key_ph": "Path to client private key (PEM, optional)"
 "ssl.n_configured": "{n} configured"

@@ -725,7 +725,7 @@ impl ConnectionForm {
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new()
                 .set_title(i18n::t("ssl.pick_file"))
-                .add_filter("证书 / 密钥 (PEM)", &["pem", "crt", "cer", "key", "der"])
+                .add_filter(i18n::t("ssl.file_filter"), &["pem", "crt", "cer", "key", "der"])
                 .pick_file();
             let _ = tx.send_blocking(picked);
         });
