@@ -154,6 +154,10 @@ impl AliyunPreset {
                 {
                     return Err("Group ID、AccessKey ID 与 AccessKey Secret 不能为空".into());
                 }
+                // 空 instance_id 会拼出 ".mqtt.aliyuncs.com" 这样的非法接入点，DNS 报错难懂
+                if self.instance_id.trim().is_empty() {
+                    return Err("Instance ID 不能为空".into());
+                }
                 // 空 DeviceName 会拼出 "group@@@" 这样的非法 clientId，服务端报错难懂
                 if self.device_id.trim().is_empty() {
                     return Err("Device ID 不能为空".into());
