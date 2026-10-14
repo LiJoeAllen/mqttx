@@ -129,6 +129,12 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                 }
             }
             EngineEvent::Log(entry) => {
+                // 引擎丢弃计数告警（events_dropped）的 connection_id 是空串
+                // （引擎通道满时补发，无归属连接），而日志面板按 connection_id
+                // 过滤，空串永不显示——这条告警的用户提醒意图只能走全局通知兑现。
+                if entry.connection_id.is_empty() && entry.event == "events_dropped" {
+                    window.push_notification(Notification::warning(entry.message.clone()), cx);
+                }
                 self.push_log(entry);
                 if let Some(id) = self.active_tab.clone()
                     && let Some(view) = self.views.get(&id) {
