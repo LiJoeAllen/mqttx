@@ -12,7 +12,7 @@
 "aliyun.generate_connect": "生成并连接"
 "aliyun.group": "分组（可选）"
 "aliyun.group_id": "Group ID"
-"aliyun.help": "Token 模式（云消息队列 MQTT 版）：接入点 {实例ID}.mqtt.aliyuncs.com，clientId={GroupId}@@@{设备ID}，密码为 HMAC-SHA1 签名；一机一密（物联网平台）：接入点 {ProductKey}.iot-as-mqtt.{地域}.aliyuncs.com，按官方三元组规范签名"
+"aliyun.help": "Token 模式（云消息队列 MQTT 版）：接入点 {InstanceID}.mqtt.aliyuncs.com，clientId={GroupId}@@@{DeviceID}，密码为 HMAC-SHA1 签名；一机一密（物联网平台）：接入点 {ProductKey}.iot-as-mqtt.{Region}.aliyuncs.com，按官方三元组规范签名"
 "aliyun.hmac_init_failed": "HMAC 初始化失败: {e}"
 "aliyun.instance_id": "实例 ID"
 "aliyun.instance_id_required": "Instance ID 不能为空"

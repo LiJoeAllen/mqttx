@@ -12,7 +12,7 @@
 "aliyun.generate_connect": "Generate & connect"
 "aliyun.group": "Group (optional)"
 "aliyun.group_id": "Group ID"
-"aliyun.help": "Token mode (Alibaba Cloud MQTT): endpoint {实例ID}.mqtt.aliyuncs.com, clientId={GroupId}@@@{设备ID}, password is the HMAC-SHA1 signature. Per-device secret (IoT Platform): endpoint {ProductKey}.iot-as-mqtt.{地域}.aliyuncs.com, signed per the official triple spec."
+"aliyun.help": "Token mode (Alibaba Cloud MQTT): endpoint {InstanceID}.mqtt.aliyuncs.com, clientId={GroupId}@@@{DeviceID}, password is the HMAC-SHA1 signature. Per-device secret (IoT Platform): endpoint {ProductKey}.iot-as-mqtt.{Region}.aliyuncs.com, signed per the official triple spec."
 "aliyun.hmac_init_failed": "HMAC init failed: {e}"
 "aliyun.instance_id": "Instance ID"
 "aliyun.instance_id_required": "Instance ID cannot be empty"
