@@ -369,7 +369,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         .map(|v| i18n::tf("msg.seconds", &[("n", &v)])),
                 ),
                 (
-                    "订阅标识符",
+                    i18n::t("sub.identifier_field"),
                     record.subscription_identifier.map(|v| v.to_string()),
                 ),
             ] {

@@ -384,7 +384,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                             )
                             .child(
                                 div().w(px(120.)).child(field(
-                                    "消息过期(秒)",
+                                    i18n::t("pub.expiry_field"),
                                     Input::new(&msg_expiry).small(),
                                 )),
                             )
@@ -468,7 +468,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                     let weak_del = weak_view.clone();
                     let del_presets = presets.clone();
                     menu = menu.submenu(
-                        "删除预设",
+                        i18n::t("pub.delete_title"),
                         window,
                         cx,
                         move |submenu, _window, _cx| {
@@ -537,7 +537,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
         // 预填默认名
         let topic = self.pub_topic.read(cx).value().to_string();
         let default_name = if topic.is_empty() {
-            "新预设".to_string()
+            i18n::t("preset.default_name").to_string()
         } else {
             topic.chars().take(20).collect()
         };
