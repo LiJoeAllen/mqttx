@@ -96,7 +96,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                     } else if connecting {
                         i18n::t("status.connecting")
                     } else {
-                        i18n::t("sidebar.connections")
+                        i18n::t("sidebar.connect")
                     })
                     .when(connected, |b| b.danger().ghost())
                     .when(!connected, |b| b.primary().ghost())

@@ -347,8 +347,8 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
             .icon(if connected { IconName::Square } else { IconName::PlugZap })
             .ghost()
             .xsmall()
-            .tooltip(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connections") })
-            .accessibility_label(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connections") })
+            .tooltip(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connect") })
+            .accessibility_label(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connect") })
             .on_click(cx.listener(move |this, _, _, _| {
                 this.toggle_connection(&cfg);
             }))

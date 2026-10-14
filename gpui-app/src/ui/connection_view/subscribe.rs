@@ -418,7 +418,7 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                 .child(
                     Button::new(SharedString::from(format!("subscribe-{}", self.conn_id)))
                         .icon(if editing { IconName::Check } else { IconName::Plus })
-                        .label(if editing { i18n::t("common.update") } else { i18n::t("connview.subscriptions") })
+                        .label(if editing { i18n::t("common.update") } else { i18n::t("common.subscribe") })
                         // 编辑用 warning 色与新增的 primary 区分
                         .when(editing, |b| b.warning())
                         .when(!editing, |b| b.primary())
