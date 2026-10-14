@@ -20,10 +20,10 @@ pub(super) fn http_get_json(url: &str) -> Result<serde_json::Value, String> {
     let mut body = agent()
         .get(url)
         .call()
-        .map_err(|e| format!("请求失败: {e}"))?
+        .map_err(|e| crate::ui::i18n::tf("update.err_request", &[("e", &e)]))?
         .into_body();
     body.read_json::<serde_json::Value>()
-        .map_err(|e| format!("解析响应失败: {e}"))
+        .map_err(|e| crate::ui::i18n::tf("update.err_parse_response", &[("e", &e)]))
 }
 
 
@@ -94,7 +94,7 @@ fn check_latest_via_api() -> Result<Option<UpdateInfo>, String> {
                     r.get("draft").and_then(|d| d.as_bool()) == Some(false)
                         && r.get("prerelease").and_then(|d| d.as_bool()) == Some(false)
                 }))
-                .ok_or_else(|| "没有可用 Release".to_string())?;
+                .ok_or_else(|| crate::ui::i18n::t("update.err_no_release").to_string())?;
             first.clone()
         }
     };
@@ -102,12 +102,15 @@ fn check_latest_via_api() -> Result<Option<UpdateInfo>, String> {
     let tag = rel
         .get("tag_name")
         .and_then(|t| t.as_str())
-        .ok_or_else(|| "Release 缺少 tag_name".to_string())?;
+        .ok_or_else(|| crate::ui::i18n::t("update.err_no_tag").to_string())?;
     if !is_newer(tag, current_version()) {
         return Ok(None);
     }
     let Some((name, url, size, sha)) = pick_assets(&rel) else {
-        return Err(format!("Release {tag} 没有当前平台（{}）的产物", platform_triple()));
+        return Err(crate::ui::i18n::tf(
+            "update.err_no_asset",
+            &[("tag", &tag), ("triple", &platform_triple())],
+        ));
     };
     Ok(Some(UpdateInfo {
         version: tag.trim_start_matches('v').to_string(),
@@ -133,10 +136,10 @@ fn check_latest_via_redirect() -> Result<Option<UpdateInfo>, String> {
     let resp = agent()
         .get(&format!("{RELEASES_PAGE}/latest"))
         .call()
-        .map_err(|e| format!("页面请求失败: {e}"))?;
+        .map_err(|e| crate::ui::i18n::tf("update.err_page_request", &[("e", &e)]))?;
     let uri = resp.get_uri().to_string();
     let Some(tag) = tag_from_releases_url(&uri) else {
-        return Err(format!("页面 URL 异常: {uri}"));
+        return Err(crate::ui::i18n::tf("update.err_page_url", &[("uri", &uri)]));
     };
     if !is_newer(tag, current_version()) {
         return Ok(None);

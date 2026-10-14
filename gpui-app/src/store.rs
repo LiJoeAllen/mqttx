@@ -272,7 +272,7 @@ pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, Str
                 );
             }
         },
-        _ => return Err("JSON 顶层应为连接数组".to_string()),
+        _ => return Err(crate::ui::i18n::t("io.err_top_level").to_string()),
     };
     let mut conns = Vec::with_capacity(items.len());
     for (i, item) in items.into_iter().enumerate() {

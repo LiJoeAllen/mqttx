@@ -13,7 +13,7 @@ fn stage_dir() -> Result<PathBuf, String> {
         .unwrap_or_else(std::env::temp_dir)
         .join("MQTTX-GPUI")
         .join("updates");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建暂存目录失败: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| crate::ui::i18n::tf("update.err_stage_dir", &[("e", &e)]))?;
     Ok(dir)
 }
 
@@ -66,14 +66,14 @@ pub fn download_and_stage(
         // 解压到暂存目录，取出二进制后删掉压缩包
         if let Err(e) = sevenz_rust::decompress_file(&tmp, &dir) {
             let _ = std::fs::remove_file(&tmp);
-            return Err(format!("解压更新包失败: {e}"));
+            return Err(crate::ui::i18n::tf("update.err_decompress", &[("e", &e)]));
         }
         let _ = std::fs::remove_file(&tmp);
         let extracted = dir.join(&binary_name);
         if !extracted.exists() {
-            return Err(format!(
-                "更新包内缺少 {}，压缩包内容异常",
-                binary_name
+            return Err(crate::ui::i18n::tf(
+                "update.err_missing_binary",
+                &[("name", &binary_name)],
             ));
         }
         // 确认解压产物后再清理其他版本，最后返回二进制路径
@@ -81,7 +81,7 @@ pub fn download_and_stage(
         extracted
     } else {
         remove_other_staged(&dir, &dst);
-        std::fs::rename(&tmp, &dst).map_err(|e| format!("暂存失败: {e}"))?;
+        std::fs::rename(&tmp, &dst).map_err(|e| crate::ui::i18n::tf("update.err_stage_rename", &[("e", &e)]))?;
         dst
     };
     // 非 Windows 平台补可执行位：File::create 落盘默认 0644，rename 保留权限，
@@ -103,13 +103,13 @@ pub fn download_and_stage(
 fn file_sha256(path: &Path) -> Result<String, String> {
     use sha2::Digest as _;
     let mut file =
-        std::fs::File::open(path).map_err(|e| format!("打开 {} 失败: {e}", path.display()))?;
+        std::fs::File::open(path).map_err(|e| crate::ui::i18n::tf("update.err_open_file", &[("p", &path.display()), ("e", &e)]))?;
     let mut hasher = sha2::Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file
             .read(&mut buf)
-            .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+            .map_err(|e| crate::ui::i18n::tf("update.err_read_file", &[("p", &path.display()), ("e", &e)]))?;
         if n == 0 {
             break;
         }
@@ -127,25 +127,26 @@ fn file_sha256(path: &Path) -> Result<String, String> {
 /// 随后被 `install_staged` 执行。这里在解压**之前**按归档头校验条目：必须恰好一个，
 /// 且名字与约定文件名完全一致，任何偏差都拒绝（fail-closed）。
 fn verify_archive_entries(archive: &Path, expected: &str) -> Result<(), String> {
-    let file = std::fs::File::open(archive).map_err(|e| format!("打开更新包失败: {e}"))?;
+    let file = std::fs::File::open(archive).map_err(|e| crate::ui::i18n::tf("update.err_open_archive", &[("e", &e)]))?;
     let len = file
         .metadata()
-        .map_err(|e| format!("读取更新包大小失败: {e}"))?
+        .map_err(|e| crate::ui::i18n::tf("update.err_archive_size", &[("e", &e)]))?
         .len();
     let reader = sevenz_rust::SevenZReader::new(file, len, sevenz_rust::Password::empty())
-        .map_err(|e| format!("解析更新包失败: {e}"))?;
+        .map_err(|e| crate::ui::i18n::tf("update.err_parse_archive", &[("e", &e)]))?;
     let files = &reader.archive().files;
     if files.len() != 1 {
-        return Err(format!(
-            "更新包应恰好包含 1 个条目 '{expected}'，实际 {} 个",
-            files.len()
+        return Err(crate::ui::i18n::tf(
+            "update.err_archive_entries",
+            &[("expected", &expected), ("n", &files.len())],
         ));
     }
     let entry = &files[0];
     let name = entry.name();
     if entry.is_directory() || name != expected || name.contains('/') || name.contains('\\') {
-        return Err(format!(
-            "更新包内容异常：条目 '{name}' 不符合约定（期望仅 '{expected}'）"
+        return Err(crate::ui::i18n::tf(
+            "update.err_archive_entry",
+            &[("name", &name), ("expected", &expected)],
         ));
     }
     Ok(())
@@ -156,11 +157,11 @@ fn verify_archive_entries(archive: &Path, expected: &str) -> Result<(), String> 
 fn make_executable(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt as _;
     let mode = std::fs::metadata(path)
-        .map_err(|e| format!("读取文件权限失败: {e}"))?
+        .map_err(|e| crate::ui::i18n::tf("update.err_read_permissions", &[("e", &e)]))?
         .permissions()
         .mode();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o755))
-        .map_err(|e| format!("设置可执行权限失败: {e}"))
+        .map_err(|e| crate::ui::i18n::tf("update.err_set_executable", &[("e", &e)]))
 }
 
 #[cfg(not(unix))]
@@ -221,12 +222,12 @@ impl InstallLock {
                         let _ = std::fs::remove_file(&path);
                         continue;
                     }
-                    return Err("另一个实例正在安装更新，已跳过本次安装".into());
+                    return Err(crate::ui::i18n::t("update.err_install_busy").to_string());
                 }
-                Err(e) => return Err(format!("创建安装锁失败: {e}")),
+                Err(e) => return Err(crate::ui::i18n::tf("update.err_lock_create", &[("e", &e)])),
             }
         }
-        Err("创建安装锁失败".into())
+        Err(crate::ui::i18n::t("update.err_lock_create_generic").to_string())
     }
 }
 
@@ -240,20 +241,20 @@ fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u6
     let resp = agent()
         .get(&info.asset_url)
         .call()
-        .map_err(|e| format!("下载失败: {e}"))?;
+        .map_err(|e| crate::ui::i18n::tf("update.err_download", &[("e", &e)]))?;
     let mut reader = resp.into_body().into_reader();
     let total = info.size;
-    let mut file = std::fs::File::create(tmp).map_err(|e| format!("创建临时文件失败: {e}"))?;
+    let mut file = std::fs::File::create(tmp).map_err(|e| crate::ui::i18n::tf("update.err_tmp_create", &[("e", &e)]))?;
     let mut buf = [0u8; 64 * 1024];
     let mut downloaded: u64 = 0;
     let mut hasher = sha2::Sha256::new();
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("下载中断: {e}"))?;
+        let n = reader.read(&mut buf).map_err(|e| crate::ui::i18n::tf("update.err_download_interrupted", &[("e", &e)]))?;
         if n == 0 {
             break;
         }
         std::io::Write::write_all(&mut file, &buf[..n])
-            .map_err(|e| format!("写入临时文件失败: {e}"))?;
+            .map_err(|e| crate::ui::i18n::tf("update.err_tmp_write", &[("e", &e)]))?;
         hasher.update(&buf[..n]);
         downloaded += n as u64;
         on_progress(downloaded, total);
@@ -264,8 +265,9 @@ fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u6
     // 传输完整性：API 提供了大小却没下满/超量，视为损坏（read 返回 0
     // 无法区分干净结束与连接提前断开，必须与预期大小对账）
     if total > 0 && downloaded != total {
-        return Err(format!(
-            "下载不完整：期望 {total} 字节，实际 {downloaded} 字节"
+        return Err(crate::ui::i18n::tf(
+            "update.err_size_mismatch",
+            &[("total", &total), ("downloaded", &downloaded)],
         ));
     }
 
@@ -273,11 +275,14 @@ fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u6
     // 状态下安装，而 UI 仍宣称"已通过 sha256 校验"。发布脚本两侧都会生成侧车，
     // 因此这里 fail-closed 不会误伤正常发布。
     let expect = fetch_expected_sha256(info)?.ok_or_else(|| {
-        "Release 未提供 .sha256 校验文件，无法验证完整性，已拒绝安装".to_string()
+        crate::ui::i18n::t("update.err_no_sha_sidecar").to_string()
     })?;
     let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
     if !actual.eq_ignore_ascii_case(&expect) {
-        return Err(format!("校验失败：期望 sha256 {expect}，实际 {actual}"));
+        return Err(crate::ui::i18n::tf(
+            "update.err_sha_mismatch",
+            &[("expect", &expect), ("actual", &actual)],
+        ));
     }
     Ok(())
 }
@@ -312,11 +317,11 @@ fn fetch_expected_sha256(info: &UpdateInfo) -> Result<Option<String>, String> {
     let mut body = agent()
         .get(url)
         .call()
-        .map_err(|e| format!("获取校验文件失败: {e}"))?
+        .map_err(|e| crate::ui::i18n::tf("update.err_fetch_sidecar", &[("e", &e)]))?
         .into_body();
     let text = body
         .read_to_string()
-        .map_err(|e| format!("读取校验文件失败: {e}"))?;
+        .map_err(|e| crate::ui::i18n::tf("update.err_read_sidecar", &[("e", &e)]))?;
     // 常见格式：<hex>  <filename> 或纯 hex
     let hex = text
         .split_whitespace()
@@ -326,7 +331,7 @@ fn fetch_expected_sha256(info: &UpdateInfo) -> Result<Option<String>, String> {
     if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(Some(hex))
     } else {
-        Err("校验文件格式异常".into())
+        Err(crate::ui::i18n::t("update.err_sidecar_format").to_string())
     }
 }
 
@@ -367,13 +372,13 @@ pub fn install_staged(staged: &StagedUpdate) -> Result<(), String> {
     // 安装前复核：从"下载校验通过"到"下次启动安装"之间，暂存文件可能被替换或损坏
     let actual = file_sha256(&staged.path)?;
     if !actual.eq_ignore_ascii_case(&staged.sha256) {
-        return Err(format!(
-            "暂存文件校验失败（可能被替换或损坏）：期望 {}，实际 {actual}",
-            staged.sha256
+        return Err(crate::ui::i18n::tf(
+            "update.err_staged_verify",
+            &[("expect", &staged.sha256), ("actual", &actual)],
         ));
     }
 
-    let cur = std::env::current_exe().map_err(|e| format!("无法定位自身: {e}"))?;
+    let cur = std::env::current_exe().map_err(|e| crate::ui::i18n::tf("update.err_locate_self", &[("e", &e)]))?;
     let mut old_name = cur.clone().into_os_string();
     old_name.push(".old");
     let old = PathBuf::from(old_name);
@@ -383,22 +388,22 @@ pub fn install_staged(staged: &StagedUpdate) -> Result<(), String> {
 
     // 旧残留先清掉，避免改名失败
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(&cur, &old).map_err(|e| format!("替换失败（可能无写入权限）: {e}"))?;
+    std::fs::rename(&cur, &old).map_err(|e| crate::ui::i18n::tf("update.err_replace_no_perm", &[("e", &e)]))?;
     if let Err(e) = place_file(&staged.path, &cur) {
         // 回滚，尽量保住当前可执行文件
         let rollback = std::fs::rename(&old, &cur);
-        return Err(format!(
-            "替换失败: {e}；{}",
-            rollback_result(rollback, &old)
+        return Err(crate::ui::i18n::tf(
+            "update.err_replace",
+            &[("e", &e), ("rollback", &rollback_result(rollback, &old))],
         ));
     }
     if let Err(e) = std::process::Command::new(&cur).spawn() {
         // 新文件无法启动（常见：杀毒软件锁定刚落地的文件）：恢复旧版本
         let _ = std::fs::remove_file(&cur);
         let rollback = std::fs::rename(&old, &cur);
-        return Err(format!(
-            "启动新版本失败: {e}；{}",
-            rollback_result(rollback, &old)
+        return Err(crate::ui::i18n::tf(
+            "update.err_spawn_new",
+            &[("e", &e), ("rollback", &rollback_result(rollback, &old))],
         ));
     }
     clear_install_consent();
@@ -410,10 +415,10 @@ pub fn install_staged(staged: &StagedUpdate) -> Result<(), String> {
 /// 描述回滚结果；回滚失败时提示 `.old` 备份仍保留在原处。
 fn rollback_result(rollback: std::io::Result<()>, old: &std::path::Path) -> String {
     match rollback {
-        Ok(()) => "已恢复原版本".to_string(),
-        Err(re) => format!(
-            "回滚失败（{re}），原版本备份保留在 {}",
-            old.display()
+        Ok(()) => crate::ui::i18n::t("update.rollback_done").to_string(),
+        Err(re) => crate::ui::i18n::tf(
+            "update.rollback_failed",
+            &[("e", &re), ("p", &old.display())],
         ),
     }
 }

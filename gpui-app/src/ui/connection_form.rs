@@ -577,9 +577,9 @@ impl ConnectionForm {
         // 证书文件不存在时握手才报错太晚，保存前给出字段级提示
         if transport.is_tls() {
             for (key, label, p) in [
-                ("ssl_ca", "CA 证书", &ssl.ca_file),
-                ("ssl_client_cert", "客户端证书", &ssl.client_cert_file),
-                ("ssl_client_key", "客户端私钥", &ssl.client_key_file),
+                ("ssl_ca", "ssl.ca", &ssl.ca_file),
+                ("ssl_client_cert", "ssl.cert", &ssl.client_cert_file),
+                ("ssl_client_key", "ssl.key", &ssl.client_key_file),
             ] {
                 if !p.is_empty() && !std::path::Path::new(p).exists() {
                     return Err(self.fail(key, i18n::tf("form.path_missing", &[("label", &i18n::t(label)), ("p", &p)])));
@@ -663,7 +663,7 @@ impl ConnectionForm {
         cx.notify();
 
         cx.spawn_in(window, async move |this, cx| {
-            let result = rx.recv().await.unwrap_or(Err("测试任务丢失".into()));
+            let result = rx.recv().await.unwrap_or(Err(i18n::t("form.test_task_lost").to_string()));
             this.update_in(cx, |form, window, cx| {
                 form.testing = false;
                 match result {
@@ -671,8 +671,9 @@ impl ConnectionForm {
                         Notification::success(i18n::t("form.test_ok")),
                         cx,
                     ),
-                    Err(e) => window.push_notification(Notification::error(format!(
-                        "连接测试失败: {e}"
+                    Err(e) => window.push_notification(Notification::error(i18n::tf(
+                        "form.test_failed",
+                        &[("e", &e)],
                     )), cx),
                 }
                 cx.notify();
@@ -967,7 +968,7 @@ impl Render for ConnectionForm {
             )))
             // ── MQTT 5 高级属性（仅 v5 协议显示） ──
             .when(is_v5, |w| w.child(self.collapsible_section(
-                "sec-mqtt5", "MQTT 5 属性", mqtt5_hint, true, self.show_mqtt5,
+                "sec-mqtt5", i18n::t("form.mqtt5_section"), mqtt5_hint, true, self.show_mqtt5,
                 |f| f.show_mqtt5 = !f.show_mqtt5, border, card_bg,
                 h_flex().gap_2().w_full()
                     .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.session_expiry"), Input::new(&self.session_expiry), false, err("session_expiry"), danger)))

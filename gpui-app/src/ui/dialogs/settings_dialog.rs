@@ -121,7 +121,7 @@ impl SettingsDialog {
         cx.notify();
         let rx = self.engine.run_blocking(update::check_latest);
         cx.spawn_in(window, async move |this, cx| {
-            let result = rx.recv().await.unwrap_or(Err("任务丢失".into()));
+            let result = rx.recv().await.unwrap_or(Err(i18n::t("update.task_lost").to_string()));
             this.update_in(cx, |s, _window, cx| {
                 s.update = match result {
                     Ok(Some(info)) => UpdateUi::Available(Box::new(info)),
@@ -155,7 +155,7 @@ impl SettingsDialog {
                 .ok();
             }
             // 进度通道关闭：拿到最终结果
-            let result = rx.recv().await.unwrap_or(Err("任务丢失".into()));
+            let result = rx.recv().await.unwrap_or(Err(i18n::t("update.task_lost").to_string()));
             this.update_in(cx, |s, _window, cx| {
                 s.update = match result {
                     Ok(staged) => UpdateUi::ReadyToInstall(Box::new(staged)),
@@ -273,8 +273,9 @@ impl SettingsDialog {
                                     .on_click(move |_, window, cx| {
                                         if let Err(e) = update::install_staged(&staged_now) {
                                             window.push_notification(
-                                                Notification::error(format!(
-                                                    "安装失败：{e}"
+                                                Notification::error(i18n::tf(
+                                                    "update.install_failed",
+                                                    &[("e", &e)],
                                                 )),
                                                 cx,
                                             );
@@ -399,12 +400,14 @@ impl SettingsDialog {
             .value()
             .trim()
             .parse::<usize>()
-            .map_err(|_| format!(
-                "消息缓存条数需要是 {MAX_MESSAGES_MIN}~{MAX_MESSAGES_MAX} 的整数"
+            .map_err(|_| i18n::tf(
+                "settings.max_messages_invalid",
+                &[("min", &MAX_MESSAGES_MIN), ("max", &MAX_MESSAGES_MAX)],
             ))?;
         if !(MAX_MESSAGES_MIN..=MAX_MESSAGES_MAX).contains(&max_messages) {
-            return Err(format!(
-                "消息缓存条数需要是 {MAX_MESSAGES_MIN}~{MAX_MESSAGES_MAX} 的整数"
+            return Err(i18n::tf(
+                "settings.max_messages_invalid",
+                &[("min", &MAX_MESSAGES_MIN), ("max", &MAX_MESSAGES_MAX)],
             ));
         }
         // 四个字段全部显式写出，避免 ..Default::default() 把开关项重置为默认值
