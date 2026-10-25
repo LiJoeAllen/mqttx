@@ -64,22 +64,22 @@ pub(super) fn extract_placeholder_keys(topic: &str, payload: &str) -> Vec<String
 }
 
 /// MQTT 主题过滤器匹配：`+` 匹配单层，`#` 匹配本层及以下（可匹配父级本身）。
+/// 迭代器逐段比较、零分配——消息面板过滤激活时每帧对环形缓冲里的每条记录调用。
 pub(super) fn topic_matches(filter: &str, topic: &str) -> bool {
-    let f: Vec<&str> = filter.split('/').collect();
-    let t: Vec<&str> = topic.split('/').collect();
-    for (i, part) in f.iter().enumerate() {
-        if *part == "#" {
-            // "a/#" 需要匹配 "a" 自身：剩余层级数 >= 过滤器已消费层数
-            return i <= t.len();
+    let mut t = topic.split('/');
+    for f in filter.split('/') {
+        if f == "#" {
+            // 走到这里说明前面的层已逐层匹配（否则早已返回 false），
+            // # 匹配剩余全部层级，"a/#" 也匹配 "a" 自身
+            return true;
         }
-        if i >= t.len() {
-            return false;
-        }
-        if *part != "+" && *part != t[i] {
-            return false;
+        match t.next() {
+            Some(tp) if f == "+" || f == tp => {}
+            _ => return false,
         }
     }
-    f.len() == t.len()
+    // 过滤器耗尽时主题也必须恰好耗尽
+    t.next().is_none()
 }
 
 /// 挑选消息着色用的订阅色：先看精确匹配，再看通配匹配；只考虑启用且已设色的订阅。
@@ -184,7 +184,7 @@ pub(super) fn contains_ignore_case(hay: &str, needle: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_placeholder_keys;
+    use super::{extract_placeholder_keys, topic_matches};
 
     // 修复回归：提取须 trim、排除内置变量、去重且保持首次出现顺序
     #[test]
@@ -206,4 +206,28 @@ mod tests {
         assert_eq!(keys, vec!["名称"]);
     }
 
+    // 零分配重写的语义锁定：与原实现（collect 后按下标比较）完全一致
+    #[test]
+    fn topic_matches_wildcards_and_levels() {
+        // # 匹配父级自身与任意深度
+        assert!(topic_matches("#", "a/b/c"));
+        assert!(topic_matches("#", "a"));
+        assert!(topic_matches("a/#", "a"));
+        assert!(topic_matches("a/#", "a/b/c"));
+        assert!(!topic_matches("a/#", "b"));
+        // + 恰好单层
+        assert!(topic_matches("a/+/c", "a/b/c"));
+        assert!(!topic_matches("a/+/c", "a/b"));
+        assert!(!topic_matches("a/+/c", "a/b/c/d"));
+        assert!(topic_matches("+/b", "a/b"));
+        assert!(!topic_matches("+/b", "/b/x"));
+        // 前缀层不足：# 之前的层必须逐一匹配
+        assert!(!topic_matches("a/b/#", "a"));
+        assert!(topic_matches("a/b/#", "a/b"));
+        // 精确匹配与长度一致性
+        assert!(topic_matches("a/b", "a/b"));
+        assert!(!topic_matches("a/b", "a"));
+        assert!(!topic_matches("a", "a/b"));
+        assert!(!topic_matches("a/b", "a/c"));
+    }
 }

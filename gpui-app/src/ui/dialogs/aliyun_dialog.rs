@@ -193,7 +193,12 @@ impl AliyunDialog {
         }
         match self.selected {
             Some(i) if i < self.presets.len() => self.presets[i] = preset,
-            _ => self.presets.push(preset),
+            _ => {
+                self.presets.push(preset);
+                // 新建流程保存后指向新条目：否则 selected 仍为 None，
+                // 再次点击「保存预设」会以新 uuid 再 push 一条内容相同的重复预设
+                self.selected = Some(self.presets.len() - 1);
+            }
         }
         let saved = self.presets.clone();
         self.app.update(cx, |a, cx| {

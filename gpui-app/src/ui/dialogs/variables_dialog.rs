@@ -24,7 +24,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
         .map(|v| (v.key.clone(), v.value.clone()))
         .collect();
     let editor: Entity<KvEditor> =
-        cx.new(|cx| KvEditor::new("global-var", &pairs, window, cx));
+        cx.new(|cx| KvEditor::new("global-var", &pairs, true, window, cx));
     let app = app.clone();
 
     window.open_dialog(cx, move |dialog, _, _| {

@@ -230,7 +230,7 @@ impl ConnectionView {
         let correlation_data =
             cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.correlation_ph")));
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("msg.filter_placeholder")));
-        let user_props = cx.new(|cx| KvEditor::new("pub", &[], window, cx));
+        let user_props = cx.new(|cx| KvEditor::new("pub", &[], false, window, cx));
         let preset_name =
             cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.preset_name_hint")));
 
@@ -293,6 +293,11 @@ impl ConnectionView {
     /// 消息流是否处于暂停滚动状态（引擎事件泵据此决定是否刷新本视图）。
     pub fn is_paused(&self) -> bool {
         self.paused
+    }
+
+    /// 当前是否处于日志面板（引擎日志事件据此决定是否刷新本视图）。
+    pub fn shows_logs(&self) -> bool {
+        matches!(self.panel, Panel::Logs)
     }
 
     /// Ctrl+F：把焦点移到消息过滤框（键盘直达过滤入口）。

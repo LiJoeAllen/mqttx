@@ -10,6 +10,10 @@ use gpui_kit::{ App, AppContext as _, Context, Entity, InteractiveElement as _, 
 /// MQTT 5 用户属性等 key/value 列表编辑器。
 pub struct KvEditor {
     id_prefix: SharedString,
+    /// 读取 pairs() 时是否按 key 去重（保留最后一条）。全局变量场景
+    /// `{{key}}` 必须唯一，去重是对的；MQTT 5 用户属性允许同名多条，
+    /// 去重会静默丢数据，须传 false。
+    dedup: bool,
     pub rows: Vec<(Entity<InputState>, Entity<InputState>)>,
 }
 
@@ -17,11 +21,13 @@ impl KvEditor {
     pub fn new(
         id_prefix: impl Into<SharedString>,
         pairs: &[(String, String)],
+        dedup: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut editor = Self {
             id_prefix: id_prefix.into(),
+            dedup,
             rows: Vec::new(),
         };
         for (k, v) in pairs {
@@ -52,8 +58,8 @@ impl KvEditor {
     }
 
     pub fn pairs(&self, cx: &App) -> Vec<(String, String)> {
-        // key 统一 trim 并去重（保留最后一条）：否则带首尾空白的 key
-        // 永远无法被 {{key}} 模板引用，重复 key 也只有一条能生效。
+        // key 统一 trim：带首尾空白的 key 无法被 {{key}} 模板引用；
+        // 去重仅在 dedup 模式（全局变量）下进行，用户属性保留重复键。
         let mut out: Vec<(String, String)> = Vec::new();
         for (k, v) in self
             .rows
@@ -65,8 +71,8 @@ impl KvEditor {
                 continue;
             }
             match out.iter_mut().find(|(ek, _)| *ek == k) {
-                Some(slot) => slot.1 = v,
-                None => out.push((k, v)),
+                Some(slot) if self.dedup => slot.1 = v,
+                _ => out.push((k, v)),
             }
         }
         out

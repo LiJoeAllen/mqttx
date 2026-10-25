@@ -48,17 +48,19 @@ struct PresetsDialog {
 }
 
 /// 列表 payload 预览：换行/制表符压平后截取前 N 字符。
+/// 单次遍历、越过上限即返回——预览在 render 里对每条预设执行，
+/// 不能为 24 个字符扫描并复制整个 payload（预设模板可达几十 KB）。
 fn payload_preview(payload: &str) -> String {
-    let flat: String = payload
-        .chars()
-        .map(|c| match c {
+    let mut out = String::new();
+    for (n, c) in payload.chars().enumerate() {
+        if n == LIST_PAYLOAD_PREVIEW_CHARS {
+            out.push('…');
+            return out;
+        }
+        out.push(match c {
             '\n' | '\r' | '\t' => ' ',
-            _ => c,
-        })
-        .collect();
-    let mut out: String = flat.chars().take(LIST_PAYLOAD_PREVIEW_CHARS).collect();
-    if flat.chars().count() > LIST_PAYLOAD_PREVIEW_CHARS {
-        out.push('…');
+            other => other,
+        });
     }
     out
 }
@@ -124,7 +126,7 @@ impl PresetsDialog {
                 .default_value(params.correlation_data.clone().unwrap_or_default())
         });
         let user_props =
-            cx.new(|cx| KvEditor::new("preset-props", &params.user_properties, window, cx));
+            cx.new(|cx| KvEditor::new("preset-props", &params.user_properties, false, window, cx));
 
         Self {
             app,
@@ -236,7 +238,7 @@ impl PresetsDialog {
             .update(cx, |s, cx| s.set_value(cd, window, cx));
         // KvEditor 不支持整体回填，直接重建实体
         self.user_props =
-            cx.new(|cx| KvEditor::new("preset-props", &params.user_properties, window, cx));
+            cx.new(|cx| KvEditor::new("preset-props", &params.user_properties, false, window, cx));
         cx.notify();
     }
 
@@ -262,7 +264,7 @@ impl PresetsDialog {
             .update(cx, |s, cx| s.set_value("", window, cx));
         self.correlation_data
             .update(cx, |s, cx| s.set_value("", window, cx));
-        self.user_props = cx.new(|cx| KvEditor::new("preset-props", &[], window, cx));
+        self.user_props = cx.new(|cx| KvEditor::new("preset-props", &[], false, window, cx));
         cx.notify();
     }
 

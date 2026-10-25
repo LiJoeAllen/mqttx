@@ -12,6 +12,7 @@ use gpui_kit::component::{
     h_flex, notification::Notification, v_flex, ActiveTheme as _, Sizable as _, StyledExt as _,
     WindowExt as _,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     div, px, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
     Styled as _, Window,
@@ -347,10 +348,14 @@ impl SettingsDialog {
                 };
                 v_flex()
                     .gap_1()
-                    .child(
-                        gpui_kit::component::progress::Progress::new("update-progress")
-                            .value(pct * 100.),
-                    )
+                    // 服务器未返回 Content-Length（total=0）时百分比恒为 0，
+                    // 渲染进度条只会让用户误以为卡死；只保留递增的字节数文案
+                    .when(*total > 0, |v| {
+                        v.child(
+                            gpui_kit::component::progress::Progress::new("update-progress")
+                                .value(pct * 100.),
+                        )
+                    })
                     .child(
                         div()
                             .text_xs()

@@ -192,7 +192,7 @@ impl ConnectionView {
         self.correlation_data
             .update(cx, |s, cx| s.set_value(cd, window, cx));
         // KvEditor 不支持运行时整体替换，直接重建实体回填用户属性
-        self.user_props = cx.new(|cx| KvEditor::new("pub", &params.user_properties, window, cx));
+        self.user_props = cx.new(|cx| KvEditor::new("pub", &params.user_properties, false, window, cx));
         let qos_idx = params.qos.min(2) as usize;
         self.pub_qos.update(cx, |s, cx| {
             s.set_selected_index(Some(IndexPath::new(qos_idx)), window, cx)

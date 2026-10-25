@@ -60,7 +60,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
         let hover_bg = cx.theme().muted;
         let mut rows = v_flex().gap_0p5().flex_1().overflow_y_scrollbar();
         let mut shown = 0usize;
-        for conn in self.connections.clone() {
+        for conn in &self.connections {
             // 分组过滤与搜索叠加（AND）
             let group = conn.group.as_deref().map(str::trim).unwrap_or("");
             let match_group = match &filter {
@@ -86,7 +86,6 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                 .then(|| self.errors.get(&conn.id).cloned())
                 .flatten();
             let active = self.active_tab.as_deref() == Some(conn.id.as_str());
-            let cfg = conn.clone();
             let name = conn.name.clone();
             let address = conn.display_address();
             let row_id = conn.id.clone();
@@ -148,7 +147,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                                 )
                             }),
                     )
-                    .child(self.render_conn_power(&cfg, status, cx))
+                    .child(self.render_conn_power(conn, status, cx))
                     .child(self.render_conn_menu(&conn.id, cx)),
             );
         }

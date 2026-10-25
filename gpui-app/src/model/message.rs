@@ -139,16 +139,19 @@ pub fn compute_preview(payload: &str) -> String {
             truncate_preview(pretty)
         }
         None => {
-            let flat: String = payload
-                .chars()
-                .map(|c| match c {
+            // 单次遍历、截满 200 字符即停：不能为截取 200 字符先把整个
+            // payload（上限 128KB）压平复制再全量计数——预览在每条消息
+            // 入环形缓冲时计算一次，高频消息流下这是热路径
+            let mut s = String::new();
+            for (n, c) in payload.chars().enumerate() {
+                if n == 200 {
+                    s.push('…');
+                    break;
+                }
+                s.push(match c {
                     '\n' | '\r' | '\t' => ' ',
-                    _ => c,
-                })
-                .collect();
-            let mut s: String = flat.chars().take(200).collect();
-            if flat.chars().count() > 200 {
-                s.push('…');
+                    other => other,
+                });
             }
             s
         }
@@ -160,15 +163,25 @@ pub fn compute_preview(payload: &str) -> String {
 }
 
 /// 截断预览文本：最多 [`PREVIEW_MAX_LINES`] 行、[`PREVIEW_MAX_CHARS`] 字符。
+/// 单次遍历：达到任一上限即停止，不再对全文做二次 lines/chars 计数。
 fn truncate_preview(text: String) -> String {
-    let mut lines: Vec<&str> = text.lines().take(PREVIEW_MAX_LINES).collect();
-    let more = text.lines().count() > PREVIEW_MAX_LINES;
-    if more {
-        lines.push("…");
+    let mut out = String::new();
+    let mut chars = 0usize;
+    let mut more = false;
+    for (lines, line) in text.lines().enumerate() {
+        let len = line.chars().count();
+        if lines >= PREVIEW_MAX_LINES || chars + len > PREVIEW_MAX_CHARS {
+            more = true;
+            break;
+        }
+        if lines > 0 {
+            out.push('\n');
+        }
+        out.push_str(line);
+        chars += len;
     }
-    let mut out = lines.join("\n");
-    if out.chars().count() > PREVIEW_MAX_CHARS {
-        out = out.chars().take(PREVIEW_MAX_CHARS).collect::<String>() + "…";
+    if more {
+        out.push('…');
     }
     out
 }

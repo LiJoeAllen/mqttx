@@ -457,23 +457,35 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                 let mut records: Vec<MqttRecord> = Vec::new();
                 let total = app.messages.get(conn.as_str()).map_or(0, |m| m.len());
                 if let Some(m) = app.messages.get(conn.as_str()) {
-                    for r in m.iter().rev() {
-                        // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
-                        let dir_ok = match dir {
-                            DirFilter::All => true,
-                            DirFilter::Received => r.direction == Direction::Received,
-                            DirFilter::Published => r.direction == Direction::Published,
-                        };
-                        let query_ok = query.is_empty()
-                            || contains_ignore_case(&r.topic, &query)
-                            || contains_ignore_case(&r.payload, &query);
-                        let sub_ok = sub_filter
-                            .as_deref()
-                            .is_none_or(|f| topic_matches(f, &r.topic));
-                        if dir_ok && query_ok && sub_ok {
-                            matched += 1;
-                            if records.len() < MAX_RENDERED_MESSAGES {
-                                records.push(r.clone());
+                    // 无任何过滤时命中数恒等于总数：直接取末尾 N 条，
+                    // 免去高频消息流下每帧全量扫描环形缓冲
+                    let unfiltered = query.is_empty()
+                        && sub_filter.is_none()
+                        && matches!(dir, DirFilter::All);
+                    if unfiltered {
+                        matched = m.len();
+                        records.extend(
+                            m.iter().rev().take(MAX_RENDERED_MESSAGES).cloned(),
+                        );
+                    } else {
+                        for r in m.iter().rev() {
+                            // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
+                            let dir_ok = match dir {
+                                DirFilter::All => true,
+                                DirFilter::Received => r.direction == Direction::Received,
+                                DirFilter::Published => r.direction == Direction::Published,
+                            };
+                            let query_ok = query.is_empty()
+                                || contains_ignore_case(&r.topic, &query)
+                                || contains_ignore_case(&r.payload, &query);
+                            let sub_ok = sub_filter
+                                .as_deref()
+                                .is_none_or(|f| topic_matches(f, &r.topic));
+                            if dir_ok && query_ok && sub_ok {
+                                matched += 1;
+                                if records.len() < MAX_RENDERED_MESSAGES {
+                                    records.push(r.clone());
+                                }
                             }
                         }
                     }

@@ -609,6 +609,16 @@ impl MqttEngine {
         rx
     }
 
+    /// 延迟 `delay` 后向 `tx` 发一个防抖触发。连续调用会 spawn 多个定时器，
+    /// 但通道容量为 1 时未消费的触发会合并（try_send 满 → 静默丢弃），
+    /// 接收方以自身的 dirty 标志判断是否还有待写数据。
+    pub fn schedule_debounced(&self, delay: Duration, tx: smol::channel::Sender<()>) {
+        self.runtime.spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = tx.try_send(());
+        });
+    }
+
     /// 驻留字符串（主题/连接 ID）：同一内容全进程只保留一份 `Arc<str>`。
     /// 缓存有上限，异常流量下整体清空重建，避免无限增长。
     pub(crate) fn intern(&self, s: &str) -> Arc<str> {

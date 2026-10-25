@@ -133,14 +133,20 @@ pub(super) fn v5_qos(qos: u8) -> V5QoS {
     }
 }
 
-fn v5_record(engine: &MqttEngine, seq: u64, conn_id: &str, p: &V5Publish) -> MqttRecord {
+fn v5_record(
+    engine: &MqttEngine,
+    seq: u64,
+    conn_id: &str,
+    p: &V5Publish,
+    topic: &str,
+) -> MqttRecord {
     let props = p.properties.as_ref();
     let (payload, raw_bytes, payload_truncated) = crate::model::retained_payload(&p.payload);
     MqttRecord {
         seq,
         connection_id: engine.intern(conn_id),
         direction: Direction::Received,
-        topic: engine.intern(&String::from_utf8_lossy(&p.topic)),
+        topic: engine.intern(topic),
         payload,
         qos: v5_qos_u8(p.qos),
         retain: p.retain,
@@ -203,8 +209,10 @@ pub(super) fn spawn_v5_loop(
                 event = eventloop.poll() => {
                     match event {
                         Ok(V5Event::Incoming(V5Packet::Publish(p))) => {
+                            // lossy 转换只做一次：日志与记录驻留共用同一份
                             let topic = String::from_utf8_lossy(&p.topic).to_string();
-                            let record = v5_record(&engine, engine.next_seq(), &id, &p);
+                            let record =
+                                v5_record(&engine, engine.next_seq(), &id, &p, &topic);
                             engine.log(
                                 &id,
                                 LogLevel::Info,

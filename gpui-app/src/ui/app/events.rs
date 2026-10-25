@@ -136,10 +136,15 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                     window.push_notification(Notification::warning(entry.message.clone()), cx);
                 }
                 self.push_log(entry);
+                // 仅当日志面板可见时才刷新对应视图。每条收到的消息都会伴随一条
+                // publish_received 日志：无条件刷新会让消息面板在高频消息流下
+                // 因日志事件反复重渲染，也让「暂停滚动」对消息流失效。
                 if let Some(id) = self.active_tab.clone()
-                    && let Some(view) = self.views.get(&id) {
-                        view.update(cx, |_, cx| cx.notify());
-                    }
+                    && let Some(view) = self.views.get(&id)
+                    && view.read(cx).shows_logs()
+                {
+                    view.update(cx, |_, cx| cx.notify());
+                }
             }
         }
     }

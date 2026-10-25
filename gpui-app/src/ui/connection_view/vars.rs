@@ -68,8 +68,8 @@ pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Sel
                         }
                         None => a.variables.push(GlobalVariable { key, value: val }),
                     }
-                    let snapshot = a.variables.clone();
-                    a.save_variables(snapshot);
+                    // 内存即时生效；落盘走 500ms 防抖，连续键入不逐键 fsync
+                    a.persist_variables_soon();
                     cx.notify();
                 });
             });

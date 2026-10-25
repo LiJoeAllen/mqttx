@@ -81,6 +81,8 @@ pub struct MqttXApp {
     storage: Storage,
     pub engine: std::sync::Arc<MqttEngine>,
     _pump: gpui_kit::Task<()>,
+    /// 变量落盘防抖泵：消费防抖触发并统一写盘（与引擎事件泵同型）
+    _vars_pump: gpui_kit::Task<()>,
     // ── 持久化数据 ──
     pub connections: Vec<ConnectionConfig>,
     pub subscriptions: Vec<Subscription>,
@@ -111,6 +113,10 @@ pub struct MqttXApp {
     file_dialog_open: bool,
     /// 按日期缓存的日志文件句柄（日期, 文件），避免每条日志都重新打开文件
     log_file: Option<(String, std::io::BufWriter<std::fs::File>)>,
+    /// 变量落盘防抖：编辑期间置脏，停顿 500ms 后由 vars 泵统一写盘
+    variables_dirty: bool,
+    /// 变量落盘防抖触发通道（引擎定时器到点后发令）
+    variables_flush_tx: smol::channel::Sender<()>,
     /// 系统外观变化订阅：设置为「跟随系统」时重应用主题，随实体存活
     _appearance_obs: gpui_kit::Subscription,
     /// 窗口置顶状态（标题栏钉子按钮切换）
@@ -159,6 +165,24 @@ impl MqttXApp {
                 .ok();
             }
         });
+
+        // 变量落盘防抖泵：persist_variables_soon 经引擎定时器（500ms）发来触发，
+        // 到点后统一把脏变量写盘。编辑期间内存即时生效，磁盘只按停顿节流，
+        // 避免连续键入时每个键击都触发一次 fsync。
+        let (flush_tx, flush_rx) = smol::channel::bounded::<()>(1);
+        let weak = cx.entity().downgrade();
+        let vars_pump =
+            cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+                while flush_rx.recv().await.is_ok() {
+                    weak.update_in(cx, |app, _window, _cx| {
+                        if app.variables_dirty {
+                            app.variables_dirty = false;
+                            app.storage.save_variables(&app.variables);
+                        }
+                    })
+                    .ok();
+                }
+            });
 
         // OTA：清理上次自更新遗留文件；开启自动检查则后台静默检查并下载，
         // 下载完成后弹对话框征得同意再安装（不自动重启）。
@@ -474,6 +498,7 @@ impl MqttXApp {
             storage,
             engine,
             _pump: pump,
+            _vars_pump: vars_pump,
             connections,
             subscriptions,
             presets,
@@ -494,6 +519,8 @@ impl MqttXApp {
             group_filter: GroupFilter::All,
             file_dialog_open: false,
             log_file: None,
+            variables_dirty: false,
+            variables_flush_tx: flush_tx,
             _appearance_obs: appearance_obs,
             pinned: false,
             sidebar_collapsed: ui_state.sidebar_collapsed,

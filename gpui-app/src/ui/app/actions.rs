@@ -177,6 +177,15 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         self.storage.save_variables(&self.variables);
     }
 
+    /// 变量编辑落盘防抖：内存即时生效（预览/发布立刻可用），磁盘写入
+    /// 延迟 500ms 节流——连续键入时每个键击都 fsync 一次小文件纯属浪费，
+    /// 停顿后才真正落盘。触发经引擎定时器发回 vars 泵完成写盘。
+    pub fn persist_variables_soon(&mut self) {
+        self.variables_dirty = true;
+        self.engine
+            .schedule_debounced(std::time::Duration::from_millis(500), self.variables_flush_tx.clone());
+    }
+
     pub fn save_presets(&mut self, presets: Vec<PublishPreset>) {
         self.presets = presets;
         self.storage.save_presets(&self.presets);
@@ -203,10 +212,13 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
 
     pub fn save_settings(&mut self, settings: AppSettings, window: &mut Window, cx: &mut App) {
         // 主题按预设分派："linear" 走外观模式（跟随系统/浅/深），官方捆绑
-        // 预设整包应用（自带明暗，apply_config 连 mode 一起生效）
-        if settings.theme_preset == crate::ui::app::theme::DEFAULT_PRESET {
-            apply_theme(settings.theme, cx);
-        } else if !crate::ui::app::theme::apply_theme_preset(&settings.theme_preset, cx) {
+        // 预设整包应用（自带明暗，apply_config 连 mode 一起生效）；
+        // 预设应用失败（未注册/被移除）时回退外观模式
+        if settings.theme_preset != crate::ui::app::theme::DEFAULT_PRESET
+            && crate::ui::app::theme::apply_theme_preset(&settings.theme_preset, cx)
+        {
+            // 官方捆绑预设已应用
+        } else {
             apply_theme(settings.theme, cx);
         }
         // 语言即时生效（含跟随系统）
