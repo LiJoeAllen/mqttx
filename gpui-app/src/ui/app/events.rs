@@ -111,12 +111,22 @@ impl MqttXApp {
                 if ok {
                     // 乐观更新已在发送前入库；这里只在订阅仍存在时同步 QoS，
                     // 避免 SUBACK 前被删除的订阅被此事件用默认字段复活。
+                    // broker 可把请求的 QoS 降级，降级后的值即真实生效值（本会话内的
+                    // 自动重连就是拿这个值重订的）。不同步落盘会导致：界面与内存显示
+                    // 已授予的 QoS，重启后又回退成请求值，形成反复的降级抖动。
+                    let mut granted_diff = false;
                     if let Some(existing) = self
                         .subscriptions
                         .iter_mut()
                         .find(|s| s.connection_id == connection_id && s.topic == topic)
+                        && existing.qos != qos
                     {
                         existing.qos = qos;
+                        granted_diff = true;
+                    }
+                    // 仅在真正变化时写盘：避免每次重连的每个 SUBACK 都触发一次 fsync
+                    if granted_diff {
+                        self.storage.save_subscriptions(&self.subscriptions);
                     }
                 } else {
                     if let Some(e) = error {

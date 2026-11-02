@@ -219,6 +219,25 @@ impl MessageRing {
         self.queue.push_back(record);
     }
 
+    /// 立即按新的条数/字节上限收敛（设置里调小 max_messages 时调用）。
+    ///
+    /// 不主动收敛的话，超出的旧记录要等到下一条消息到达才驱逐：
+    /// 100000 → 100 会让那一次 push 在事件回调里连做近十万次 pop_front，
+    /// UI 线程卡在这一帧上，内存也一直按旧上限占着。返回被丢弃的条数。
+    pub fn trim_to(&mut self, max_count: usize) -> usize {
+        let max_count = max_count.max(1);
+        let before = self.queue.len();
+        while self.queue.len() > max_count
+            || (self.bytes > MAX_CONNECTION_MESSAGE_BYTES && self.queue.len() > 1)
+        {
+            let Some(old) = self.queue.pop_front() else {
+                break;
+            };
+            self.bytes -= old.retained_bytes();
+        }
+        before - self.queue.len()
+    }
+
     pub fn len(&self) -> usize {
         self.queue.len()
     }

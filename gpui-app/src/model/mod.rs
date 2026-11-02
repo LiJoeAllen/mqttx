@@ -401,6 +401,26 @@ mod tests {
 
     // 单条超预算的记录也至少保留最新一条（列表不能被清空）
     #[test]
+    fn message_ring_trim_to_shrinks_without_waiting_for_next_push() {
+        let mut ring = MessageRing::new(100_000);
+        for i in 0..500_u64 {
+            ring.push(ring_record(i, 64, 64), 100_000);
+        }
+        assert_eq!(ring.len(), 500);
+        // 设置从 100000 调到 100：必须当场收敛，而不是等下一条消息才驱逐
+        let dropped = ring.trim_to(100);
+        assert_eq!(dropped, 400);
+        assert_eq!(ring.len(), 100);
+        assert_eq!(ring.retained_bytes(), 100 * 128);
+        // 丢弃最旧，保留最新
+        assert_eq!(ring.iter().next_back().unwrap().seq, 499);
+        assert_eq!(ring.iter().next().unwrap().seq, 400);
+        // 0 值按 1 处理：不允许把自己清空
+        assert_eq!(ring.trim_to(0), 99);
+        assert_eq!(ring.len(), 1);
+    }
+
+    #[test]
     fn message_ring_never_empties_on_oversized_record() {
         let mut ring = MessageRing::new(10);
         ring.push(ring_record(0, MAX_PAYLOAD_RETAIN, MAX_PAYLOAD_RETAIN), 10);

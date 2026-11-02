@@ -244,6 +244,13 @@ impl MqttXApp {
                 view.update(cx, |v, cx| v.refresh_labels(window, cx));
             }
         }
+        // 条数上限调小时立即收敛各连接环形缓冲：否则超出的旧记录要等
+        // 下一条消息到达才驱逐，内存按旧上限滞留，且那一次 push 会卡帧
+        if settings.max_messages != self.settings.max_messages {
+            for ring in self.messages.values_mut() {
+                ring.trim_to(settings.max_messages);
+            }
+        }
         self.settings = settings;
         self.storage.save_settings(&self.settings);
         // 预设切换/主题变更后强制整窗重画，避免未损坏区域滞留旧主题像素
