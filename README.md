@@ -101,7 +101,10 @@ gpui-app/
 
 ## 构建与运行
 
-前置：Rust nightly（GPUI 0.3 依赖，使用 `rustup default nightly`）。
+前置：Rust（GPUI 0.3 + edition 2024 + let-chains 需要较新的工具链）。
+本项目开发默认用 nightly；CI 的 test / lint job 用 GitHub 默认 stable
+（1.88+ 即可编译：let-chains 与 edition 2024 均已进入 stable，本机实测
+`+stable check --all-targets` 与 `+stable clippy -D warnings` 均通过）。
 
 ```bash
 # 开发运行
