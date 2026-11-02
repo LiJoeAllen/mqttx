@@ -190,3 +190,8 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 - MQTT 引擎从 Tauri 命令模型改为独立 tokio runtime + 事件通道，UI 直接订阅
 - 数据存储从浏览器 `localStorage` 迁移到系统数据目录下的 JSON 文件
 - 新增 TLS/WSS 传输、负载格式（Base64/Hex）、遗嘱消息、连接测试等能力
+
+## 许可
+
+[Apache-2.0](LICENSE)。与 `gpui-app/Cargo.toml` 的 `license` 字段及
+应用内「关于」页展示一致。
