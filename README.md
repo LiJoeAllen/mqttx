@@ -27,15 +27,15 @@
 - **国际化** — 中文 / English 双语界面，默认跟随系统语言，设置内可切换即时生效
 - **无障碍** — 全部图标按钮带可访问名称（屏幕阅读器 / UIA 可识别），完整键盘操作路径
 - **性能** — 消息预览（JSON 美化/截断）入缓冲时计算一次并随记录缓存，渲染热路径零重复解析
-- **主题** — Linear 风格配色（近黑/纯白扁平底 + 靛蓝 #5e6ad2 主色，14px 紧凑排版、6px 圆角），浅色 / 深色 / 跟随系统
-- **设置** — 自动检查更新开关、消息缓存条数、时间戳毫秒、数据目录展示与打开、关于页（版本 / 许可）
+- **主题** — 默认 Linear 风格配色（近黑/纯白扁平底 + 靛蓝 #5e6ad2 主色，14px 紧凑排版、6px 圆角），另有 38 个 gpui-kit 官方预设可选（自带明暗两套），以及浅色 / 深色 / 跟随系统三档外观模式
+- **设置** — 主题预设、外观模式、界面语言、消息缓存条数、时间戳毫秒、数据目录展示与打开、自动检查更新开关、关于页（版本 / 许可 / 检查并安装更新）
 - **本地持久化** — 连接、订阅、预设、变量、设置以 JSON 存于系统数据目录
 
 ## 技术栈
 
 | 层 | 技术 |
 | --- | --- |
-| UI | GPUI 0.3 + gpui-kit（gpui-component）0.6 |
+| UI | GPUI 0.3 + gpui-kit（gpui-component / gpui-base）0.7 |
 | MQTT | rumqttc-v5-next 0.34 / rumqttc-v4-next 0.34（TCP/TLS/WS） |
 | 异步 | 引擎跑在独立 tokio runtime，事件经 smol channel 泵回 UI 线程 |
 | 持久化 | serde + serde_json，原子写（临时文件 + rename） |
@@ -111,6 +111,17 @@ cargo run -p mqttx-desktop
 cargo build --release -p mqttx-desktop
 # 产物：target/release/mqttx(.exe)
 ```
+
+> **Windows 上 release 构建需要 `fxc.exe`**（编译 GPUI 的 HLSL 着色器；debug
+> 构建不编译着色器，所以只在 `--release` 才暴露）。gpui 的构建脚本取"版本号
+> 最大"的已装 Windows SDK，而最新 SDK（10.0.28000+）已不再随附 fxc，构建会以
+> 一句含糊的 `Failed to run fxc for quad_vertex: 系统找不到指定的文件` 失败。
+> 本机若同时装了旧 SDK，显式指过去即可：
+>
+> ```powershell
+> $env:GPUI_FXC_PATH = "D:\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe"
+> cargo build --release -p mqttx-desktop
+> ```
 
 > 中国大陆网络下若 `index.crates.io` 不可达，仓库已提供仅作用于本工程的
 > `.cargo/config.toml`（rsproxy 镜像）。
