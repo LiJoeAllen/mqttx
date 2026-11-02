@@ -60,23 +60,19 @@ impl Sampler {
     #[cfg(target_os = "windows")]
     fn sample_windows(&mut self) -> Option<Sample> {
         use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::Foundation::FILETIME;
         use windows::Win32::System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
-            THREADENTRY32,
+            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
         };
         use windows::Win32::System::ProcessStatus::{
             GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
         };
         use windows::Win32::System::Threading::{
-            GetProcessHandleCount, GetProcessTimes, OpenProcess,
-            PROCESS_QUERY_LIMITED_INFORMATION,
+            GetProcessHandleCount, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
-        use windows::Win32::Foundation::FILETIME;
 
-        let process = unsafe {
-            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid)
-                .ok()?
-        };
+        let process =
+            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid).ok()? };
 
         // ── 内存 ──
         // windows 0.58 的 EX 结构是扁平的（cb 在首位），按 EX 大小传 cb，
@@ -115,19 +111,14 @@ impl Sampler {
         let mut cpu_percent = 0f32;
         let now = Instant::now();
         let have_times = unsafe {
-            GetProcessTimes(
-                process,
-                &mut creation,
-                &mut exit,
-                &mut kernel,
-                &mut user,
-            )
-            .is_ok()
+            GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user).is_ok()
         };
         if have_times {
             let k = ((kernel.dwHighDateTime as u64) << 32) | kernel.dwLowDateTime as u64;
             let u = ((user.dwHighDateTime as u64) << 32) | user.dwLowDateTime as u64;
-            let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as f32;
+            let cores = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1) as f32;
             if let Some((pk, pu, pt)) = self.last_cpu {
                 let dt = now.duration_since(pt).as_secs_f32();
                 if dt > 0.05 {
@@ -179,7 +170,8 @@ impl Sampler {
             cpu_percent,
             threads,
             handles,
-        })    }
+        })
+    }
 }
 
 impl Default for Sampler {

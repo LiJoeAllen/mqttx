@@ -1,10 +1,8 @@
 //! 全局变量管理对话框。变量可在发布主题/负载中以 `{{key}}` 引用。
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{h_flex, v_flex, WindowExt as _};
-use gpui_kit::{
-    px, App, AppContext as _, Entity, ParentElement as _, Styled as _, Window,
-};
+use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
+use gpui_kit::{App, AppContext as _, Entity, ParentElement as _, Styled as _, Window, px};
 
 use crate::model::GlobalVariable;
 use crate::ui::app::MqttXApp;

@@ -1,47 +1,56 @@
 //! MQTT 5.0：MqttOptions/last-will/属性组装与事件循环泵。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rumqttc::mqttbytes::v5::{
     ConnectReturnCode as V5ReturnCode, Packet as V5Packet, Publish as V5Publish,
 };
 use rumqttc::{
-    AsyncClient as V5AsyncClient, Broker as V5Broker, ConnectionError as V5Error,
-    Event as V5Event, EventLoop as V5EventLoop, MqttOptions as V5Options, Outgoing as V5Outgoing, QoS as V5QoS, Transport as V5Transport,
+    AsyncClient as V5AsyncClient, Broker as V5Broker, ConnectionError as V5Error, Event as V5Event,
+    EventLoop as V5EventLoop, MqttOptions as V5Options, Outgoing as V5Outgoing, QoS as V5QoS,
+    Transport as V5Transport,
 };
 use tokio::sync::watch;
 
 use crate::model::{
     ConnectionConfig, ConnectionStatus, Direction, LogLevel, MqttRecord, TransportKind,
-};// ─── 引擎事件 ────────────────────────────────────────────────────────────────
-
+}; // ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 use super::*;
 use crate::ui::i18n;
 
-pub(super) fn build_v5(
-    cfg: &ConnectionConfig,
-) -> Result<(V5AsyncClient, V5EventLoop), String> {
+pub(super) fn build_v5(cfg: &ConnectionConfig) -> Result<(V5AsyncClient, V5EventLoop), String> {
     let custom_tls = resolve_tls_config(cfg)?;
     let mut opts = match cfg.transport {
         TransportKind::Tcp | TransportKind::Tls => {
             V5Options::new(cfg.client_id.clone(), V5Broker::tcp(&cfg.host, cfg.port))
         }
         TransportKind::Ws => {
-            let url = format!("ws://{}:{}{}", cfg.host, cfg.port, normalize_path(&cfg.path));
-            V5Options::new(cfg.client_id.clone(), V5Broker::websocket(url).map_err(|e| format!("{e:?}"))?)
+            let url = format!(
+                "ws://{}:{}{}",
+                cfg.host,
+                cfg.port,
+                normalize_path(&cfg.path)
+            );
+            V5Options::new(
+                cfg.client_id.clone(),
+                V5Broker::websocket(url).map_err(|e| format!("{e:?}"))?,
+            )
         }
         TransportKind::Wss => {
-            let url = format!("wss://{}:{}{}", cfg.host, cfg.port, normalize_path(&cfg.path));
+            let url = format!(
+                "wss://{}:{}{}",
+                cfg.host,
+                cfg.port,
+                normalize_path(&cfg.path)
+            );
             match &custom_tls {
-                Some(tls) => V5Options::websocket_with_tls_config(
-                    cfg.client_id.clone(),
-                    url,
-                    tls.clone(),
-                )
-                .map_err(|e| format!("{e:?}"))?,
+                Some(tls) => {
+                    V5Options::websocket_with_tls_config(cfg.client_id.clone(), url, tls.clone())
+                        .map_err(|e| format!("{e:?}"))?
+                }
                 None => V5Options::try_websocket_with_default_tls(cfg.client_id.clone(), url)
                     .map_err(|e| format!("{e:?}"))?,
             }
@@ -87,30 +96,31 @@ pub(super) fn build_v5(
         opts.set_topic_alias_max(Some(v));
     }
     if let Some(will) = &cfg.last_will
-        && !will.topic.is_empty() {
-            // v5 遗嘱属性：content_type / response_topic（3.1.1 下无此扩展）
-            let properties = if will.content_type.is_some() || will.response_topic.is_some() {
-                Some(rumqttc::mqttbytes::v5::LastWillProperties {
-                    delay_interval: None,
-                    payload_format_indicator: None,
-                    message_expiry_interval: None,
-                    content_type: non_blank(will.content_type.clone()),
-                    response_topic: non_blank(will.response_topic.clone()),
-                    correlation_data: None,
-                    user_properties: Vec::new(),
-                })
-            } else {
-                None
-            };
-            let lw = rumqttc::mqttbytes::v5::LastWill::new(
-                will.topic.clone(),
-                will.payload.as_bytes().to_vec(),
-                v5_qos(will.qos),
-                will.retain,
-                properties,
-            );
-            opts.set_last_will(lw);
-        }
+        && !will.topic.is_empty()
+    {
+        // v5 遗嘱属性：content_type / response_topic（3.1.1 下无此扩展）
+        let properties = if will.content_type.is_some() || will.response_topic.is_some() {
+            Some(rumqttc::mqttbytes::v5::LastWillProperties {
+                delay_interval: None,
+                payload_format_indicator: None,
+                message_expiry_interval: None,
+                content_type: non_blank(will.content_type.clone()),
+                response_topic: non_blank(will.response_topic.clone()),
+                correlation_data: None,
+                user_properties: Vec::new(),
+            })
+        } else {
+            None
+        };
+        let lw = rumqttc::mqttbytes::v5::LastWill::new(
+            will.topic.clone(),
+            will.payload.as_bytes().to_vec(),
+            v5_qos(will.qos),
+            will.retain,
+            properties,
+        );
+        opts.set_last_will(lw);
+    }
 
     Ok(V5AsyncClient::builder(opts).build())
 }
@@ -156,11 +166,8 @@ fn v5_record(
             .unwrap_or_default(),
         content_type: props.and_then(|p| p.content_type.clone()),
         response_topic: props.and_then(|p| p.response_topic.clone()),
-        correlation_data: props.and_then(|p| {
-            p.correlation_data
-                .as_ref()
-                .map(|d| correlation_display(d))
-        }),
+        correlation_data: props
+            .and_then(|p| p.correlation_data.as_ref().map(|d| correlation_display(d))),
         message_expiry_interval: props.and_then(|p| p.message_expiry_interval),
         subscription_identifier: props
             .and_then(|p| p.subscription_identifiers.first().map(|v| *v as u32)),

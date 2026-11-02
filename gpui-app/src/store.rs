@@ -71,8 +71,9 @@ impl Storage {
     }
 
     fn read_json_inner<T: for<'de> serde::Deserialize<'de>>(&self, p: &Path) -> Result<Option<T>> {
-        let mut text = std::fs::read_to_string(p)
-            .with_context(|| crate::ui::i18n::tf("io.err_read", &[("p", &p.display().to_string())]))?;
+        let mut text = std::fs::read_to_string(p).with_context(|| {
+            crate::ui::i18n::tf("io.err_read", &[("p", &p.display().to_string())])
+        })?;
         // 容忍 Windows 编辑器/PowerShell 写入的 UTF-8 BOM（BOM 只有 1 个字符，逐字符剥离）
         if let Some(rest) = text.strip_prefix('\u{feff}') {
             text = rest.to_string();
@@ -80,14 +81,19 @@ impl Storage {
         if text.trim().is_empty() {
             return Ok(None);
         }
-        let value =
-            serde_json::from_str(&text).with_context(|| crate::ui::i18n::tf("io.err_parse_json_path", &[("p", &p.display().to_string())]))?;
+        let value = serde_json::from_str(&text).with_context(|| {
+            crate::ui::i18n::tf("io.err_parse_json_path", &[("p", &p.display().to_string())])
+        })?;
         Ok(Some(value))
     }
 
     fn write_json<T: serde::Serialize + ?Sized>(&self, name: &str, value: &T) -> Result<()> {
         // 曾加载失败过的文件：覆盖前先备份原文件，把数据丢失降为可恢复
-        let was_corrupt = self.corrupt.lock().map(|mut s| s.remove(name)).unwrap_or(false);
+        let was_corrupt = self
+            .corrupt
+            .lock()
+            .map(|mut s| s.remove(name))
+            .unwrap_or(false);
         let target = self.path(name);
         if was_corrupt && target.exists() {
             let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
@@ -110,7 +116,8 @@ impl Storage {
             let mut f = std::fs::File::create(&tmp)
                 .with_context(|| format!("写入 {} 失败", tmp.display()))?;
             std::io::Write::write_all(&mut f, text.as_bytes())?;
-            f.sync_all().with_context(|| format!("刷盘 {} 失败", tmp.display()))?;
+            f.sync_all()
+                .with_context(|| format!("刷盘 {} 失败", tmp.display()))?;
             drop(f);
             std::fs::rename(&tmp, &target)
                 .with_context(|| format!("替换 {} 失败", target.display()))?;
@@ -246,7 +253,12 @@ impl Default for Storage {
 pub fn export_connections_to(path: &Path, conns: &[ConnectionConfig]) -> Result<(), String> {
     let text = serde_json::to_string_pretty(conns)
         .map_err(|e| crate::ui::i18n::tf("io.err_serialize", &[("e", &e.to_string())]))?;
-    std::fs::write(path, text).map_err(|e| crate::ui::i18n::tf("io.err_write", &[("p", &path.display().to_string()), ("e", &e.to_string())]))
+    std::fs::write(path, text).map_err(|e| {
+        crate::ui::i18n::tf(
+            "io.err_write",
+            &[("p", &path.display().to_string()), ("e", &e.to_string())],
+        )
+    })
 }
 
 /// 从 JSON 文件导入连接。
@@ -254,22 +266,25 @@ pub fn export_connections_to(path: &Path, conns: &[ConnectionConfig]) -> Result<
 /// 容错规则：容忍 UTF-8 BOM；顶层允许是数组，也可能是 `{ "connections": [...] }` 对象；
 /// 任一项不是合法连接配置、或 `id` 为空白时，返回带序号的错误信息。
 pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, String> {
-    let bytes = std::fs::read(path).map_err(|e| crate::ui::i18n::tf("io.err_read", &[("p", &path.display().to_string()), ("e", &e.to_string())]))?;
-    let mut text =
-        String::from_utf8(bytes).map_err(|_| crate::ui::i18n::tf("io.err_utf8", &[("p", &path.display().to_string())]))?;
+    let bytes = std::fs::read(path).map_err(|e| {
+        crate::ui::i18n::tf(
+            "io.err_read",
+            &[("p", &path.display().to_string()), ("e", &e.to_string())],
+        )
+    })?;
+    let mut text = String::from_utf8(bytes)
+        .map_err(|_| crate::ui::i18n::tf("io.err_utf8", &[("p", &path.display().to_string())]))?;
     if let Some(rest) = text.strip_prefix('\u{feff}') {
         text = rest.to_string();
     }
-    let value: serde_json::Value =
-        serde_json::from_str(text.trim()).map_err(|e| crate::ui::i18n::tf("io.err_parse_json", &[("e", &e.to_string())]))?;
+    let value: serde_json::Value = serde_json::from_str(text.trim())
+        .map_err(|e| crate::ui::i18n::tf("io.err_parse_json", &[("e", &e.to_string())]))?;
     let items = match value {
         serde_json::Value::Array(items) => items,
         serde_json::Value::Object(mut map) => match map.remove("connections") {
             Some(serde_json::Value::Array(items)) => items,
             _ => {
-                return Err(
-                    crate::ui::i18n::t("io.err_missing_field").to_string(),
-                );
+                return Err(crate::ui::i18n::t("io.err_missing_field").to_string());
             }
         },
         _ => return Err(crate::ui::i18n::t("io.err_top_level").to_string()),
@@ -284,7 +299,12 @@ pub fn import_connections_from(path: &Path) -> Result<Vec<ConnectionConfig>, Str
                 }
                 conns.push(c);
             }
-            Err(e) => return Err(crate::ui::i18n::tf("io.err_item_invalid", &[("n", &(i + 1)), ("e", &e.to_string())])),
+            Err(e) => {
+                return Err(crate::ui::i18n::tf(
+                    "io.err_item_invalid",
+                    &[("n", &(i + 1)), ("e", &e.to_string())],
+                ));
+            }
         }
     }
     Ok(conns)
@@ -373,7 +393,10 @@ mod tests {
         };
         std::fs::write(dir.join("connections.json"), "{ 这不是 JSON").expect("写入损坏文件");
 
-        assert!(storage.load_connections().is_empty(), "损坏文件按空数据处理");
+        assert!(
+            storage.load_connections().is_empty(),
+            "损坏文件按空数据处理"
+        );
 
         storage.save_connections(&[ConnectionConfig::new()]);
 
@@ -383,10 +406,15 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert!(
-            names.iter().any(|n| n.starts_with("connections.json.corrupt-")),
+            names
+                .iter()
+                .any(|n| n.starts_with("connections.json.corrupt-")),
             "覆盖前应备份损坏文件，实际文件: {names:?}"
         );
-        assert!(names.contains(&"connections.json".to_string()), "新文件应已写入");
+        assert!(
+            names.contains(&"connections.json".to_string()),
+            "新文件应已写入"
+        );
         // 备份内容仍是损坏原文，可人工抢救
         let backup = names
             .iter()

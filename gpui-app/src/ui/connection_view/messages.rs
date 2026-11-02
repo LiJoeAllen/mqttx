@@ -1,28 +1,33 @@
 //! 消息区：顶栏过滤/工具条、消息流渲染、单条消息行与日志视图。
 
-
-use gpui_kit::component::button::{ Button, ButtonGroup, ButtonVariant };
+use crate::ui::IconName;
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariant};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::Input;
-use gpui_kit::component::{ h_flex, notification::Notification, v_flex,  };
-use crate::ui::IconName;
-use gpui_kit::{ div, px, ClipboardItem, Context, IntoElement, SharedString,  };
+use gpui_kit::component::{h_flex, notification::Notification, v_flex};
+use gpui_kit::{ClipboardItem, Context, IntoElement, SharedString, div, px};
 
-use crate::model::{ render_will_templates, ConnectionStatus, Direction, LogLevel, MqttRecord, Subscription, MAX_PAYLOAD_RETAIN,  };
+use crate::model::{
+    ConnectionStatus, Direction, LogLevel, MAX_PAYLOAD_RETAIN, MqttRecord, Subscription,
+    render_will_templates,
+};
 use crate::ui::widgets::format_time;
 
 use super::*;
 use crate::ui::i18n;
 
 impl ConnectionView {
-pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.conn_id.clone();
         let (name, status, is_v5, error) = self
             .with_app(cx, |app| {
                 let cfg = app.connections.iter().find(|c| c.id == id);
                 (
                     cfg.map(|c| c.name.clone()).unwrap_or_else(|| id.clone()),
-                    app.statuses.get(&id).copied().unwrap_or(ConnectionStatus::Disconnected),
+                    app.statuses
+                        .get(&id)
+                        .copied()
+                        .unwrap_or(ConnectionStatus::Disconnected),
                     cfg.map(|c| c.protocol.is_v5()).unwrap_or(true),
                     app.errors.get(&id).cloned(),
                 )
@@ -63,12 +68,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                     .rounded_md()
                     .bg(status_tone.alpha(0.12))
                     .child(div().size(px(5.)).rounded_full().bg(status_tone))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(status_tone)
-                            .child(status_text),
-                    ),
+                    .child(div().text_xs().text_color(status_tone).child(status_text)),
             )
             // Error 副文本展示失败原因（截断避免挤掉按钮）
             .when_some(error_hint.clone(), |h, e| {
@@ -151,7 +151,11 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let mono = cx.theme().mono_font_family.clone();
-        let direction_label = if received { i18n::t("dir.received") } else { i18n::t("dir.published") };
+        let direction_label = if received {
+            i18n::t("dir.received")
+        } else {
+            i18n::t("dir.published")
+        };
 
         let header = h_flex()
             .gap_2()
@@ -223,7 +227,10 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         .rounded_sm()
                         .bg(cx.theme().warning.alpha(0.15))
                         .text_color(cx.theme().warning)
-                        .child(i18n::tf("msg.truncated", &[("n", &(MAX_PAYLOAD_RETAIN / 1024))])),
+                        .child(i18n::tf(
+                            "msg.truncated",
+                            &[("n", &(MAX_PAYLOAD_RETAIN / 1024))],
+                        )),
                 )
             })
             .child(
@@ -252,25 +259,31 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
 
         if expanded {
             let fmt = self.detail_format;
-            let detail_text = format_payload_detail(&record.payload, record.raw_bytes.as_deref(), fmt);
+            let detail_text =
+                format_payload_detail(&record.payload, record.raw_bytes.as_deref(), fmt);
             let mut details = v_flex().gap_1p5().pt_1();
 
             // 格式切换 + 复制按钮；stop_propagation 避免点击时又收起整行
             let fmt_group = ButtonGroup::new(SharedString::from(format!("msg-fmt-{}", seq)))
                 .compact()
                 .children(
-                    [DetailFormat::Auto, DetailFormat::Text, DetailFormat::Hex, DetailFormat::Base64]
-                        .into_iter()
-                        .map(|f| {
-                            Button::new(SharedString::from(format!(
-                                "msg-fmt-btn-{}-{}",
-                                seq,
-                                f.index()
-                            )))
-                            .label(i18n::t(f.label()))
-                            .small()
-                            .selected(f == fmt)
-                        }),
+                    [
+                        DetailFormat::Auto,
+                        DetailFormat::Text,
+                        DetailFormat::Hex,
+                        DetailFormat::Base64,
+                    ]
+                    .into_iter()
+                    .map(|f| {
+                        Button::new(SharedString::from(format!(
+                            "msg-fmt-btn-{}-{}",
+                            seq,
+                            f.index()
+                        )))
+                        .label(i18n::t(f.label()))
+                        .small()
+                        .selected(f == fmt)
+                    }),
                 )
                 .on_click(cx.listener(|this, ixs: &Vec<usize>, _, cx| {
                     cx.stop_propagation();
@@ -298,8 +311,13 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         .accessibility_label(i18n::t("msg.copy_topic"))
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_topic.to_string()));
-                            window.push_notification(Notification::success(i18n::t("msg.topic_copied")), cx);
+                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                copy_topic.to_string(),
+                            ));
+                            window.push_notification(
+                                Notification::success(i18n::t("msg.topic_copied")),
+                                cx,
+                            );
                         }),
                 )
                 .child(
@@ -312,8 +330,13 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         .accessibility_label(i18n::t("msg.copy_payload"))
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.to_string()));
-                            window.push_notification(Notification::success(i18n::t("msg.payload_copied")), cx);
+                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                copy_payload.to_string(),
+                            ));
+                            window.push_notification(
+                                Notification::success(i18n::t("msg.payload_copied")),
+                                cx,
+                            );
                         }),
                 )
                 .child(
@@ -327,7 +350,10 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                         .on_click(move |_, window, cx| {
                             cx.stop_propagation();
                             cx.write_to_clipboard(ClipboardItem::new_string(copy_detail.clone()));
-                            window.push_notification(Notification::success(i18n::t("msg.details_copied")), cx);
+                            window.push_notification(
+                                Notification::success(i18n::t("msg.details_copied")),
+                                cx,
+                            );
                         }),
                 );
             details = details.child(detail_toolbar).child(
@@ -350,13 +376,13 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
                     .collect::<Vec<_>>()
                     .join("\n");
                 details = details
-                    .child(div().text_xs().font_semibold().child(i18n::t("preset.user_props")))
                     .child(
                         div()
-                            .font_family(mono.clone())
                             .text_xs()
-                            .child(props),
-                    );
+                            .font_semibold()
+                            .child(i18n::t("preset.user_props")),
+                    )
+                    .child(div().font_family(mono.clone()).text_xs().child(props));
             }
             for (label, value) in [
                 ("Content-Type", record.content_type.clone()),
@@ -434,7 +460,7 @@ pub(super) fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement 
             }))
     }
 
-pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.filter.read(cx).value().to_lowercase();
         let conn = self.conn_id.clone();
         let dir = self.msg_dir;
@@ -459,14 +485,11 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                 if let Some(m) = app.messages.get(conn.as_str()) {
                     // 无任何过滤时命中数恒等于总数：直接取末尾 N 条，
                     // 免去高频消息流下每帧全量扫描环形缓冲
-                    let unfiltered = query.is_empty()
-                        && sub_filter.is_none()
-                        && matches!(dir, DirFilter::All);
+                    let unfiltered =
+                        query.is_empty() && sub_filter.is_none() && matches!(dir, DirFilter::All);
                     if unfiltered {
                         matched = m.len();
-                        records.extend(
-                            m.iter().rev().take(MAX_RENDERED_MESSAGES).cloned(),
-                        );
+                        records.extend(m.iter().rev().take(MAX_RENDERED_MESSAGES).cloned());
                     } else {
                         for r in m.iter().rev() {
                             // 方向 / 搜索 / 订阅过滤叠加，过滤后再截断保证最新消息优先
@@ -496,9 +519,7 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
 
         let mut body = v_flex().flex_1().overflow_y_scrollbar();
         if records.is_empty() {
-            let filtering = !query.is_empty()
-                || sub_filter.is_some()
-                || dir != DirFilter::All;
+            let filtering = !query.is_empty() || sub_filter.is_some() || dir != DirFilter::All;
             body = body.child(
                 v_flex()
                     .h_full()
@@ -543,29 +564,28 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
         }
 
         // 方向过滤 seg
-        let dir_group = ButtonGroup::new(SharedString::from(format!(
-            "msg-dir-{}",
-            self.conn_id
-        )))
-        .compact()
-        .children([DirFilter::All, DirFilter::Received, DirFilter::Published].into_iter().map(
-            |d| {
-                Button::new(SharedString::from(format!(
-                    "msg-dir-btn-{}-{}",
-                    self.conn_id,
-                    d.index()
-                )))
-                .label(i18n::t(d.label()))
-                .small()
-                .selected(d == dir)
-            },
-        ))
-        .on_click(cx.listener(|this, ixs: &Vec<usize>, _, cx| {
-            if let Some(&i) = ixs.first() {
-                this.msg_dir = DirFilter::from_index(i);
-                cx.notify();
-            }
-        }));
+        let dir_group = ButtonGroup::new(SharedString::from(format!("msg-dir-{}", self.conn_id)))
+            .compact()
+            .children(
+                [DirFilter::All, DirFilter::Received, DirFilter::Published]
+                    .into_iter()
+                    .map(|d| {
+                        Button::new(SharedString::from(format!(
+                            "msg-dir-btn-{}-{}",
+                            self.conn_id,
+                            d.index()
+                        )))
+                        .label(i18n::t(d.label()))
+                        .small()
+                        .selected(d == dir)
+                    }),
+            )
+            .on_click(cx.listener(|this, ixs: &Vec<usize>, _, cx| {
+                if let Some(&i) = ixs.first() {
+                    this.msg_dir = DirFilter::from_index(i);
+                    cx.notify();
+                }
+            }));
 
         // 订阅过滤 chip（点击订阅项激活）
         let filter_chip = self.sub_filter.clone().map(|topic| {
@@ -622,7 +642,10 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                     .child(dir_group)
                     .child(
                         div()
-                            .id(SharedString::from(format!("msg-filter-wrap-{}", self.conn_id)))
+                            .id(SharedString::from(format!(
+                                "msg-filter-wrap-{}",
+                                self.conn_id
+                            )))
                             .flex_1()
                             .min_w(px(0.))
                             // Esc 清空过滤词：高频调试时比全选删除顺手
@@ -630,15 +653,16 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                                 |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
                                     if ev.keystroke.key == "escape" {
                                         cx.stop_propagation();
-                                        this.filter
-                                            .update(cx, |s, cx| s.set_value("", window, cx));
+                                        this.filter.update(cx, |s, cx| s.set_value("", window, cx));
                                         cx.notify();
                                     }
                                 },
                             ))
-                            .child(Input::new(&self.filter).small().prefix(
-                                gpui_kit::component::Icon::new(IconName::Search).small(),
-                            )),
+                            .child(
+                                Input::new(&self.filter).small().prefix(
+                                    gpui_kit::component::Icon::new(IconName::Search).small(),
+                                ),
+                            ),
                     )
                     .children(filter_chip)
                     .child(
@@ -656,42 +680,43 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
                                 .px_1p5()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(i18n::tf(
-                                "msg.latest_only",
-                                &[("n", &MAX_RENDERED_MESSAGES)],
-                            )),
+                                    "msg.latest_only",
+                                    &[("n", &MAX_RENDERED_MESSAGES)],
+                                )),
                         )
                     })
                     .child({
                         // 暂停滚动：高频消息流下锁定当前画面以便阅读/展开，
                         // 消息仍照常入环形缓冲，恢复后直接显示最新
                         let paused = self.paused;
-                        Button::new(SharedString::from(format!(
-                            "msg-pause-{}",
-                            self.conn_id
-                        )))
-                        .icon(if paused {
-                            IconName::Play
-                        } else {
-                            IconName::Pause
-                        })
-                        .label(if paused { i18n::t("common.resume") } else { i18n::t("common.pause") })
-                        .ghost()
-                        .small()
-                        .when(paused, |b| b.selected(true))
-                        .tooltip(if paused {
-                            i18n::t("msg.resume_tooltip")
-                        } else {
-                            i18n::t("msg.pause_tooltip")
-                        })
-                        .accessibility_label(if paused {
-                            i18n::t("common.resume")
-                        } else {
-                            i18n::t("common.pause")
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.paused = !this.paused;
-                            cx.notify();
-                        }))
+                        Button::new(SharedString::from(format!("msg-pause-{}", self.conn_id)))
+                            .icon(if paused {
+                                IconName::Play
+                            } else {
+                                IconName::Pause
+                            })
+                            .label(if paused {
+                                i18n::t("common.resume")
+                            } else {
+                                i18n::t("common.pause")
+                            })
+                            .ghost()
+                            .small()
+                            .when(paused, |b| b.selected(true))
+                            .tooltip(if paused {
+                                i18n::t("msg.resume_tooltip")
+                            } else {
+                                i18n::t("msg.pause_tooltip")
+                            })
+                            .accessibility_label(if paused {
+                                i18n::t("common.resume")
+                            } else {
+                                i18n::t("common.pause")
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.paused = !this.paused;
+                                cx.notify();
+                            }))
                     })
                     .child({
                         let weak = cx.weak_entity();
@@ -747,7 +772,7 @@ pub(super) fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement
             .child(body)
     }
 
-pub(super) fn render_logs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_logs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let conn = self.conn_id.clone();
         let show_millis = self

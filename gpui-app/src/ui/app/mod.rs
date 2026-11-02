@@ -9,30 +9,29 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
-    h_flex, notification::Notification, v_flex, ActiveTheme as _, Selectable as _, Sizable as _,
-    StyledExt as _, Theme, ThemeMode, WindowExt as _,
+    ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _, Theme, ThemeMode,
+    WindowExt as _, h_flex, notification::Notification, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    KeyBinding, ParentElement as _, Render, StatefulInteractiveElement as _,
-    Styled as _, Window,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, KeyBinding,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::aliyun::AliyunPreset;
 use crate::model::{
-    AppSettings, ConnectionConfig, ConnectionStatus, GlobalVariable, LogEntry, MessageRing, PublishPreset,
-    Subscription, ThemeModePref,
+    AppSettings, ConnectionConfig, ConnectionStatus, GlobalVariable, LogEntry, MessageRing,
+    PublishPreset, Subscription, ThemeModePref,
 };
 use crate::mqtt::MqttEngine;
 use crate::store::{Storage, UiState};
-use crate::update;
 use crate::ui::connection_view::ConnectionView;
 use crate::ui::i18n::{self, Lang};
+use crate::update;
 
 mod actions;
 mod events;
@@ -49,7 +48,22 @@ const MAX_LOGS: usize = 3000;
 const EVENT_QUEUE_CAPACITY: usize = 1024;
 
 // 应用级快捷键动作（context=None：任意焦点状态下都匹配）。
-gpui_kit::actions!(mqttx, [NewConnection, OpenSettings, ExportConnections, ImportConnections, OpenResourceMonitor, PublishMessage, ToggleSidebar, CloseActiveTab, NextTab, PrevTab, FocusMessageFilter]);
+gpui_kit::actions!(
+    mqttx,
+    [
+        NewConnection,
+        OpenSettings,
+        ExportConnections,
+        ImportConnections,
+        OpenResourceMonitor,
+        PublishMessage,
+        ToggleSidebar,
+        CloseActiveTab,
+        NextTab,
+        PrevTab,
+        FocusMessageFilter
+    ]
+);
 
 /// 侧边栏分组过滤；chips 只做列表过滤，分组重命名/删除通过编辑连接的分组字段完成。
 #[derive(Clone, PartialEq, Eq)]
@@ -125,7 +139,6 @@ pub struct MqttXApp {
     sidebar_collapsed: bool,
 }
 
-
 impl MqttXApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let storage = Storage::new();
@@ -157,22 +170,26 @@ impl MqttXApp {
         let engine = MqttEngine::new(tx);
 
         let weak = cx.entity().downgrade();
-        let pump = cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
-            while let Ok(event) = rx.recv().await {
-                weak.update_in(cx, |app, window, cx| {
-                    app.on_engine_event(event, window, cx);
-                })
-                .ok();
-            }
-        });
+        let pump = cx.spawn_in(
+            window,
+            async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+                while let Ok(event) = rx.recv().await {
+                    weak.update_in(cx, |app, window, cx| {
+                        app.on_engine_event(event, window, cx);
+                    })
+                    .ok();
+                }
+            },
+        );
 
         // 变量落盘防抖泵：persist_variables_soon 经引擎定时器（500ms）发来触发，
         // 到点后统一把脏变量写盘。编辑期间内存即时生效，磁盘只按停顿节流，
         // 避免连续键入时每个键击都触发一次 fsync。
         let (flush_tx, flush_rx) = smol::channel::bounded::<()>(1);
         let weak = cx.entity().downgrade();
-        let vars_pump =
-            cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+        let vars_pump = cx.spawn_in(
+            window,
+            async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
                 while flush_rx.recv().await.is_ok() {
                     weak.update_in(cx, |app, _window, _cx| {
                         if app.variables_dirty {
@@ -182,7 +199,8 @@ impl MqttXApp {
                     })
                     .ok();
                 }
-            });
+            },
+        );
 
         // OTA：清理上次自更新遗留文件；开启自动检查则后台静默检查并下载，
         // 下载完成后弹对话框征得同意再安装（不自动重启）。
@@ -210,9 +228,7 @@ impl MqttXApp {
             .into_iter()
             .filter(|id| conn_ids.contains(id))
             .collect();
-        let restored_active = ui_state
-            .active_tab
-            .filter(|id| restored_tabs.contains(id));
+        let restored_active = ui_state.active_tab.filter(|id| restored_tabs.contains(id));
         let auto_first = connections
             .iter()
             .find(|c| c.auto_connect)
@@ -237,93 +253,97 @@ impl MqttXApp {
         if settings.auto_check_update {
             let rx = engine.run_blocking(update::check_and_download);
             let weak = cx.entity().downgrade();
-            cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
-                match rx.recv().await {
-                    Ok(Ok(Some(staged))) => {
-                        weak.update_in(cx, |_app, window, cx| {
-                        window.open_dialog(cx, move |dialog, _, _cx| {
-                            let staged = staged.clone();
-                            let staged_skip = staged.clone();
-                            let staged_consent = staged.clone();
-                            dialog
-                                    .w(px(440.))
-                                    .title(i18n::t("update.ready_title"))
-                                    .child(
-                                        v_flex().gap_2().child(
-                                            div().text_sm().child(i18n::tf(
+            cx.spawn_in(
+                window,
+                async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+                    match rx.recv().await {
+                        Ok(Ok(Some(staged))) => {
+                            weak.update_in(cx, |_app, window, cx| {
+                                window.open_dialog(cx, move |dialog, _, _cx| {
+                                    let staged = staged.clone();
+                                    let staged_skip = staged.clone();
+                                    let staged_consent = staged.clone();
+                                    dialog
+                                        .w(px(440.))
+                                        .title(i18n::t("update.ready_title"))
+                                        .child(v_flex().gap_2().child(div().text_sm().child(
+                                            i18n::tf(
                                                 "update.ready_body",
                                                 &[("v", &staged.version)],
-                                            )),
-                                        ),
-                                    )
-                                    .footer(
-                                        h_flex()
-                                            .gap_2()
-                                            .justify_end()
-                                            .w_full()
-                                            .child(
-                                                Button::new("upd-skip")
-                                                    .label(i18n::t("update.not_now"))
-                                                    .outline()
-                                                    .on_click(move |_, window, cx| {
-                                                        // 拒绝本次更新：删除暂存包，
-                                                        // 下次启动不会被自动安装
-                                                        update::discard_staged(&staged_skip);
-                                                        window.close_dialog(cx);
-                                                    }),
-                                            )
-                                            .child(
-                                                Button::new("upd-later")
-                                                    .label(i18n::t("update.install_later"))
-                                                    .outline()
-                                                    .on_click(move |_, window, cx| {
-                                                        // 同意标记：启动时据此自动安装；
-                                                        // 用户跳过对话框则不会强制升级
-                                                        update::mark_install_consent(&staged_consent);
-                                                        window.close_dialog(cx);
-                                                    }),
-                                            )
-                                            .child(
-                                                Button::new("upd-now")
-                                                    .label(i18n::t("update.install_now"))
-                                                    .primary()
-                                                    .on_click(move |_, window, cx| {
-                                                        window.close_dialog(cx);
-                                                        if let Err(e) =
-                                                            update::install_staged(&staged)
-                                                        {
-                                                            window.push_notification(
-                                                                Notification::error(i18n::tf(
-                                                                    "update.install_failed",
-                                                                    &[("e", &e),
-                                                                ])),
-                                                                cx,
-                                                            );
-                                                        } else {
-                                                            cx.quit();
-                                                        }
-                                                    }),
                                             ),
-                                    )
-                            });
-                        })
-                        .ok();
+                                        )))
+                                        .footer(
+                                            h_flex()
+                                                .gap_2()
+                                                .justify_end()
+                                                .w_full()
+                                                .child(
+                                                    Button::new("upd-skip")
+                                                        .label(i18n::t("update.not_now"))
+                                                        .outline()
+                                                        .on_click(move |_, window, cx| {
+                                                            // 拒绝本次更新：删除暂存包，
+                                                            // 下次启动不会被自动安装
+                                                            update::discard_staged(&staged_skip);
+                                                            window.close_dialog(cx);
+                                                        }),
+                                                )
+                                                .child(
+                                                    Button::new("upd-later")
+                                                        .label(i18n::t("update.install_later"))
+                                                        .outline()
+                                                        .on_click(move |_, window, cx| {
+                                                            // 同意标记：启动时据此自动安装；
+                                                            // 用户跳过对话框则不会强制升级
+                                                            update::mark_install_consent(
+                                                                &staged_consent,
+                                                            );
+                                                            window.close_dialog(cx);
+                                                        }),
+                                                )
+                                                .child(
+                                                    Button::new("upd-now")
+                                                        .label(i18n::t("update.install_now"))
+                                                        .primary()
+                                                        .on_click(move |_, window, cx| {
+                                                            window.close_dialog(cx);
+                                                            if let Err(e) =
+                                                                update::install_staged(&staged)
+                                                            {
+                                                                window.push_notification(
+                                                                    Notification::error(i18n::tf(
+                                                                        "update.install_failed",
+                                                                        &[("e", &e)],
+                                                                    )),
+                                                                    cx,
+                                                                );
+                                                            } else {
+                                                                cx.quit();
+                                                            }
+                                                        }),
+                                                ),
+                                        )
+                                });
+                            })
+                            .ok();
+                        }
+                        // 检查/下载失败不打扰用户，但也不能完全无声
+                        Ok(Err(e)) => {
+                            eprintln!("[app] 启动更新检查失败: {e}");
+                            sentry::capture_message(
+                                &format!("startup update check failed: {e}"),
+                                sentry::Level::Warning,
+                            );
+                        }
+                        _ => {}
                     }
-                    // 检查/下载失败不打扰用户，但也不能完全无声
-                    Ok(Err(e)) => {
-                        eprintln!("[app] 启动更新检查失败: {e}");
-                        sentry::capture_message(
-                            &format!("startup update check failed: {e}"),
-                            sentry::Level::Warning,
-                        );
-                    }
-                    _ => {}
-                }
-            })
+                },
+            )
             .detach();
         }
 
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sidebar.search")));
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sidebar.search")));
 
         // 自验后门：MQTTX_OPEN_RESMON=1 启动时直接打开资源监控
         // （与 MQTTX_VERSION_OVERRIDE 同类的测试入口，供自动化验证 UI）。
@@ -528,7 +548,6 @@ impl MqttXApp {
     }
 
     // ── 引擎事件 ──────────────────────────────────────────────────────────
-
 }
 
 impl Render for MqttXApp {

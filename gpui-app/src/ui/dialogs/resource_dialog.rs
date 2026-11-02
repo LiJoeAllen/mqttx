@@ -10,19 +10,19 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _, StyledExt as _, WindowExt as _,
+    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Window,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Window, div, px,
 };
 
 use crate::model::MAX_CONNECTION_MESSAGE_BYTES;
-use crate::ui::i18n;
 use crate::sysmon::{Sample, Sampler};
-use crate::ui::app::MqttXApp;
 use crate::ui::IconName;
+use crate::ui::app::MqttXApp;
+use crate::ui::i18n;
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
 
@@ -136,12 +136,7 @@ impl ResourceMonitorDialog {
                     .gap_1p5()
                     .items_center()
                     .child(Icon::new(icon).size_4().text_color(muted))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(label.to_string()),
-                    ),
+                    .child(div().text_xs().text_color(muted).child(label.to_string())),
             )
             .child(div().text_xl().font_semibold().child(value))
             .when_some(sub, |t, s| {
@@ -152,7 +147,12 @@ impl ResourceMonitorDialog {
             })
     }
 
-    fn section_header(&self, icon: IconName, title: &str, cx: &mut Context<Self>) -> impl IntoElement {
+    fn section_header(
+        &self,
+        icon: IconName,
+        title: &str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         h_flex()
             .gap_1p5()
             .items_center()
@@ -166,12 +166,7 @@ impl ResourceMonitorDialog {
             )
     }
 
-    fn conn_card(
-        &self,
-        index: usize,
-        c: &ConnStat,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn conn_card(&self, index: usize, c: &ConnStat, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let pct = (c.bytes as f32 / MAX_CONNECTION_MESSAGE_BYTES as f32 * 100.).min(100.);
         v_flex()
@@ -194,12 +189,7 @@ impl ResourceMonitorDialog {
                                 cx.theme().primary_foreground,
                             ))
                             .child(div().text_sm().font_semibold().child(c.name.clone()))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child(c.address.clone()),
-                            ),
+                            .child(div().text_xs().text_color(muted).child(c.address.clone())),
                     )
                     .child(
                         h_flex()
@@ -254,27 +244,18 @@ impl ResourceMonitorDialog {
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .child(
-                                Icon::new(IconName::Database)
-                                    .size_3p5()
-                                    .text_color(muted),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child(i18n::tf(
-                                        "resmon.budget",
-                                        &[
-                                            ("p", &format!("{:.0}", pct)),
-                                            ("used", &Self::fmt_bytes(c.bytes as u64)),
-                                            (
-                                                "total",
-                                                &Self::fmt_bytes(MAX_CONNECTION_MESSAGE_BYTES as u64),
-                                            ),
-                                        ]
-                                    )),
-                            ),
+                            .child(Icon::new(IconName::Database).size_3p5().text_color(muted))
+                            .child(div().text_xs().text_color(muted).child(i18n::tf(
+                                "resmon.budget",
+                                &[
+                                    ("p", &format!("{:.0}", pct)),
+                                    ("used", &Self::fmt_bytes(c.bytes as u64)),
+                                    (
+                                        "total",
+                                        &Self::fmt_bytes(MAX_CONNECTION_MESSAGE_BYTES as u64),
+                                    ),
+                                ],
+                            ))),
                     ),
             )
             .child(
@@ -315,7 +296,12 @@ impl Render for ResourceMonitorDialog {
                         cx.theme().primary,
                         cx.theme().primary_foreground,
                     ))
-                    .child(div().text_base().font_semibold().child(i18n::t("titlebar.resmon")))
+                    .child(
+                        div()
+                            .text_base()
+                            .font_semibold()
+                            .child(i18n::t("titlebar.resmon")),
+                    )
                     .child(
                         div()
                             .text_xs()
@@ -384,9 +370,9 @@ impl Render for ResourceMonitorDialog {
                 i18n::t("resmon.working_set"),
                 Self::fmt_bytes(ws),
                 Some(i18n::tf(
-                            "resmon.peak",
-                            &[("v", &Self::fmt_bytes(s.peak_working_set))],
-                        )),
+                    "resmon.peak",
+                    &[("v", &Self::fmt_bytes(s.peak_working_set))],
+                )),
                 Some(ws as f32 / peak as f32 * 100.),
                 cx,
             ))
@@ -421,7 +407,12 @@ impl Render for ResourceMonitorDialog {
                     .border_1()
                     .border_color(cx.theme().border)
                     .child(Icon::new(IconName::Info).size_4().text_color(muted))
-                    .child(div().text_sm().text_color(muted).child(i18n::t("resmon.no_conn"))),
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(i18n::t("resmon.no_conn")),
+                    ),
             );
         }
         for (i, c) in self.conns.iter().enumerate() {
@@ -437,22 +428,17 @@ impl Render for ResourceMonitorDialog {
                 v_flex()
                     .gap_2()
                     .child(self.section_header(IconName::Database, i18n::t("resmon.section"), cx))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(i18n::tf(
-                                "resmon.stats",
-                                &[
-                                    ("n", &self.conns.len()),
-                                    ("m", &connected_count),
-                                    ("t", &self.tabs),
-                                    ("msgs", &self.total_messages),
-                                    ("cap", &self.app.read(cx).settings.max_messages),
-                                    ("logs", &self.logs),
-                                ]
-                            )),
-                    )
+                    .child(div().text_xs().text_color(muted).child(i18n::tf(
+                        "resmon.stats",
+                        &[
+                            ("n", &self.conns.len()),
+                            ("m", &connected_count),
+                            ("t", &self.tabs),
+                            ("msgs", &self.total_messages),
+                            ("cap", &self.app.read(cx).settings.max_messages),
+                            ("logs", &self.logs),
+                        ],
+                    )))
                     .child(conns_block),
             )
             .child(
@@ -492,9 +478,7 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
     let weak_view = dialog_view.downgrade();
     cx.spawn(async move |cx: &mut gpui_kit::AsyncApp| {
         loop {
-            cx.background_executor()
-                .timer(REFRESH_INTERVAL)
-                .await;
+            cx.background_executor().timer(REFRESH_INTERVAL).await;
             if weak_view
                 .update(cx, |d, cx| {
                     if d.auto_refresh {
@@ -516,15 +500,12 @@ pub fn open(app: Entity<MqttXApp>, window: &mut Window, cx: &mut App) {
             .title(i18n::t("titlebar.resmon"))
             .child(dialog_view.clone())
             .footer(
-                h_flex()
-                    .justify_end()
-                    .w_full()
-                    .child(
-                        Button::new("res-close")
-                            .label(i18n::t("common.close"))
-                            .outline()
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    ),
+                h_flex().justify_end().w_full().child(
+                    Button::new("res-close")
+                        .label(i18n::t("common.close"))
+                        .outline()
+                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                ),
             )
     });
 }

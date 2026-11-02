@@ -19,7 +19,7 @@ fn set_topmost_windows(window: &gpui_kit::Window, topmost: bool) -> bool {
     use raw_window_handle::RawWindowHandle;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SET_WINDOW_POS_FLAGS,
+        HWND_NOTOPMOST, HWND_TOPMOST, SET_WINDOW_POS_FLAGS, SetWindowPos,
     };
 
     // gpui 的 Window 自带同名方法，HasWindowHandle 必须全路径调用
@@ -35,7 +35,11 @@ fn set_topmost_windows(window: &gpui_kit::Window, topmost: bool) -> bool {
         return false;
     };
     let hwnd = HWND(w.hwnd.get() as *mut core::ffi::c_void);
-    let insert = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    let insert = if topmost {
+        HWND_TOPMOST
+    } else {
+        HWND_NOTOPMOST
+    };
     let flags = SET_WINDOW_POS_FLAGS(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     // windows 0.62 起 SetWindowPos 的插入位置参数改为 Option<HWND>
     unsafe { SetWindowPos(hwnd, Some(insert), 0, 0, 0, 0, flags).is_ok() }

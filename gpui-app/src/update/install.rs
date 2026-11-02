@@ -3,7 +3,6 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-
 use super::check::agent;
 use super::*;
 
@@ -13,10 +12,10 @@ fn stage_dir() -> Result<PathBuf, String> {
         .unwrap_or_else(std::env::temp_dir)
         .join("MQTTX-GPUI")
         .join("updates");
-    std::fs::create_dir_all(&dir).map_err(|e| crate::ui::i18n::tf("update.err_stage_dir", &[("e", &e)]))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| crate::ui::i18n::tf("update.err_stage_dir", &[("e", &e)]))?;
     Ok(dir)
 }
-
 
 /// 下载并校验到暂存区，返回待安装的更新。
 ///
@@ -81,7 +80,8 @@ pub fn download_and_stage(
         extracted
     } else {
         remove_other_staged(&dir, &dst);
-        std::fs::rename(&tmp, &dst).map_err(|e| crate::ui::i18n::tf("update.err_stage_rename", &[("e", &e)]))?;
+        std::fs::rename(&tmp, &dst)
+            .map_err(|e| crate::ui::i18n::tf("update.err_stage_rename", &[("e", &e)]))?;
         dst
     };
     // 非 Windows 平台补可执行位：File::create 落盘默认 0644，rename 保留权限，
@@ -102,21 +102,26 @@ pub fn download_and_stage(
 /// 计算文件的 sha256（小写 hex）。
 fn file_sha256(path: &Path) -> Result<String, String> {
     use sha2::Digest as _;
-    let mut file =
-        std::fs::File::open(path).map_err(|e| crate::ui::i18n::tf("update.err_open_file", &[("p", &path.display()), ("e", &e)]))?;
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        crate::ui::i18n::tf("update.err_open_file", &[("p", &path.display()), ("e", &e)])
+    })?;
     let mut hasher = sha2::Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| crate::ui::i18n::tf("update.err_read_file", &[("p", &path.display()), ("e", &e)]))?;
+        let n = file.read(&mut buf).map_err(|e| {
+            crate::ui::i18n::tf("update.err_read_file", &[("p", &path.display()), ("e", &e)])
+        })?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
     }
     // digest 0.11 的 Output 不再实现 LowerHex，手动转 hex
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// 校验 7z 归档的条目清单（只读归档头，不解压数据）。
@@ -127,7 +132,8 @@ fn file_sha256(path: &Path) -> Result<String, String> {
 /// 随后被 `install_staged` 执行。这里在解压**之前**按归档头校验条目：必须恰好一个，
 /// 且名字与约定文件名完全一致，任何偏差都拒绝（fail-closed）。
 fn verify_archive_entries(archive: &Path, expected: &str) -> Result<(), String> {
-    let file = std::fs::File::open(archive).map_err(|e| crate::ui::i18n::tf("update.err_open_archive", &[("e", &e)]))?;
+    let file = std::fs::File::open(archive)
+        .map_err(|e| crate::ui::i18n::tf("update.err_open_archive", &[("e", &e)]))?;
     let len = file
         .metadata()
         .map_err(|e| crate::ui::i18n::tf("update.err_archive_size", &[("e", &e)]))?
@@ -237,19 +243,26 @@ impl Drop for InstallLock {
     }
 }
 
-fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u64, u64)) -> Result<(), String> {
+fn download_to(
+    info: &UpdateInfo,
+    tmp: &std::path::Path,
+    on_progress: &dyn Fn(u64, u64),
+) -> Result<(), String> {
     let resp = agent()
         .get(&info.asset_url)
         .call()
         .map_err(|e| crate::ui::i18n::tf("update.err_download", &[("e", &e)]))?;
     let mut reader = resp.into_body().into_reader();
     let total = info.size;
-    let mut file = std::fs::File::create(tmp).map_err(|e| crate::ui::i18n::tf("update.err_tmp_create", &[("e", &e)]))?;
+    let mut file = std::fs::File::create(tmp)
+        .map_err(|e| crate::ui::i18n::tf("update.err_tmp_create", &[("e", &e)]))?;
     let mut buf = [0u8; 64 * 1024];
     let mut downloaded: u64 = 0;
     let mut hasher = sha2::Sha256::new();
     loop {
-        let n = reader.read(&mut buf).map_err(|e| crate::ui::i18n::tf("update.err_download_interrupted", &[("e", &e)]))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| crate::ui::i18n::tf("update.err_download_interrupted", &[("e", &e)]))?;
         if n == 0 {
             break;
         }
@@ -274,10 +287,13 @@ fn download_to(info: &UpdateInfo, tmp: &std::path::Path, on_progress: &dyn Fn(u6
     // sha256 校验：缺侧车不再静默跳过——一次漏传就会让所有客户端在"零完整性校验"
     // 状态下安装，而 UI 仍宣称"已通过 sha256 校验"。发布脚本两侧都会生成侧车，
     // 因此这里 fail-closed 不会误伤正常发布。
-    let expect = fetch_expected_sha256(info)?.ok_or_else(|| {
-        crate::ui::i18n::t("update.err_no_sha_sidecar").to_string()
-    })?;
-    let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let expect = fetch_expected_sha256(info)?
+        .ok_or_else(|| crate::ui::i18n::t("update.err_no_sha_sidecar").to_string())?;
+    let actual: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     if !actual.eq_ignore_ascii_case(&expect) {
         return Err(crate::ui::i18n::tf(
             "update.err_sha_mismatch",
@@ -378,7 +394,8 @@ pub fn install_staged(staged: &StagedUpdate) -> Result<(), String> {
         ));
     }
 
-    let cur = std::env::current_exe().map_err(|e| crate::ui::i18n::tf("update.err_locate_self", &[("e", &e)]))?;
+    let cur = std::env::current_exe()
+        .map_err(|e| crate::ui::i18n::tf("update.err_locate_self", &[("e", &e)]))?;
     let mut old_name = cur.clone().into_os_string();
     old_name.push(".old");
     let old = PathBuf::from(old_name);
@@ -388,7 +405,8 @@ pub fn install_staged(staged: &StagedUpdate) -> Result<(), String> {
 
     // 旧残留先清掉，避免改名失败
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(&cur, &old).map_err(|e| crate::ui::i18n::tf("update.err_replace_no_perm", &[("e", &e)]))?;
+    std::fs::rename(&cur, &old)
+        .map_err(|e| crate::ui::i18n::tf("update.err_replace_no_perm", &[("e", &e)]))?;
     if let Err(e) = place_file(&staged.path, &cur) {
         // 回滚，尽量保住当前可执行文件
         let rollback = std::fs::rename(&old, &cur);
@@ -546,6 +564,9 @@ mod tests {
         let hex = file_sha256(&path).expect("计算 sha256");
         let _ = std::fs::remove_file(&path);
         // echo -n abc | sha256sum
-        assert_eq!(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            hex,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

@@ -1,17 +1,16 @@
 //! 订阅：表单操作、订阅列表渲染与主题配色。
 
-
-use gpui_kit::component::button::{ Button };
+use crate::ui::IconName;
+use gpui_kit::component::IndexPath;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::Input;
-use gpui_kit::component::menu::{ PopupMenuItem };
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ h_flex, notification::Notification, v_flex,  };
-use crate::ui::IconName;
-use gpui_kit::{ div, px, Context, IntoElement, SharedString, Window,  };
-use gpui_kit::component::IndexPath;
+use gpui_kit::component::{h_flex, notification::Notification, v_flex};
+use gpui_kit::{Context, IntoElement, SharedString, Window, div, px};
 
-use crate::model::{ SubscribeOptions, Subscription,  };
+use crate::model::{SubscribeOptions, Subscription};
 use crate::ui::widgets::field;
 
 use super::*;
@@ -56,16 +55,16 @@ impl ConnectionView {
                 .subscriptions
                 .iter()
                 .position(|s| s.connection_id == sub.connection_id && s.topic == sub.topic);
-            app.subscriptions.retain(|s| {
-                !(s.connection_id == sub.connection_id && s.topic == sub.topic)
-            });
+            app.subscriptions
+                .retain(|s| !(s.connection_id == sub.connection_id && s.topic == sub.topic));
             let new_id = sub.id.clone();
             app.add_subscription(sub);
             if let Some(pos) = slot
                 && let Some(from) = app.subscriptions.iter().position(|s| s.id == new_id)
             {
                 let moved = app.subscriptions.remove(from);
-                app.subscriptions.insert(pos.min(app.subscriptions.len()), moved);
+                app.subscriptions
+                    .insert(pos.min(app.subscriptions.len()), moved);
             }
             cx.notify();
         });
@@ -75,10 +74,7 @@ impl ConnectionView {
     fn set_subscription_color(&mut self, sub_id: &str, hue: Option<f32>, cx: &mut Context<Self>) {
         let sub = self
             .with_app(cx, |app| {
-                app.subscriptions
-                    .iter()
-                    .find(|s| s.id == sub_id)
-                    .cloned()
+                app.subscriptions.iter().find(|s| s.id == sub_id).cloned()
             })
             .flatten();
         if let Some(mut sub) = sub {
@@ -91,10 +87,7 @@ impl ConnectionView {
     fn toggle_subscription_enabled(&mut self, sub_id: &str, cx: &mut Context<Self>) {
         let Some(mut sub) = self
             .with_app(cx, |app| {
-                app.subscriptions
-                    .iter()
-                    .find(|s| s.id == sub_id)
-                    .cloned()
+                app.subscriptions.iter().find(|s| s.id == sub_id).cloned()
             })
             .flatten()
         else {
@@ -120,7 +113,12 @@ impl ConnectionView {
     }
 
     /// 回填输入区进入编辑态；旧订阅保留到提交时才替换，中途放弃不丢数据。
-    fn start_edit_subscription(&mut self, sub: &Subscription, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_edit_subscription(
+        &mut self,
+        sub: &Subscription,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.editing = Some(sub.topic.clone());
         self.sub_topic
             .update(cx, |s, cx| s.set_value(sub.topic.clone(), window, cx));
@@ -262,7 +260,9 @@ impl ConnectionView {
                 }
                 None => {
                     // 改名编辑的单主题提交：新主题承接旧记录身份与备注，避免改名丢数据
-                    if topics.len() == 1 && let Some(mut old) = editing_old.clone() {
+                    if topics.len() == 1
+                        && let Some(mut old) = editing_old.clone()
+                    {
                         old.topic = topic.clone();
                         old.qos = qos;
                         old.alias = alias.clone();
@@ -298,11 +298,7 @@ impl ConnectionView {
             }
         }
         if !connected {
-            let hint = if self
-                .config(cx)
-                .map(|c| c.auto_resubscribe)
-                .unwrap_or(true)
-            {
+            let hint = if self.config(cx).map(|c| c.auto_resubscribe).unwrap_or(true) {
                 i18n::t("sub.saved_offline_resub")
             } else {
                 i18n::t("sub.saved_offline")
@@ -335,7 +331,7 @@ impl ConnectionView {
         cx.notify();
     }
 
-pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let sub_topic = self.sub_topic.clone();
         let sub_qos = self.sub_qos.clone();
         let sub_alias = self.sub_alias.clone();
@@ -369,7 +365,10 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                 })
                 .child(
                     div()
-                        .id(SharedString::from(format!("sub-topic-wrap-{}", self.conn_id)))
+                        .id(SharedString::from(format!(
+                            "sub-topic-wrap-{}",
+                            self.conn_id
+                        )))
                         .flex_1()
                         .min_w(px(0.))
                         // Enter 直接提交订阅；Esc 退出编辑态或清空输入，
@@ -417,8 +416,16 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                 })
                 .child(
                     Button::new(SharedString::from(format!("subscribe-{}", self.conn_id)))
-                        .icon(if editing { IconName::Check } else { IconName::Plus })
-                        .label(if editing { i18n::t("common.update") } else { i18n::t("common.subscribe") })
+                        .icon(if editing {
+                            IconName::Check
+                        } else {
+                            IconName::Plus
+                        })
+                        .label(if editing {
+                            i18n::t("common.update")
+                        } else {
+                            i18n::t("common.subscribe")
+                        })
                         // 编辑用 warning 色与新增的 primary 区分
                         .when(editing, |b| b.warning())
                         .when(!editing, |b| b.primary())
@@ -427,18 +434,21 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
                 )
                 .when(editing, |h| {
                     h.child(
-                        Button::new(SharedString::from(format!("sub-edit-cancel-{}", self.conn_id)))
-                            .icon(IconName::Close)
-                            .ghost()
-                            .small()
-                            .tooltip(i18n::t("sub.cancel_edit"))
-                            .accessibility_label(i18n::t("sub.cancel_edit"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.editing = None;
-                                // 清空回填到输入框的主题/别名/高级字段，回到新增态
-                                this.reset_subscribe_form(window, cx);
-                                cx.notify();
-                            })),
+                        Button::new(SharedString::from(format!(
+                            "sub-edit-cancel-{}",
+                            self.conn_id
+                        )))
+                        .icon(IconName::Close)
+                        .ghost()
+                        .small()
+                        .tooltip(i18n::t("sub.cancel_edit"))
+                        .accessibility_label(i18n::t("sub.cancel_edit"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.editing = None;
+                            // 清空回填到输入框的主题/别名/高级字段，回到新增态
+                            this.reset_subscribe_form(window, cx);
+                            cx.notify();
+                        })),
                     )
                 }),
         );
@@ -448,55 +458,53 @@ pub(super) fn render_subscribe_bar(&mut self, cx: &mut Context<Self>) -> impl In
             let sub_no_local = self.sub_no_local;
             let sub_rap = self.sub_rap;
             let sub_retain_handling = self.sub_retain_handling.clone();
-            bar = bar.child(
-                h_flex()
-                    .gap_4()
-                    .px_3()
-                    .pb_2()
-                    .items_start()
-                    .child(
-                        div()
-                            .w(px(150.))
-                            .child(field(i18n::t("sub.identifier_field"), Input::new(&sub_identifier).small())),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .pt_4()
-                            .child(Switch::new("sub-no-local").checked(sub_no_local).on_change(
-                                cx.listener(|this, v, _, cx| {
-                                    this.sub_no_local = *v;
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(div().text_xs().child(i18n::t("sub.no_local"))),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .pt_4()
-                            .child(Switch::new("sub-rap").checked(sub_rap).on_change(
-                                cx.listener(|this, v, _, cx| {
-                                    this.sub_rap = *v;
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(div().text_xs().child(i18n::t("sub.rap"))),
-                    )
-                    .child(
-                        div().w(px(150.)).child(field(
+            bar =
+                bar.child(
+                    h_flex()
+                        .gap_4()
+                        .px_3()
+                        .pb_2()
+                        .items_start()
+                        .child(div().w(px(150.)).child(field(
+                            i18n::t("sub.identifier_field"),
+                            Input::new(&sub_identifier).small(),
+                        )))
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .pt_4()
+                                .child(Switch::new("sub-no-local").checked(sub_no_local).on_change(
+                                    cx.listener(|this, v, _, cx| {
+                                        this.sub_no_local = *v;
+                                        cx.notify();
+                                    }),
+                                ))
+                                .child(div().text_xs().child(i18n::t("sub.no_local"))),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .pt_4()
+                                .child(Switch::new("sub-rap").checked(sub_rap).on_change(
+                                    cx.listener(|this, v, _, cx| {
+                                        this.sub_rap = *v;
+                                        cx.notify();
+                                    }),
+                                ))
+                                .child(div().text_xs().child(i18n::t("sub.rap"))),
+                        )
+                        .child(div().w(px(150.)).child(field(
                             i18n::t("sub.retain_handling"),
                             Select::new(&sub_retain_handling).small(),
-                        )),
-                    ),
-            );
+                        ))),
+                );
         }
         bar
     }
 
-pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let hover_bg = cx.theme().muted;
         let muted_fg = cx.theme().muted_foreground;
         let conn = self.conn_id.clone();
@@ -603,45 +611,60 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                                     .child(div().text_sm().child(label.clone()))
                             })
                             .on_click(move |_, _, cx| {
-                                weak
-                                    .update(cx, |view, cx| {
-                                        view.set_subscription_color(&sid, Some(hue), cx);
-                                    })
-                                    .ok();
+                                weak.update(cx, |view, cx| {
+                                    view.set_subscription_color(&sid, Some(hue), cx);
+                                })
+                                .ok();
                             }),
                         );
                     }
                     menu = menu.separator();
                     let weak_rand = weak_menu.clone();
                     let sid_rand = sid.clone();
-                    menu = menu.item(PopupMenuItem::new(i18n::t("sub.color_random")).on_click(move |_, _, cx| {
-                        let hue = (uuid::Uuid::new_v4().as_u128() % 360) as f32;
-                        weak_rand
-                            .update(cx, |view, cx| {
-                                view.set_subscription_color(&sid_rand, Some(hue), cx);
-                            })
-                            .ok();
-                    }));
+                    menu = menu.item(PopupMenuItem::new(i18n::t("sub.color_random")).on_click(
+                        move |_, _, cx| {
+                            let hue = (uuid::Uuid::new_v4().as_u128() % 360) as f32;
+                            weak_rand
+                                .update(cx, |view, cx| {
+                                    view.set_subscription_color(&sid_rand, Some(hue), cx);
+                                })
+                                .ok();
+                        },
+                    ));
                     let weak_clear = weak_menu.clone();
                     let sid_clear = sid.clone();
-                    menu = menu.item(PopupMenuItem::new(i18n::t("sub.color_clear")).on_click(move |_, _, cx| {
-                        weak_clear
-                            .update(cx, |view, cx| {
-                                view.set_subscription_color(&sid_clear, None, cx);
-                            })
-                            .ok();
-                    }));
+                    menu = menu.item(PopupMenuItem::new(i18n::t("sub.color_clear")).on_click(
+                        move |_, _, cx| {
+                            weak_clear
+                                .update(cx, |view, cx| {
+                                    view.set_subscription_color(&sid_clear, None, cx);
+                                })
+                                .ok();
+                        },
+                    ));
                     menu
                 })
             };
 
             let eye_sid = sub_id.clone();
             let eye_btn = Button::new(SharedString::from(format!("sub-eye-{}", sub_id)))
-                .icon(if enabled { IconName::Eye } else { IconName::EyeOff })
+                .icon(if enabled {
+                    IconName::Eye
+                } else {
+                    IconName::EyeOff
+                })
                 .ghost()
                 .xsmall()
-                .tooltip(if enabled { i18n::t("sub.disable") } else { i18n::t("sub.enable") })
-                .accessibility_label(if enabled { i18n::t("sub.disable") } else { i18n::t("sub.enable") })
+                .tooltip(if enabled {
+                    i18n::t("sub.disable")
+                } else {
+                    i18n::t("sub.enable")
+                })
+                .accessibility_label(if enabled {
+                    i18n::t("sub.disable")
+                } else {
+                    i18n::t("sub.enable")
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_subscription_enabled(&eye_sid, cx);
                 }));
@@ -656,10 +679,7 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let sub = this
                         .with_app(cx, |app| {
-                            app.subscriptions
-                                .iter()
-                                .find(|s| s.id == edit_sid)
-                                .cloned()
+                            app.subscriptions.iter().find(|s| s.id == edit_sid).cloned()
                         })
                         .flatten();
                     if let Some(sub) = sub {
@@ -700,18 +720,16 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                 .flex_1()
                 .min_w(px(0.))
                 .when(enabled, |z| {
-                    z.cursor_pointer().on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.sub_filter = if this.sub_filter.as_deref()
-                                == Some(filter_topic.as_str())
-                            {
-                                None
-                            } else {
-                                Some(filter_topic.clone())
-                            };
+                    z.cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.sub_filter =
+                                if this.sub_filter.as_deref() == Some(filter_topic.as_str()) {
+                                    None
+                                } else {
+                                    Some(filter_topic.clone())
+                                };
                             cx.notify();
-                        },
-                    ))
+                        }))
                 })
                 .child(
                     v_flex()
@@ -740,7 +758,10 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
 
             list = list.child(
                 h_flex()
-                    .id(SharedString::from(format!("sub-{}-{}", self.conn_id, sub.id)))
+                    .id(SharedString::from(format!(
+                        "sub-{}-{}",
+                        self.conn_id, sub.id
+                    )))
                     .gap_1p5()
                     .items_center()
                     .px_2()
@@ -781,7 +802,12 @@ pub(super) fn render_subscriptions(&self, cx: &mut Context<Self>) -> impl IntoEl
                     .px_3()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().font_semibold().child(i18n::t("connview.subscriptions")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(i18n::t("connview.subscriptions")),
+                    )
                     .child(
                         Button::new("subs-collapse")
                             .icon(IconName::PanelLeftClose)

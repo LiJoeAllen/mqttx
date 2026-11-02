@@ -1,7 +1,7 @@
 //! 基础部件：字段行布局、连接状态指示、时间格式化。
 
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
-use gpui_kit::{div, px, App, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _};
+use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::{App, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _, div, px};
 
 use crate::model::ConnectionStatus;
 
@@ -53,7 +53,6 @@ pub fn status_dot(status: ConnectionStatus, cx: &App) -> impl IntoElement {
 }
 
 // ─── 键值对编辑器 ────────────────────────────────────────────────────────────
-
 
 pub fn format_time(ts_ms: i64, show_millis: bool) -> String {
     use chrono::TimeZone as _;

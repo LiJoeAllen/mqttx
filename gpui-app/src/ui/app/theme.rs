@@ -10,11 +10,8 @@
 //! 外观模式开关仅对 Linear 生效（系统深浅变化监听同样跳过官方预设，
 //! 避免冲掉用户选择）。
 
-
-use gpui_kit::component::{
-    Theme, ThemeMode, ThemeRegistry,
-};
 use gpui_kit::App;
+use gpui_kit::component::{Theme, ThemeMode, ThemeRegistry};
 
 use crate::model::ThemeModePref;
 

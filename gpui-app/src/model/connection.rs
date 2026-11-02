@@ -1,9 +1,6 @@
 //! 连接配置：协议版本、传输方式、遗嘱、TLS 与连接参数。
 
-
 use serde::{Deserialize, Serialize};
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -30,7 +27,6 @@ impl ProtocolVersion {
         matches!(self, Self::V5)
     }
 }
-
 
 /// 传输方式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,7 +73,6 @@ impl TransportKind {
         matches!(self, Self::Ws | Self::Wss)
     }
 }
-
 
 /// MQTT 5 遗嘱消息（3.1.1 下忽略 v5 专属属性）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

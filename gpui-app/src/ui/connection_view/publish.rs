@@ -1,19 +1,18 @@
 //! 发布：参数收集/发送、发布预设菜单与保存对话框。
 
-
-use gpui_kit::component::button::{ Button, ButtonVariant };
+use crate::ui::IconName;
+use gpui_kit::component::IndexPath;
+use gpui_kit::component::button::{Button, ButtonVariant};
 use gpui_kit::component::dialog::DialogButtonProps;
-use gpui_kit::component::input::{ Input, InputState, Textarea };
-use gpui_kit::component::menu::{ PopupMenuItem };
+use gpui_kit::component::input::{Input, InputState, Textarea};
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ h_flex, notification::Notification, v_flex,  };
-use crate::ui::IconName;
-use gpui_kit::{ div, px, App, Context, Entity, IntoElement, SharedString, Window,  };
-use gpui_kit::component::IndexPath;
+use gpui_kit::component::{h_flex, notification::Notification, v_flex};
+use gpui_kit::{App, Context, Entity, IntoElement, SharedString, Window, div, px};
 
-use crate::model::{ render_template, PayloadFormat, PublishParams,  };
-use crate::ui::widgets::{ field, KvEditor };
+use crate::model::{PayloadFormat, PublishParams, render_template};
+use crate::ui::widgets::{KvEditor, field};
 
 use super::*;
 use crate::ui::i18n;
@@ -71,7 +70,9 @@ impl ConnectionView {
             return;
         }
 
-        let vars = self.with_app(cx, |app| app.variables.clone()).unwrap_or_default();
+        let vars = self
+            .with_app(cx, |app| app.variables.clone())
+            .unwrap_or_default();
         params.topic = render_template(&params.topic, &vars);
         params.payload = render_template(&params.payload, &vars);
         // {{topic}} 等变量渲染后可能变空串，渲染完成后再校验一次
@@ -91,13 +92,14 @@ impl ConnectionView {
         params.correlation_data = params.correlation_data.map(|v| render_template(&v, &vars));
 
         if let PayloadFormat::Json = params.payload_format
-            && let Err(e) = serde_json::from_str::<serde_json::Value>(&params.payload) {
-                window.push_notification(
-                    Notification::warning(i18n::tf("pub.json_invalid", &[("e", &e)])),
-                    cx,
-                );
-                return;
-            }
+            && let Err(e) = serde_json::from_str::<serde_json::Value>(&params.payload)
+        {
+            window.push_notification(
+                Notification::warning(i18n::tf("pub.json_invalid", &[("e", &e)])),
+                cx,
+            );
+            return;
+        }
         match params.payload_format.encode(&params.payload) {
             Ok(bytes) => params.raw_bytes = Some(bytes),
             Err(e) => {
@@ -128,10 +130,7 @@ impl ConnectionView {
                 && !contains_ignore_case(&params.payload, &query));
         self.engine.publish(self.conn_id.clone(), params);
         if hidden {
-            window.push_notification(
-                Notification::success(i18n::t("pub.sent_hidden")),
-                cx,
-            );
+            window.push_notification(Notification::success(i18n::t("pub.sent_hidden")), cx);
         }
     }
 
@@ -139,8 +138,12 @@ impl ConnectionView {
     /// 须覆盖全部 v5 属性与用户属性。
     fn collect_publish_params(&self, cx: &App) -> PublishParams {
         let qos = self.pub_qos.read(cx).selected_value().copied().unwrap_or(0) as u8;
-        let format = PayloadFormat::ALL
-            [self.payload_format.read(cx).selected_value().copied().unwrap_or(0)];
+        let format = PayloadFormat::ALL[self
+            .payload_format
+            .read(cx)
+            .selected_value()
+            .copied()
+            .unwrap_or(0)];
         let opt = |s: String| {
             let t = s.trim();
             (!t.is_empty()).then(|| t.to_string())
@@ -156,7 +159,11 @@ impl ConnectionView {
             message_expiry_interval: {
                 let t = self.msg_expiry.read(cx).value().to_string();
                 let t = t.trim();
-                if t.is_empty() { None } else { t.parse::<u32>().ok() }
+                if t.is_empty() {
+                    None
+                } else {
+                    t.parse::<u32>().ok()
+                }
             },
             response_topic: opt(self.response_topic.read(cx).value().to_string()),
             correlation_data: opt(self.correlation_data.read(cx).value().to_string()),
@@ -192,7 +199,8 @@ impl ConnectionView {
         self.correlation_data
             .update(cx, |s, cx| s.set_value(cd, window, cx));
         // KvEditor 不支持运行时整体替换，直接重建实体回填用户属性
-        self.user_props = cx.new(|cx| KvEditor::new("pub", &params.user_properties, false, window, cx));
+        self.user_props =
+            cx.new(|cx| KvEditor::new("pub", &params.user_properties, false, window, cx));
         let qos_idx = params.qos.min(2) as usize;
         self.pub_qos.update(cx, |s, cx| {
             s.set_selected_index(Some(IndexPath::new(qos_idx)), window, cx)
@@ -211,7 +219,7 @@ impl ConnectionView {
         cx.notify();
     }
 
-pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let pub_topic = self.pub_topic.clone();
         let payload = self.payload.clone();
         let pub_qos = self.pub_qos.clone();
@@ -227,7 +235,9 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
         let is_v5 = self.is_v5(cx);
 
         // 发布预设
-        let presets = self.with_app(cx, |app| app.presets.clone()).unwrap_or_default();
+        let presets = self
+            .with_app(cx, |app| app.presets.clone())
+            .unwrap_or_default();
         let connected = self.engine.is_connected(&self.conn_id);
         // 当前提取到的占位符数量（仅用于提示，行构建在 sync_var_rows 完成）
         let var_count = extract_placeholder_keys(
@@ -252,14 +262,15 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                 // 主题框内 Enter 直接发送（Ctrl+Enter 走全局 action，任意焦点可用）
                 .child(
                     div()
-                        .id(SharedString::from(format!("pub-topic-wrap-{}", self.conn_id)))
+                        .id(SharedString::from(format!(
+                            "pub-topic-wrap-{}",
+                            self.conn_id
+                        )))
                         .flex_1()
                         .min_w(px(0.))
                         .on_key_down(cx.listener(
                             |this, ev: &gpui_kit::KeyDownEvent, window, cx| {
-                                if ev.keystroke.key == "enter"
-                                    && !ev.keystroke.modifiers.control
-                                {
+                                if ev.keystroke.key == "enter" && !ev.keystroke.modifiers.control {
                                     cx.stop_propagation();
                                     this.do_publish(window, cx);
                                 }
@@ -268,7 +279,11 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .child(Input::new(&pub_topic).small()),
                 )
                 .child(div().w(px(92.)).child(Select::new(&pub_qos).small()))
-                .child(div().w(px(124.)).child(Select::new(&payload_format).small()))
+                .child(
+                    div()
+                        .w(px(124.))
+                        .child(Select::new(&payload_format).small()),
+                )
                 .child(self.render_preset_menu(presets, cx))
                 .child({
                     // 变量注入开关：展开/收起内联绑定面板
@@ -279,10 +294,7 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                         .small()
                         .when(show_vars, |b| b.selected(true))
                         .tooltip(if count > 0 {
-                            i18n::tf(
-                                "pub.vars_count",
-                                &[("n", &count)],
-                            )
+                            i18n::tf("pub.vars_count", &[("n", &count)])
                         } else {
                             i18n::t("pub.vars").to_string()
                         })
@@ -300,12 +312,12 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                     h_flex()
                         .gap_1()
                         .items_center()
-                        .child(Switch::new("retain").checked(retain).on_change(
-                            cx.listener(|this, v, _, cx| {
+                        .child(Switch::new("retain").checked(retain).on_change(cx.listener(
+                            |this, v, _, cx| {
                                 this.retain = *v;
                                 cx.notify();
-                            }),
-                        ))
+                            },
+                        )))
                         .child(div().text_xs().child("Retain")),
                 )
                 .when(is_v5, |h| {
@@ -368,47 +380,41 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
         }
 
         if show_props && is_v5 {
-            card = card.child(
-                v_flex()
-                    .gap_2()
-                    .w_full()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .w_full()
-                            .child(
-                                div().w(px(220.)).child(field(
+            card =
+                card.child(
+                    v_flex()
+                        .gap_2()
+                        .w_full()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .w_full()
+                                .child(div().w(px(220.)).child(field(
                                     "Content-Type",
                                     Input::new(&content_type).small(),
-                                )),
-                            )
-                            .child(
-                                div().w(px(120.)).child(field(
+                                )))
+                                .child(div().w(px(120.)).child(field(
                                     i18n::t("pub.expiry_field"),
                                     Input::new(&msg_expiry).small(),
-                                )),
-                            )
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
+                                )))
+                                .child(div().flex_1().min_w(px(0.)).child(field(
                                     "Response Topic",
                                     Input::new(&response_topic).small(),
-                                )),
-                            )
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
+                                )))
+                                .child(div().flex_1().min_w(px(0.)).child(field(
                                     "Correlation Data",
                                     Input::new(&correlation_data).small(),
-                                )),
-                            ),
-                    )
-                    .child(user_props.clone()),
-            );
+                                ))),
+                        )
+                        .child(user_props.clone()),
+                );
         }
         card
     }
 
     /// 发布预设下拉：应用已有预设、保存当前、删除预设。
-    fn render_preset_menu(        &self,
+    fn render_preset_menu(
+        &self,
         presets: Vec<crate::model::PublishPreset>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -549,9 +555,10 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
             dialog
                 .w(px(420.))
                 .title(i18n::t("pub.save_title"))
-                .child(v_flex().gap_3().child(
-                    crate::ui::widgets::field(i18n::t("aliyun.preset_name"), Input::new(&name_for_ok)),
-                ))
+                .child(v_flex().gap_3().child(crate::ui::widgets::field(
+                    i18n::t("aliyun.preset_name"),
+                    Input::new(&name_for_ok),
+                )))
                 .footer(
                     h_flex()
                         .gap_2()
@@ -571,14 +578,12 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                     let name_input = name_for_ok.clone();
                                     let weak = weak.clone();
                                     move |_ev, window, cx| {
-                                        let name = name_input
-                                            .read(cx)
-                                            .value()
-                                            .trim()
-                                            .to_string();
+                                        let name = name_input.read(cx).value().trim().to_string();
                                         if name.is_empty() {
                                             window.push_notification(
-                                                Notification::warning(i18n::t("pub.preset_name_required")),
+                                                Notification::warning(i18n::t(
+                                                    "pub.preset_name_required",
+                                                )),
                                                 cx,
                                             );
                                             return;
@@ -586,15 +591,9 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                         // 复用 do_publish 的过期秒数校验：输入了但解析不出即拒绝
                                         let params = weak
                                             .read_with(cx, |view, cx| {
-                                                let expiry_raw = view
-                                                    .msg_expiry
-                                                    .read(cx)
-                                                    .value()
-                                                    .to_string();
-                                                (
-                                                    view.collect_publish_params(cx),
-                                                    expiry_raw,
-                                                )
+                                                let expiry_raw =
+                                                    view.msg_expiry.read(cx).value().to_string();
+                                                (view.collect_publish_params(cx), expiry_raw)
                                             })
                                             .ok();
                                         if let (Some(view), Some((params, expiry_raw))) =
@@ -604,7 +603,9 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                 && params.message_expiry_interval.is_none()
                                             {
                                                 window.push_notification(
-                                                    Notification::warning(i18n::t("pub.expiry_invalid")),
+                                                    Notification::warning(i18n::t(
+                                                        "pub.expiry_invalid",
+                                                    )),
                                                     cx,
                                                 );
                                                 return;
@@ -621,7 +622,10 @@ pub(super) fn render_publish_bar(&mut self, cx: &mut Context<Self>) -> impl Into
                                                     cx.notify();
                                                 });
                                                 let msg = if existed {
-                                                    i18n::tf("pub.preset_overwritten", &[("name", &name)])
+                                                    i18n::tf(
+                                                        "pub.preset_overwritten",
+                                                        &[("name", &name)],
+                                                    )
                                                 } else {
                                                     i18n::t("pub.preset_saved").to_string()
                                                 };

@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::VecDeque;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -53,7 +52,9 @@ impl PayloadFormat {
                 use base64::Engine as _;
                 base64::engine::general_purpose::STANDARD
                     .decode(text.trim())
-                    .map_err(|e| crate::ui::i18n::tf("encode.base64_failed", &[("e", &e.to_string())]))
+                    .map_err(|e| {
+                        crate::ui::i18n::tf("encode.base64_failed", &[("e", &e.to_string())])
+                    })
             }
             Self::Hex => {
                 let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
@@ -68,15 +69,15 @@ impl PayloadFormat {
                 (0..cleaned.len())
                     .step_by(2)
                     .map(|i| {
-                        u8::from_str_radix(&cleaned[i..i + 2], 16)
-                            .map_err(|e| crate::ui::i18n::tf("encode.hex_failed", &[("e", &e.to_string())]))
+                        u8::from_str_radix(&cleaned[i..i + 2], 16).map_err(|e| {
+                            crate::ui::i18n::tf("encode.hex_failed", &[("e", &e.to_string())])
+                        })
                     })
                     .collect()
             }
         }
     }
 }
-
 
 /// 一条收到/发出的消息记录。payload 以 UTF-8 文本保存（非文本按 lossy 显示）。
 ///
@@ -210,7 +211,9 @@ impl MessageRing {
         while self.queue.len() >= max_count
             || (self.bytes > MAX_CONNECTION_MESSAGE_BYTES && self.queue.len() > 1)
         {
-            let Some(old) = self.queue.pop_front() else { break };
+            let Some(old) = self.queue.pop_front() else {
+                break;
+            };
             self.bytes -= old.retained_bytes();
         }
         self.queue.push_back(record);

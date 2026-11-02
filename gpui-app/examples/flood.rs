@@ -26,7 +26,10 @@ fn main() {
         .unwrap();
     rt.block_on(async move {
         let opts = rumqttc::MqttOptions::new(
-            format!("mqttx_flood_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
+            format!(
+                "mqttx_flood_{}",
+                &uuid::Uuid::new_v4().simple().to_string()[..8]
+            ),
             rumqttc::Broker::tcp(&host, port),
         );
         let (client, mut eventloop) = rumqttc::AsyncClient::builder(opts).build();

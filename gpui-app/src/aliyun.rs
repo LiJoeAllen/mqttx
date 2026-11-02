@@ -167,8 +167,7 @@ impl AliyunPreset {
                 let client_id = format!("{}@@@{}", self.group_id, self.device_id);
                 let password = Self::signature(&self.access_key_secret, &client_id)?;
                 conn.client_id = client_id;
-                conn.username =
-                    format!("Signature|{}|{}", self.access_key_id, self.instance_id);
+                conn.username = format!("Signature|{}|{}", self.access_key_id, self.instance_id);
                 conn.password = password;
             }
             AliyunAuthMode::DeviceCredential => {

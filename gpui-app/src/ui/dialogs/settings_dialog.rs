@@ -9,28 +9,38 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    h_flex, notification::Notification, v_flex, ActiveTheme as _, Sizable as _, StyledExt as _,
-    WindowExt as _,
+    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
+    notification::Notification, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    Styled as _, Window,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+    Window, div, px,
 };
 
-use crate::model::{AppSettings, LanguagePref, ThemeModePref, MAX_CONNECTION_MESSAGE_BYTES};
+use crate::model::{AppSettings, LanguagePref, MAX_CONNECTION_MESSAGE_BYTES, ThemeModePref};
 use crate::mqtt::MqttEngine;
-use crate::ui::app::MqttXApp;
-use crate::ui::widgets::{field, make_select, OptionDelegate};
 use crate::ui::IconName;
+use crate::ui::app::MqttXApp;
 use crate::ui::i18n;
+use crate::ui::widgets::{OptionDelegate, field, make_select};
 use crate::update::{self, UpdateInfo};
 
 fn theme_labels() -> [&'static str; 3] {
-    [i18n::t("theme.system"), i18n::t("theme.light"), i18n::t("theme.dark")]
+    [
+        i18n::t("theme.system"),
+        i18n::t("theme.light"),
+        i18n::t("theme.dark"),
+    ]
 }
 fn language_labels() -> [&'static str; 3] {
-    ["跟随系统 / System", "中文", "English"]
+    // 选项文案随界面语言切换：System 项在中文界面显示「跟随系统」，
+    // 英文界面显示 "Follow system"（"中文" / "English" 两个自然语言名固定）
+    [
+        i18n::t(crate::model::LanguagePref::System.label()),
+        i18n::t(crate::model::LanguagePref::Zh.label()),
+        i18n::t(crate::model::LanguagePref::En.label()),
+    ]
 }
 
 /// 消息缓存条数的合法范围：太少不够回看，太多占内存
@@ -47,7 +57,10 @@ enum UpdateUi {
     Checking,
     UpToDate,
     Available(Box<UpdateInfo>),
-    Downloading { downloaded: u64, total: u64 },
+    Downloading {
+        downloaded: u64,
+        total: u64,
+    },
     /// 已下载到暂存区，等待用户选择安装时机
     ReadyToInstall(Box<update::StagedUpdate>),
     Failed(String),
@@ -122,7 +135,10 @@ impl SettingsDialog {
         cx.notify();
         let rx = self.engine.run_blocking(update::check_latest);
         cx.spawn_in(window, async move |this, cx| {
-            let result = rx.recv().await.unwrap_or(Err(i18n::t("update.task_lost").to_string()));
+            let result = rx
+                .recv()
+                .await
+                .unwrap_or(Err(i18n::t("update.task_lost").to_string()));
             this.update_in(cx, |s, _window, cx| {
                 s.update = match result {
                     Ok(Some(info)) => UpdateUi::Available(Box::new(info)),
@@ -137,7 +153,10 @@ impl SettingsDialog {
     }
 
     fn run_update(&mut self, info: &UpdateInfo, window: &mut Window, cx: &mut Context<Self>) {
-        self.update = UpdateUi::Downloading { downloaded: 0, total: info.size };
+        self.update = UpdateUi::Downloading {
+            downloaded: 0,
+            total: info.size,
+        };
         cx.notify();
         let (prog_tx, prog_rx) = smol::channel::unbounded();
         let info = info.clone();
@@ -156,7 +175,10 @@ impl SettingsDialog {
                 .ok();
             }
             // 进度通道关闭：拿到最终结果
-            let result = rx.recv().await.unwrap_or(Err(i18n::t("update.task_lost").to_string()));
+            let result = rx
+                .recv()
+                .await
+                .unwrap_or(Err(i18n::t("update.task_lost").to_string()));
             this.update_in(cx, |s, _window, cx| {
                 s.update = match result {
                     Ok(staged) => UpdateUi::ReadyToInstall(Box::new(staged)),
@@ -180,20 +202,16 @@ impl SettingsDialog {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let row = |button: gpui_kit::AnyElement, status: gpui_kit::AnyElement, accent: bool| {
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(button)
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(if accent {
-                            cx.theme().accent
-                        } else {
-                            cx.theme().muted_foreground
-                        })
-                        .child(status),
-                )
+            h_flex().gap_2().items_center().child(button).child(
+                div()
+                    .text_xs()
+                    .text_color(if accent {
+                        cx.theme().accent
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(status),
+            )
         };
         match &self.update {
             UpdateUi::Idle => row(
@@ -231,21 +249,14 @@ impl SettingsDialog {
                 let info_for_click = info.clone();
                 row(
                     Button::new("apply-update")
-                        .label(i18n::tf(
-                            "update.apply",
-                            &[("v", &ver)],
-                        ))
+                        .label(i18n::tf("update.apply", &[("v", &ver)]))
                         .primary()
                         .xsmall()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.run_update(&info_for_click, window, cx)
                         }))
                         .into_any_element(),
-                    i18n::tf(
-                        "update.found",
-                        &[("v", &ver)],
-                    )
-                    .into_any_element(),
+                    i18n::tf("update.found", &[("v", &ver)]).into_any_element(),
                     true,
                 )
             }
@@ -258,10 +269,7 @@ impl SettingsDialog {
                         div()
                             .text_xs()
                             .text_color(cx.theme().accent)
-                            .child(i18n::tf(
-                                "update.ready",
-                                &[("v", &ver)],
-                            )),
+                            .child(i18n::tf("update.ready", &[("v", &ver)])),
                     )
                     .child(
                         h_flex()
@@ -298,9 +306,7 @@ impl SettingsDialog {
                                         }
                                         this.update = UpdateUi::Idle;
                                         window.push_notification(
-                                            Notification::info(i18n::t(
-                                                "update.staged",
-                                            )),
+                                            Notification::info(i18n::t("update.staged")),
                                             cx,
                                         );
                                         cx.notify();
@@ -376,7 +382,6 @@ impl SettingsDialog {
         }
     }
 
-
     fn collect(&self, cx: &App) -> Result<AppSettings, String> {
         let theme = match self.theme.read(cx).selected_value() {
             Some(1) => ThemeModePref::Light,
@@ -405,10 +410,12 @@ impl SettingsDialog {
             .value()
             .trim()
             .parse::<usize>()
-            .map_err(|_| i18n::tf(
-                "settings.max_messages_invalid",
-                &[("min", &MAX_MESSAGES_MIN), ("max", &MAX_MESSAGES_MAX)],
-            ))?;
+            .map_err(|_| {
+                i18n::tf(
+                    "settings.max_messages_invalid",
+                    &[("min", &MAX_MESSAGES_MIN), ("max", &MAX_MESSAGES_MAX)],
+                )
+            })?;
         if !(MAX_MESSAGES_MIN..=MAX_MESSAGES_MAX).contains(&max_messages) {
             return Err(i18n::tf(
                 "settings.max_messages_invalid",
@@ -438,7 +445,10 @@ fn open_in_file_manager(path: &Path, window: &mut Window, cx: &mut App) {
 
     cmd.arg(path);
     if let Err(e) = cmd.spawn() {
-        window.push_notification(Notification::error(i18n::tf("settings.open_dir_failed", &[("e", &e)])), cx);
+        window.push_notification(
+            Notification::error(i18n::tf("settings.open_dir_failed", &[("e", &e)])),
+            cx,
+        );
     }
 }
 
@@ -457,7 +467,10 @@ impl Render for SettingsDialog {
                 Select::new(&self.theme_preset),
             ))
             .child(field(i18n::t("settings.theme"), Select::new(&self.theme)))
-            .child(field(i18n::t("settings.language"), Select::new(&self.language)))
+            .child(field(
+                i18n::t("settings.language"),
+                Select::new(&self.language),
+            ))
             .child(field(
                 i18n::t("settings.max_messages"),
                 Input::new(&self.max_messages),
@@ -468,9 +481,10 @@ impl Render for SettingsDialog {
                     .text_color(cx.theme().muted_foreground)
                     .child(i18n::tf(
                         "settings.byte_budget",
-                        &[
-                            ("n", &format!("{}", MAX_CONNECTION_MESSAGE_BYTES / (1024 * 1024))),
-                        ],
+                        &[(
+                            "n",
+                            &format!("{}", MAX_CONNECTION_MESSAGE_BYTES / (1024 * 1024)),
+                        )],
                     )),
             )
             .child(
@@ -554,7 +568,10 @@ impl Render for SettingsDialog {
                                 // 日志目录可能尚未创建（从未产生过日志）
                                 if let Err(e) = std::fs::create_dir_all(&log_dir_for_open) {
                                     window.push_notification(
-                                        Notification::error(i18n::tf("settings.mkdir_failed", &[("e", &e)])),
+                                        Notification::error(i18n::tf(
+                                            "settings.mkdir_failed",
+                                            &[("e", &e)],
+                                        )),
                                         cx,
                                     );
                                     return;
@@ -568,7 +585,12 @@ impl Render for SettingsDialog {
                 v_flex().gap_1().child(
                     v_flex()
                         .gap_1()
-                        .child(div().text_sm().font_semibold().child(i18n::t("settings.about")))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(i18n::t("settings.about")),
+                        )
                         .child(
                             h_flex()
                                 .gap_2()
@@ -591,21 +613,24 @@ impl Render for SettingsDialog {
                                 .child(i18n::t("settings.tagline")),
                         )
                         .child(
-                            h_flex().gap_1().child(
-                                Button::new("about-site")
-                                    .label("mqttx.app")
-                                    .ghost()
-                                    .xsmall()
-                                    .tooltip(SITE_URL)
-                                    .on_click(|_, _, cx| cx.open_url(SITE_URL)),
-                            ).child(
-                                Button::new("about-repo")
-                                    .label("github.com/LiJoeAllen/mqttx")
-                                    .ghost()
-                                    .xsmall()
-                                    .tooltip(REPO_URL)
-                                    .on_click(|_, _, cx| cx.open_url(REPO_URL)),
-                            ),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    Button::new("about-site")
+                                        .label("mqttx.app")
+                                        .ghost()
+                                        .xsmall()
+                                        .tooltip(SITE_URL)
+                                        .on_click(|_, _, cx| cx.open_url(SITE_URL)),
+                                )
+                                .child(
+                                    Button::new("about-repo")
+                                        .label("github.com/LiJoeAllen/mqttx")
+                                        .ghost()
+                                        .xsmall()
+                                        .tooltip(REPO_URL)
+                                        .on_click(|_, _, cx| cx.open_url(REPO_URL)),
+                                ),
                         ),
                 ),
             )

@@ -2,9 +2,8 @@
 
 use std::path::PathBuf;
 
-use gpui_kit::component::{ notification::Notification,  };
-use gpui_kit::{ Context, Window,  };
-
+use gpui_kit::component::notification::Notification;
+use gpui_kit::{Context, Window};
 
 use super::*;
 use crate::ui::i18n;
@@ -45,16 +44,19 @@ impl MqttXApp {
             let _ = tx.send_blocking(work());
         });
         let weak = cx.entity().downgrade();
-        cx.spawn_in(window, async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
-            let result = rx.recv().await.ok();
-            weak.update_in(cx, |app, window, cx| {
-                app.file_dialog_open = false;
-                if let Some(result) = result {
-                    done(app, result, window, cx);
-                }
-            })
-            .ok();
-        })
+        cx.spawn_in(
+            window,
+            async move |_this, cx: &mut gpui_kit::AsyncWindowContext| {
+                let result = rx.recv().await.ok();
+                weak.update_in(cx, |app, window, cx| {
+                    app.file_dialog_open = false;
+                    if let Some(result) = result {
+                        done(app, result, window, cx);
+                    }
+                })
+                .ok();
+            },
+        )
         .detach();
     }
 
@@ -79,10 +81,7 @@ impl MqttXApp {
                     Ok(()) => window.push_notification(
                         Notification::success(i18n::tf(
                             "io.exported",
-                            &[
-                                ("n", &count),
-                                ("path", &path.display()),
-                            ],
+                            &[("n", &count), ("path", &path.display())],
                         )),
                         cx,
                     ),
@@ -135,10 +134,7 @@ impl MqttXApp {
                     window.push_notification(
                         Notification::success(i18n::tf(
                             "io.imported",
-                            &[
-                                ("n", &added),
-                                ("n2", &skipped),
-                            ],
+                            &[("n", &added), ("n2", &skipped)],
                         )),
                         cx,
                     );

@@ -3,20 +3,22 @@
 use std::sync::Arc;
 
 use rumqttc::TlsConfiguration;
-use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
 use crate::model::{ConnectionConfig, SslConfig};
-use crate::ui::i18n;// ─── 引擎事件 ────────────────────────────────────────────────────────────────
-
-
+use crate::ui::i18n; // ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 /// SSL 配置非默认时构建自定义 rustls 配置；返回 None 表示沿用 rumqttc 默认 TLS。
 /// 文件读取/解析失败在此返回 Err，由 connect 的错误通道上报为连接失败事件。
-pub(super) fn resolve_tls_config(cfg: &ConnectionConfig) -> Result<Option<TlsConfiguration>, String> {
+pub(super) fn resolve_tls_config(
+    cfg: &ConnectionConfig,
+) -> Result<Option<TlsConfiguration>, String> {
     if !cfg.transport.is_tls() || cfg.ssl.is_default() {
         return Ok(None);
     }
-    Ok(Some(TlsConfiguration::Rustls(build_rustls_config(&cfg.ssl)?)))
+    Ok(Some(TlsConfiguration::Rustls(build_rustls_config(
+        &cfg.ssl,
+    )?)))
 }
 
 /// 按 SslConfig 构造 rustls ClientConfig：
@@ -76,15 +78,24 @@ pub(super) fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientC
         builder.with_no_client_auth()
     } else {
         let chain_pem = std::fs::read(&ssl.client_cert_file).map_err(|e| {
-            i18n::tf("tls.client_cert_read_failed", &[("p", &ssl.client_cert_file), ("e", &e)])
+            i18n::tf(
+                "tls.client_cert_read_failed",
+                &[("p", &ssl.client_cert_file), ("e", &e)],
+            )
         })?;
         let key_pem = std::fs::read(&ssl.client_key_file).map_err(|e| {
-            i18n::tf("tls.client_key_read_failed", &[("p", &ssl.client_key_file), ("e", &e)])
+            i18n::tf(
+                "tls.client_key_read_failed",
+                &[("p", &ssl.client_key_file), ("e", &e)],
+            )
         })?;
         let certs = CertificateDer::pem_slice_iter(&chain_pem)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| {
-                i18n::tf("tls.client_cert_parse_failed", &[("p", &ssl.client_cert_file), ("e", &e)])
+                i18n::tf(
+                    "tls.client_cert_parse_failed",
+                    &[("p", &ssl.client_cert_file), ("e", &e)],
+                )
             })?;
         if certs.is_empty() {
             return Err(i18n::tf(
@@ -93,7 +104,10 @@ pub(super) fn build_rustls_config(ssl: &SslConfig) -> Result<Arc<rustls::ClientC
             ));
         }
         let key = PrivateKeyDer::from_pem_slice(&key_pem).map_err(|e| {
-            i18n::tf("tls.client_key_parse_failed", &[("p", &ssl.client_key_file), ("e", &e)])
+            i18n::tf(
+                "tls.client_key_parse_failed",
+                &[("p", &ssl.client_key_file), ("e", &e)],
+            )
         })?;
         builder
             .with_client_auth_cert(certs, key)

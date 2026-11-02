@@ -8,27 +8,30 @@
 use std::sync::Arc;
 
 use gpui_kit::component::button::ButtonVariants as _;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::input::{InputState, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::SelectState;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
-    h_flex, v_flex, ActiveTheme as _, Disableable as _,
-    Selectable as _, Sizable as _, StyledExt as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, StyledExt as _,
+    WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    px, App, AppContext as _, Context, Entity,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled as _, Subscription as InputSubscription, Window,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+    Subscription as InputSubscription, Window, px,
 };
 
 use crate::model::ConnectionConfig;
-use crate::ui::i18n;
 use crate::mqtt::MqttEngine;
 use crate::ui::app::MqttXApp;
-use crate::ui::widgets::{make_select, KvEditor, OptionDelegate};
+use crate::ui::i18n;
+use crate::ui::widgets::{
+    KvEditor, OptionDelegate, make_select, refresh_placeholder, refresh_select,
+    refresh_textarea_placeholder,
+};
 
 mod messages;
 mod publish;
@@ -208,28 +211,30 @@ impl ConnectionView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-
-        let sub_topic = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(i18n::t("sub.topic_placeholder"))
-        });
+        let sub_topic =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sub.topic_placeholder")));
         let sub_qos = make_select(&QOS, 0, window, cx);
         let sub_alias = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sub.alias")));
-        let sub_identifier = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sub.identifier")));
+        let sub_identifier =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("sub.identifier")));
         let sub_retain_handling = make_select(&retain_handling_labels(), 0, window, cx);
-        let pub_topic = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.topic_placeholder")));
+        let pub_topic =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.topic_placeholder")));
         let payload = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(i18n::t("pub.payload_placeholder"))
+            TextareaState::new(window, cx).placeholder(i18n::t("pub.payload_placeholder"))
         });
         let pub_qos = make_select(&QOS, 0, window, cx);
         let payload_format = make_select(&PAYLOAD_FORMATS, 0, window, cx);
-        let content_type = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.content_type_ph")));
-        let msg_expiry = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.seconds_hint")));
+        let content_type =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.content_type_ph")));
+        let msg_expiry =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.seconds_hint")));
         let response_topic =
             cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.response_topic_ph")));
         let correlation_data =
             cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.correlation_ph")));
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("msg.filter_placeholder")));
+        let filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("msg.filter_placeholder")));
         let user_props = cx.new(|cx| KvEditor::new("pub", &[], false, window, cx));
         let preset_name =
             cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("pub.preset_name_hint")));
@@ -302,12 +307,10 @@ impl ConnectionView {
 
     /// Ctrl+F：把焦点移到消息过滤框（键盘直达过滤入口）。
     pub fn focus_filter(&self, window: &mut Window, cx: &mut App) {
-        let handle = gpui_kit::component::input::AnyInputState::from(self.filter.clone())
-            .focus_handle(cx);
+        let handle =
+            gpui_kit::component::input::AnyInputState::from(self.filter.clone()).focus_handle(cx);
         window.focus(&handle, cx);
     }
-
-
 }
 
 impl Render for ConnectionView {
@@ -370,3 +373,63 @@ impl Render for ConnectionView {
     }
 }
 
+impl ConnectionView {
+    /// 语言切换后重刷在构造时固化的控件文案：Retain Handling 下拉与各输入框
+    /// 占位符。QoS / 负载格式 / 传输方式是语言无关的技术术语，不在此列。
+    /// 由 `MqttXApp::save_settings` 调用，切语言不再需要重开页签。
+    pub(crate) fn refresh_labels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        refresh_select(
+            &self.sub_retain_handling,
+            &retain_handling_labels(),
+            window,
+            cx,
+        );
+        refresh_placeholder(
+            &self.sub_topic,
+            i18n::t("sub.topic_placeholder"),
+            window,
+            cx,
+        );
+        refresh_placeholder(&self.sub_alias, i18n::t("sub.alias"), window, cx);
+        refresh_placeholder(&self.sub_identifier, i18n::t("sub.identifier"), window, cx);
+        refresh_placeholder(
+            &self.pub_topic,
+            i18n::t("pub.topic_placeholder"),
+            window,
+            cx,
+        );
+        refresh_textarea_placeholder(
+            &self.payload,
+            i18n::t("pub.payload_placeholder"),
+            window,
+            cx,
+        );
+        refresh_placeholder(
+            &self.content_type,
+            i18n::t("pub.content_type_ph"),
+            window,
+            cx,
+        );
+        refresh_placeholder(&self.msg_expiry, i18n::t("pub.seconds_hint"), window, cx);
+        refresh_placeholder(
+            &self.response_topic,
+            i18n::t("pub.response_topic_ph"),
+            window,
+            cx,
+        );
+        refresh_placeholder(
+            &self.correlation_data,
+            i18n::t("pub.correlation_ph"),
+            window,
+            cx,
+        );
+        refresh_placeholder(&self.filter, i18n::t("msg.filter_placeholder"), window, cx);
+        refresh_placeholder(
+            &self.preset_name,
+            i18n::t("pub.preset_name_hint"),
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+}

@@ -1,11 +1,13 @@
 //! key/value 列表编辑器（MQTT 5 用户属性等）。
 
-use gpui_kit::component::button::{ Button, ButtonVariants as _ };
-use gpui_kit::component::input::{ Input, InputState };
-use gpui_kit::component::{ h_flex, v_flex, Disableable as _, Sizable as _ };
 use crate::ui::IconName;
-use gpui_kit::{ App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, div, px };
-
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
+};
 
 /// MQTT 5 用户属性等 key/value 列表编辑器。
 pub struct KvEditor {
@@ -61,11 +63,12 @@ impl KvEditor {
         // key 统一 trim：带首尾空白的 key 无法被 {{key}} 模板引用；
         // 去重仅在 dedup 模式（全局变量）下进行，用户属性保留重复键。
         let mut out: Vec<(String, String)> = Vec::new();
-        for (k, v) in self
-            .rows
-            .iter()
-            .map(|(k, v)| (k.read(cx).value().to_string(), v.read(cx).value().to_string()))
-        {
+        for (k, v) in self.rows.iter().map(|(k, v)| {
+            (
+                k.read(cx).value().to_string(),
+                v.read(cx).value().to_string(),
+            )
+        }) {
             let k = k.trim().to_string();
             if k.is_empty() {
                 continue;
@@ -108,20 +111,17 @@ impl Render for KvEditor {
             );
         }
 
-        v_flex()
-            .gap_2()
-            .child(rows)
-            .child(
-                Button::new(SharedString::from(format!("kv-add-{prefix}")))
-                    .icon(IconName::Plus)
-                    .label(crate::ui::i18n::t("kv.add"))
-                    .ghost()
-                    .xsmall()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.push(None, window, cx);
-                        cx.notify();
-                    })),
-            )
+        v_flex().gap_2().child(rows).child(
+            Button::new(SharedString::from(format!("kv-add-{prefix}")))
+                .icon(IconName::Plus)
+                .label(crate::ui::i18n::t("kv.add"))
+                .ghost()
+                .xsmall()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.push(None, window, cx);
+                    cx.notify();
+                })),
+        )
     }
 }
 

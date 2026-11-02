@@ -1,27 +1,30 @@
 //! 阿里云 IoT 设备接入对话框：保存预设，并可一键生成连接并连接。
 
+use crate::ui::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::{
-    h_flex, notification::Notification, v_flex, ActiveTheme as _, Sizable as _, StyledExt as _,
-    WindowExt as _,
+    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
+    notification::Notification, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use crate::ui::IconName;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, StatefulInteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Styled as _, Window,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::aliyun::{AliyunAuthMode, AliyunPreset};
-use crate::model::{render_will_templates, ConnectionConfig};
+use crate::model::{ConnectionConfig, render_will_templates};
 use crate::ui::app::MqttXApp;
-use crate::ui::widgets::{field, make_select, OptionDelegate};
 use crate::ui::i18n;
+use crate::ui::widgets::{OptionDelegate, field, make_select};
 
 fn auth_mode_labels() -> [&'static str; 2] {
-    [i18n::t("aliyun.auth_token_mode"), i18n::t("aliyun.auth_triple_mode")]
+    [
+        i18n::t("aliyun.auth_token_mode"),
+        i18n::t("aliyun.auth_triple_mode"),
+    ]
 }
 
 struct AliyunDialog {
@@ -53,7 +56,12 @@ macro_rules! text_field {
 }
 
 impl AliyunDialog {
-    fn new(app: Entity<MqttXApp>, presets: Vec<AliyunPreset>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        app: Entity<MqttXApp>,
+        presets: Vec<AliyunPreset>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let first = presets.first().cloned().unwrap_or_else(AliyunPreset::new);
         // 表单已用 first 预填：selected 也指向它，否则"打开即保存"会用相同的
         // 内容 push 出一条重复预设（selected=None 走新建分支、另生成 uuid）
@@ -84,7 +92,12 @@ impl AliyunDialog {
             }),
             group_id: text_field!(cx, window, &first.group_id, "GID-xxx"),
             device_id: text_field!(cx, window, &first.device_id, i18n::t("aliyun.device_id")),
-            product_key: text_field!(cx, window, &first.product_key, i18n::t("aliyun.product_key_ph")),
+            product_key: text_field!(
+                cx,
+                window,
+                &first.product_key,
+                i18n::t("aliyun.product_key_ph")
+            ),
             device_secret: cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(&first.device_secret)
@@ -101,8 +114,10 @@ impl AliyunDialog {
             return;
         };
         self.selected = Some(idx);
-        self.name.update(cx, |s, cx| s.set_value(p.name, window, cx));
-        self.group.update(cx, |s, cx| s.set_value(p.group, window, cx));
+        self.name
+            .update(cx, |s, cx| s.set_value(p.name, window, cx));
+        self.group
+            .update(cx, |s, cx| s.set_value(p.group, window, cx));
         self.instance_id
             .update(cx, |s, cx| s.set_value(p.instance_id, window, cx));
         self.region
@@ -137,7 +152,8 @@ impl AliyunDialog {
     fn new_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let p = AliyunPreset::new();
         self.selected = None;
-        self.name.update(cx, |s, cx| s.set_value(p.name, window, cx));
+        self.name
+            .update(cx, |s, cx| s.set_value(p.name, window, cx));
         self.group.update(cx, |s, cx| s.set_value("", window, cx));
         self.instance_id
             .update(cx, |s, cx| s.set_value("", window, cx));
@@ -149,7 +165,8 @@ impl AliyunDialog {
             .update(cx, |s, cx| s.set_value("", window, cx));
         self.access_key_secret
             .update(cx, |s, cx| s.set_value("", window, cx));
-        self.group_id.update(cx, |s, cx| s.set_value("", window, cx));
+        self.group_id
+            .update(cx, |s, cx| s.set_value("", window, cx));
         self.device_id
             .update(cx, |s, cx| s.set_value(p.device_id, window, cx));
         self.product_key
@@ -188,7 +205,10 @@ impl AliyunDialog {
     fn save_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let preset = self.collect(cx);
         if preset.name.trim().is_empty() {
-            window.push_notification(Notification::warning(i18n::t("pub.preset_name_required")), cx);
+            window.push_notification(
+                Notification::warning(i18n::t("pub.preset_name_required")),
+                cx,
+            );
             return;
         }
         match self.selected {
@@ -224,7 +244,10 @@ impl AliyunDialog {
                 window.close_dialog(cx);
             }
             Err(e) => {
-                window.push_notification(Notification::error(i18n::tf("aliyun.build_failed", &[("e", &e)])), cx);
+                window.push_notification(
+                    Notification::error(i18n::tf("aliyun.build_failed", &[("e", &e)])),
+                    cx,
+                );
             }
         }
     }
@@ -240,27 +263,27 @@ impl Render for AliyunDialog {
                 v_flex()
                     .w(px(160.))
                     .gap_1()
-                    .child(div().text_xs().font_semibold().child(i18n::t("aliyun.saved_presets")))
-                    .children(
-                        self.presets
-                            .iter()
-                            .enumerate()
-                            .map(|(i, p)| {
-                                let selected = self.selected == Some(i);
-                                div()
-                                    .id(("aliyun-preset", i))
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_md()
-                                    .text_sm()
-                                    .when(selected, |d| d.bg(cx.theme().secondary))
-                                    .cursor_pointer()
-                                    .child(p.name.clone())
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.select_preset(i, window, cx);
-                                    }))
-                            }),
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child(i18n::t("aliyun.saved_presets")),
                     )
+                    .children(self.presets.iter().enumerate().map(|(i, p)| {
+                        let selected = self.selected == Some(i);
+                        div()
+                            .id(("aliyun-preset", i))
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .text_sm()
+                            .when(selected, |d| d.bg(cx.theme().secondary))
+                            .cursor_pointer()
+                            .child(p.name.clone())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_preset(i, window, cx);
+                            }))
+                    }))
                     .child(
                         Button::new("aliyun-new")
                             .icon(IconName::Plus)
@@ -282,12 +305,10 @@ impl Render for AliyunDialog {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.instance_id"),
-                                    Input::new(&self.instance_id),
-                                )),
-                            )
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.instance_id"),
+                                Input::new(&self.instance_id),
+                            )))
                             .child(
                                 div().flex_1().min_w(px(0.)).child(field(
                                     i18n::t("aliyun.region"),
@@ -295,54 +316,45 @@ impl Render for AliyunDialog {
                                 )),
                             ),
                     )
-                    .child(field(i18n::t("aliyun.auth_mode"), Select::new(&self.auth_mode)))
+                    .child(field(
+                        i18n::t("aliyun.auth_mode"),
+                        Select::new(&self.auth_mode),
+                    ))
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.access_key_id"),
-                                    Input::new(&self.access_key_id),
-                                )),
-                            )
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.access_key_secret"),
-                                    Input::new(&self.access_key_secret).mask_toggle(),
-                                )),
-                            ),
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.access_key_id"),
+                                Input::new(&self.access_key_id),
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.access_key_secret"),
+                                Input::new(&self.access_key_secret).mask_toggle(),
+                            ))),
                     )
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.group_id"),
-                                    Input::new(&self.group_id),
-                                )),
-                            )
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.device_id"),
-                                    Input::new(&self.device_id),
-                                )),
-                            ),
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.group_id"),
+                                Input::new(&self.group_id),
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.device_id"),
+                                Input::new(&self.device_id),
+                            ))),
                     )
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.product_key"),
-                                    Input::new(&self.product_key),
-                                )),
-                            )
-                            .child(
-                                div().flex_1().min_w(px(0.)).child(field(
-                                    i18n::t("aliyun.device_secret"),
-                                    Input::new(&self.device_secret).mask_toggle(),
-                                )),
-                            ),
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.product_key"),
+                                Input::new(&self.product_key),
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("aliyun.device_secret"),
+                                Input::new(&self.device_secret).mask_toggle(),
+                            ))),
                     )
                     .child(
                         div()
@@ -366,9 +378,9 @@ impl Render for AliyunDialog {
                                 Button::new("aliyun-connect")
                                     .label(i18n::t("aliyun.generate_connect"))
                                     .primary()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.connect(window, cx)
-                                    })),
+                                    .on_click(
+                                        cx.listener(|this, _, window, cx| this.connect(window, cx)),
+                                    ),
                             ),
                     ),
             )

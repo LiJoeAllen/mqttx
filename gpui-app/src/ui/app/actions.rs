@@ -1,14 +1,16 @@
 //! 用户动作：连接/订阅/预设/变量/设置等状态写操作，与连接表单的打开。
 
-
-use gpui_kit::component::button::{ Button };
-use gpui_kit::component::{ h_flex, notification::Notification,  };
-use gpui_kit::{ div, px, App, Context, Window,  };
+use gpui_kit::component::button::Button;
+use gpui_kit::component::{h_flex, notification::Notification};
+use gpui_kit::{App, Context, Window, div, px};
 
 use crate::aliyun::AliyunPreset;
-use crate::model::{ AppSettings, ConnectionConfig, ConnectionStatus, GlobalVariable, PublishParams, PublishPreset, Subscription,  };
+use crate::model::{
+    AppSettings, ConnectionConfig, ConnectionStatus, GlobalVariable, PublishParams, PublishPreset,
+    Subscription,
+};
 use crate::ui::IconName;
-use crate::ui::{ connection_form::ConnectionForm, connection_view::ConnectionView,  };
+use crate::ui::{connection_form::ConnectionForm, connection_view::ConnectionView};
 
 use super::*;
 use crate::ui::i18n;
@@ -31,8 +33,7 @@ impl MqttXApp {
         let mut copy = src;
         copy.id = uuid::Uuid::new_v4().to_string();
         copy.name = i18n::tf("sidebar.dup_suffix", &[("name", &copy.name)]);
-        copy.client_id =
-            format!("mqttx_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        copy.client_id = format!("mqttx_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         self.connections.push(copy);
         self.storage.save_connections(&self.connections);
     }
@@ -41,9 +42,10 @@ impl MqttXApp {
     /// 路径复位到「全部」；render 只读，不做突变。
     fn normalize_group_filter(&mut self) {
         if let GroupFilter::Named(name) = &self.group_filter
-            && !self.connections.iter().any(|c| {
-                c.group.as_deref().map(str::trim) == Some(name.as_str())
-            })
+            && !self
+                .connections
+                .iter()
+                .any(|c| c.group.as_deref().map(str::trim) == Some(name.as_str()))
         {
             self.group_filter = GroupFilter::All;
         }
@@ -94,19 +96,16 @@ impl MqttXApp {
             self.open_tabs.push(conn_id.to_string());
             let weak = cx.entity().downgrade();
             let engine = self.engine.clone();
-            let view = cx.new(|cx| ConnectionView::new(conn_id.to_string(), weak, engine, window, cx));
+            let view =
+                cx.new(|cx| ConnectionView::new(conn_id.to_string(), weak, engine, window, cx));
             self.views.insert(conn_id.to_string(), view);
         }
         self.active_tab = Some(conn_id.to_string());
         self.persist_ui_state();
-        #[cfg(debug_assertions)]
-        if std::env::var("MQTTX_DEBUG_TABS").as_deref() == Ok("1") {
-            eprintln!("[debug] open_tab {conn_id} views={}", self.views.len());
-        }
         cx.notify();
     }
 
-pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         self.open_tabs.retain(|t| t != id);
         self.views.remove(id);
         if self.active_tab.as_deref() == Some(id) {
@@ -182,8 +181,10 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
     /// 停顿后才真正落盘。触发经引擎定时器发回 vars 泵完成写盘。
     pub fn persist_variables_soon(&mut self) {
         self.variables_dirty = true;
-        self.engine
-            .schedule_debounced(std::time::Duration::from_millis(500), self.variables_flush_tx.clone());
+        self.engine.schedule_debounced(
+            std::time::Duration::from_millis(500),
+            self.variables_flush_tx.clone(),
+        );
     }
 
     pub fn save_presets(&mut self, presets: Vec<PublishPreset>) {
@@ -222,17 +223,32 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
             apply_theme(settings.theme, cx);
         }
         // 语言即时生效（含跟随系统）
-        crate::ui::i18n::set_lang(match settings.language {
+        let next_lang = match settings.language {
             crate::model::LanguagePref::Zh => crate::ui::i18n::Lang::Zh,
             crate::model::LanguagePref::En => crate::ui::i18n::Lang::En,
             crate::model::LanguagePref::System => crate::ui::i18n::from_system(),
-        });
+        };
+        // 只有语言真的变了才重建固化文案：纯主题/条数变更不必动各页签的下拉与输入框
+        let lang_changed = next_lang != crate::ui::i18n::lang();
+        crate::ui::i18n::set_lang(next_lang);
+        if lang_changed {
+            crate::ui::widgets::refresh_placeholder(
+                &self.search,
+                i18n::t("sidebar.search"),
+                window,
+                cx,
+            );
+            // 先取出句柄再逐个更新，避开 HashMap 借用与 App 可变借用的冲突
+            let views: Vec<_> = self.views.values().cloned().collect();
+            for view in views {
+                view.update(cx, |v, cx| v.refresh_labels(window, cx));
+            }
+        }
         self.settings = settings;
         self.storage.save_settings(&self.settings);
         // 预设切换/主题变更后强制整窗重画，避免未损坏区域滞留旧主题像素
         window.refresh();
     }
-
 
     pub fn open_connection_form(
         &mut self,
@@ -273,7 +289,11 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                 } else {
                                     IconName::PlugZap
                                 })
-                                .label(if testing { i18n::t("form.testing") } else { i18n::t("form.test") })
+                                .label(if testing {
+                                    i18n::t("form.testing")
+                                } else {
+                                    i18n::t("form.test")
+                                })
                                 .outline()
                                 .loading(testing)
                                 .on_click(move |_, window, cx| {
@@ -319,7 +339,9 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                             window.close_dialog(cx);
                                             if stale {
                                                 window.push_notification(
-                                                    Notification::info(i18n::t("form.saved_reconnect")),
+                                                    Notification::info(i18n::t(
+                                                        "form.saved_reconnect",
+                                                    )),
                                                     cx,
                                                 );
                                             }
@@ -327,10 +349,7 @@ pub(super) fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
                                         Err(e) => {
                                             // 触发重绘，让字段级红字即时显示（错误已写入表单内部）
                                             form_ok.update(cx, |_, cx| cx.notify());
-                                            window.push_notification(
-                                                Notification::error(e),
-                                                cx,
-                                            );
+                                            window.push_notification(Notification::error(e), cx);
                                         }
                                     }
                                 }),

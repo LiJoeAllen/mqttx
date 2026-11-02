@@ -1,10 +1,9 @@
 //! 主区域：标签页栏与内容视图装配（含空态占位）。
 
-
-use gpui_kit::component::button::{ Button };
-use gpui_kit::component::tab::{ Tab, TabBar };
-use gpui_kit::component::{ v_flex,  };
-use gpui_kit::{ div, px, Context, IntoElement, SharedString, Window,  };
+use gpui_kit::component::button::Button;
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::v_flex;
+use gpui_kit::{Context, IntoElement, SharedString, Window, div, px};
 
 use crate::ui::IconName;
 
@@ -12,7 +11,11 @@ use super::*;
 use crate::ui::i18n;
 
 impl MqttXApp {
-pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_main(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         if self.open_tabs.is_empty() {
             // 父级 h_flex 交叉轴居中子项，容器必须 h_full 占满高度才不会整体下沉
             return v_flex()
@@ -27,7 +30,12 @@ pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self
                     cx.theme().muted,
                     cx.theme().muted_foreground,
                 ))
-                .child(div().text_base().font_medium().child(i18n::t("tab.welcome_title")))
+                .child(
+                    div()
+                        .text_base()
+                        .font_medium()
+                        .child(i18n::t("tab.welcome_title")),
+                )
                 .child(
                     div()
                         .text_sm()
@@ -83,15 +91,6 @@ pub(super) fn render_main(&mut self, _window: &mut Window, cx: &mut Context<Self
         }
 
         let view = self.views.get(&active).cloned();
-        #[cfg(debug_assertions)]
-        if std::env::var("MQTTX_DEBUG_TABS").as_deref() == Ok("1") {
-            eprintln!(
-                "[debug] render_main active={active} views={} tabs={:?} view_found={}",
-                self.views.len(),
-                self.open_tabs,
-                view.is_some()
-            );
-        }
         // h_full：父级 h_flex 交叉轴居中子项，不占满高度会被整体垂直居中；
         // 视图根是 size_full，须包在 flex_1 容器里，否则会盖住 TabBar 并溢出。
         v_flex()

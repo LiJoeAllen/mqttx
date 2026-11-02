@@ -4,33 +4,37 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpui_kit::component::scroll::ScrollableElement as _;
+use crate::ui::IconName;
+use crate::ui::i18n;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    h_flex, notification::Notification, v_flex, ActiveTheme as _, Icon, Sizable as _,
-    StyledExt as _, WindowExt as _,
+    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
+    notification::Notification, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use crate::ui::IconName;
-use crate::ui::i18n;
 use gpui_kit::{
-    div, percentage, px, App, AppContext as _, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Window,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Window, div, percentage, px,
 };
 
 use crate::model::{ConnectionConfig, LastWill, ProtocolVersion, SslConfig, TransportKind};
 use crate::mqtt::MqttEngine;
-use crate::ui::widgets::{field, field_ex, make_select, OptionDelegate};
+use crate::ui::widgets::{OptionDelegate, field, field_ex, make_select};
 
-fn protocol_labels() -> [&'static str; 2] { ["MQTT 5.0", "MQTT 3.1.1"] }
+fn protocol_labels() -> [&'static str; 2] {
+    ["MQTT 5.0", "MQTT 3.1.1"]
+}
 const TRANSPORTS: [&str; 4] = ["TCP", "TLS", "WebSocket", "WSS"]; // 语言无关
 const QOS: [&str; 3] = ["QoS 0", "QoS 1", "QoS 2"]; // 语言无关
 /// 分组下拉的首项：选择它表示不归属任何分组。
-fn no_group_label() -> &'static str { i18n::t("form.no_group") }
+fn no_group_label() -> &'static str {
+    i18n::t("form.no_group")
+}
 
 pub struct ConnectionForm {
     engine: Arc<MqttEngine>,
@@ -139,13 +143,19 @@ impl ConnectionForm {
     ) -> Self {
         let c = edit.clone().unwrap_or_default();
         let editing_id = edit.as_ref().map(|e| e.id.clone());
-        let created_at = edit.as_ref().map(|e| e.created_at).unwrap_or_else(|| {
-            chrono::Local::now().timestamp()
-        });
+        let created_at = edit
+            .as_ref()
+            .map(|e| e.created_at)
+            .unwrap_or_else(|| chrono::Local::now().timestamp());
 
         let name = input(&c.name, i18n::t("form.name_ph"), window, cx);
         let host = input(&c.host, "broker.example.com", window, cx);
-        let port = input(&c.port.to_string(), i18n::t(i18n::t("form.port")), window, cx);
+        let port = input(
+            &c.port.to_string(),
+            i18n::t(i18n::t("form.port")),
+            window,
+            cx,
+        );
         let path = input(&c.path, "/mqtt", window, cx);
         let client_id = input(&c.client_id, i18n::t("form.client_id"), window, cx);
         let username = input(&c.username, i18n::t("form.username_ph"), window, cx);
@@ -178,9 +188,24 @@ impl ConnectionForm {
             window,
             cx,
         );
-        let receive_max = optional_input(c.receive_maximum.map(u32::from), i18n::t("form.receive_max_ph"), window, cx);
-        let max_packet = optional_input(c.maximum_packet_size, i18n::t("form.max_packet"), window, cx);
-        let topic_alias = optional_input(c.topic_alias_maximum.map(u32::from), i18n::t("form.topic_alias_max"), window, cx);
+        let receive_max = optional_input(
+            c.receive_maximum.map(u32::from),
+            i18n::t("form.receive_max_ph"),
+            window,
+            cx,
+        );
+        let max_packet = optional_input(
+            c.maximum_packet_size,
+            i18n::t("form.max_packet"),
+            window,
+            cx,
+        );
+        let topic_alias = optional_input(
+            c.topic_alias_maximum.map(u32::from),
+            i18n::t("form.topic_alias_max"),
+            window,
+            cx,
+        );
 
         let ssl_ca = input(&c.ssl.ca_file, i18n::t("ssl.ca_ph"), window, cx);
         let ssl_client_cert = input(&c.ssl.client_cert_file, i18n::t("ssl.cert_ph"), window, cx);
@@ -188,27 +213,44 @@ impl ConnectionForm {
 
         let group_new = input("", i18n::t("form.new_group_hint"), window, cx);
 
-        let (will_topic, will_payload, will_enabled, will_retain, will_qos_idx, will_content_type, will_response_topic) =
-            match &c.last_will {
-                Some(w) => (
-                    input(&w.topic, i18n::t("form.will_topic"), window, cx),
-                    input(&w.payload, i18n::t("form.will_payload_ph"), window, cx),
-                    true,
-                    w.retain,
-                    w.qos as usize,
-                    input(w.content_type.as_deref().unwrap_or(""), i18n::t("form.content_type_ph"), window, cx),
-                    input(w.response_topic.as_deref().unwrap_or(""), i18n::t("form.response_topic_ph"), window, cx),
+        let (
+            will_topic,
+            will_payload,
+            will_enabled,
+            will_retain,
+            will_qos_idx,
+            will_content_type,
+            will_response_topic,
+        ) = match &c.last_will {
+            Some(w) => (
+                input(&w.topic, i18n::t("form.will_topic"), window, cx),
+                input(&w.payload, i18n::t("form.will_payload_ph"), window, cx),
+                true,
+                w.retain,
+                w.qos as usize,
+                input(
+                    w.content_type.as_deref().unwrap_or(""),
+                    i18n::t("form.content_type_ph"),
+                    window,
+                    cx,
                 ),
-                None => (
-                    input("", i18n::t("form.will_topic"), window, cx),
-                    input("", i18n::t("form.will_payload_ph"), window, cx),
-                    false,
-                    false,
-                    0,
-                    input("", i18n::t("form.content_type_ph"), window, cx),
-                    input("", i18n::t("form.response_topic_ph"), window, cx),
+                input(
+                    w.response_topic.as_deref().unwrap_or(""),
+                    i18n::t("form.response_topic_ph"),
+                    window,
+                    cx,
                 ),
-            };
+            ),
+            None => (
+                input("", i18n::t("form.will_topic"), window, cx),
+                input("", i18n::t("form.will_payload_ph"), window, cx),
+                false,
+                false,
+                0,
+                input("", i18n::t("form.content_type_ph"), window, cx),
+                input("", i18n::t("form.response_topic_ph"), window, cx),
+            ),
+        };
 
         let protocol = make_select(
             &protocol_labels(),
@@ -313,18 +355,14 @@ impl ConnectionForm {
         ];
         let mut err_subs = Vec::with_capacity(err_watch.len());
         for w in err_watch {
-            err_subs.push(cx.subscribe_in(
-                &w,
-                window,
-                move |this, _, ev: &InputEvent, _, cx| {
-                    if matches!(ev, InputEvent::Change)
-                        && !this.field_errors.borrow().is_empty()
-                    {
+            err_subs.push(
+                cx.subscribe_in(&w, window, move |this, _, ev: &InputEvent, _, cx| {
+                    if matches!(ev, InputEvent::Change) && !this.field_errors.borrow().is_empty() {
                         this.field_errors.borrow_mut().clear();
                         cx.notify();
                     }
-                },
-            ));
+                }),
+            );
         }
 
         Self {
@@ -391,11 +429,7 @@ impl ConnectionForm {
     }
 
     /// 把 Result 的错误挂到指定字段上再继续 `?` 传播。
-    fn fail_as<T>(
-        &self,
-        key: &'static str,
-        r: Result<T, String>,
-    ) -> Result<T, String> {
+    fn fail_as<T>(&self, key: &'static str, r: Result<T, String>) -> Result<T, String> {
         r.map_err(|e| self.fail(key, e))
     }
 
@@ -419,7 +453,11 @@ impl ConnectionForm {
     /// 且该值会被持久化，表现为"每次连接都失败"。
     fn parse_opt_positive_u32(s: &str, label: &'static str) -> Result<Option<u32>, String> {
         match Self::parse_opt_u32(s, label)? {
-            Some(0) => Err(format!("{} {}", i18n::t(label), i18n::t("form.err_positive"))),
+            Some(0) => Err(format!(
+                "{} {}",
+                i18n::t(label),
+                i18n::t("form.err_positive")
+            )),
             other => Ok(other),
         }
     }
@@ -468,11 +506,19 @@ impl ConnectionForm {
             if !for_test {
                 return Err(self.fail("client_id", i18n::t("form.client_id_required")));
             }
-            client_id = format!("mqttx-test-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+            client_id = format!(
+                "mqttx-test-{}",
+                &uuid::Uuid::new_v4().simple().to_string()[..8]
+            );
         }
         let client_id = client_id.trim().to_string();
-        let keep_alive =
-            self.fail_as("keep_alive", Self::parse_u16(&self.val(&self.keep_alive, cx), i18n::t("form.keep_alive_short")))?;
+        let keep_alive = self.fail_as(
+            "keep_alive",
+            Self::parse_u16(
+                &self.val(&self.keep_alive, cx),
+                i18n::t("form.keep_alive_short"),
+            ),
+        )?;
         // 空串视为 0（会话随连接结束）；非空必须是合法非负整数，不再静默吞掉 -1/abc
         let session_expiry = {
             let raw = self.val(&self.session_expiry, cx);
@@ -481,27 +527,43 @@ impl ConnectionForm {
                 0
             } else {
                 t.parse::<u32>().map_err(|_| {
-                    self.fail(
-                        "session_expiry",
-                        i18n::t("form.session_expiry_invalid"),
-                    )
+                    self.fail("session_expiry", i18n::t("form.session_expiry_invalid"))
                 })?
             }
         };
-        let receive_maximum = self.fail_as("receive_max", (|| -> Result<_, String> {
-            Ok(Self::parse_opt_positive_u32(&self.val(&self.receive_max, cx), i18n::t("form.receive_max_short"))?
-                .map(|v| u16::try_from(v).map_err(|_| i18n::t("form.receive_max_invalid").to_string()))
+        let receive_maximum = self.fail_as(
+            "receive_max",
+            (|| -> Result<_, String> {
+                Ok(Self::parse_opt_positive_u32(
+                    &self.val(&self.receive_max, cx),
+                    i18n::t("form.receive_max_short"),
+                )?
+                .map(|v| {
+                    u16::try_from(v).map_err(|_| i18n::t("form.receive_max_invalid").to_string())
+                })
                 .transpose())
-        })())??;
+            })(),
+        )??;
         let maximum_packet_size = self.fail_as(
             "max_packet",
-            Self::parse_opt_positive_u32(&self.val(&self.max_packet, cx), i18n::t("form.max_packet")),
+            Self::parse_opt_positive_u32(
+                &self.val(&self.max_packet, cx),
+                i18n::t("form.max_packet"),
+            ),
         )?;
-        let topic_alias_maximum = self.fail_as("topic_alias", (|| -> Result<_, String> {
-            Ok(Self::parse_opt_positive_u32(&self.val(&self.topic_alias, cx), i18n::t("form.topic_alias"))?
-                .map(|v| u16::try_from(v).map_err(|_| i18n::t("form.topic_alias_invalid").to_string()))
+        let topic_alias_maximum = self.fail_as(
+            "topic_alias",
+            (|| -> Result<_, String> {
+                Ok(Self::parse_opt_positive_u32(
+                    &self.val(&self.topic_alias, cx),
+                    i18n::t("form.topic_alias"),
+                )?
+                .map(|v| {
+                    u16::try_from(v).map_err(|_| i18n::t("form.topic_alias_invalid").to_string())
+                })
                 .transpose())
-        })())??;
+            })(),
+        )??;
 
         let conn_timeout_raw = self.val(&self.conn_timeout, cx);
         let connection_timeout_secs = if conn_timeout_raw.trim().is_empty() {
@@ -569,9 +631,7 @@ impl ConnectionForm {
             ignore_ca: self.ssl_ignore_ca,
         };
         // 只填证书或只填私钥必然握手失败；仅 TLS/WSS 下 SSL 生效，按生效传输校验
-        if transport.is_tls()
-            && ssl.client_cert_file.is_empty() != ssl.client_key_file.is_empty()
-        {
+        if transport.is_tls() && ssl.client_cert_file.is_empty() != ssl.client_key_file.is_empty() {
             return Err(self.fail("ssl_client_cert", i18n::t("form.cert_pair_required")));
         }
         // 证书文件不存在时握手才报错太晚，保存前给出字段级提示
@@ -582,7 +642,13 @@ impl ConnectionForm {
                 ("ssl_client_key", "ssl.key", &ssl.client_key_file),
             ] {
                 if !p.is_empty() && !std::path::Path::new(p).exists() {
-                    return Err(self.fail(key, i18n::tf("form.path_missing", &[("label", &i18n::t(label)), ("p", &p)])));
+                    return Err(self.fail(
+                        key,
+                        i18n::tf(
+                            "form.path_missing",
+                            &[("label", &i18n::t(label)), ("p", &p)],
+                        ),
+                    ));
                 }
             }
         }
@@ -595,10 +661,7 @@ impl ConnectionForm {
             }
             // 通配符只用于订阅过滤器；出现在 PUBLISH 主题上会被 broker 直接拒绝
             if topic.contains('+') || topic.contains('#') {
-                return Err(self.fail(
-                    "will_topic",
-                    i18n::t("will.topic_wildcard"),
-                ));
+                return Err(self.fail("will_topic", i18n::t("will.topic_wildcard")));
             }
             let opt_str = |v: String| {
                 let t = v.trim().to_string();
@@ -607,7 +670,12 @@ impl ConnectionForm {
             Some(LastWill {
                 topic,
                 payload: self.val(&self.will_payload, cx),
-                qos: self.will_qos.read(cx).selected_value().copied().unwrap_or(0) as u8,
+                qos: self
+                    .will_qos
+                    .read(cx)
+                    .selected_value()
+                    .copied()
+                    .unwrap_or(0) as u8,
                 retain: self.will_retain,
                 content_type: opt_str(self.val(&self.will_content_type, cx)),
                 response_topic: opt_str(self.val(&self.will_response_topic, cx)),
@@ -616,7 +684,10 @@ impl ConnectionForm {
             None
         };
 
-        let id = self.editing_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let id = self
+            .editing_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         Ok(ConnectionConfig {
             id,
             name,
@@ -663,18 +734,20 @@ impl ConnectionForm {
         cx.notify();
 
         cx.spawn_in(window, async move |this, cx| {
-            let result = rx.recv().await.unwrap_or(Err(i18n::t("form.test_task_lost").to_string()));
+            let result = rx
+                .recv()
+                .await
+                .unwrap_or(Err(i18n::t("form.test_task_lost").to_string()));
             this.update_in(cx, |form, window, cx| {
                 form.testing = false;
                 match result {
-                    Ok(()) => window.push_notification(
-                        Notification::success(i18n::t("form.test_ok")),
+                    Ok(()) => {
+                        window.push_notification(Notification::success(i18n::t("form.test_ok")), cx)
+                    }
+                    Err(e) => window.push_notification(
+                        Notification::error(i18n::tf("form.test_failed", &[("e", &e)])),
                         cx,
                     ),
-                    Err(e) => window.push_notification(Notification::error(i18n::tf(
-                        "form.test_failed",
-                        &[("e", &e)],
-                    )), cx),
                 }
                 cx.notify();
             })
@@ -696,12 +769,13 @@ impl ConnectionForm {
         h_flex()
             .gap_1()
             .w_full()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .child(field_ex(label, Input::new(&target), false, err, danger)),
-            )
+            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                label,
+                Input::new(&target),
+                false,
+                err,
+                danger,
+            )))
             .child(
                 Button::new(id)
                     .label(i18n::t("common.browse"))
@@ -725,7 +799,10 @@ impl ConnectionForm {
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new()
                 .set_title(i18n::t("ssl.pick_file"))
-                .add_filter(i18n::t("ssl.file_filter"), &["pem", "crt", "cer", "key", "der"])
+                .add_filter(
+                    i18n::t("ssl.file_filter"),
+                    &["pem", "crt", "cer", "key", "der"],
+                )
                 .pick_file();
             let _ = tx.send_blocking(picked);
         });
@@ -753,24 +830,22 @@ impl ConnectionForm {
         h_flex()
             .justify_between()
             .child(div().text_sm().child(label))
-            .child(
-                Switch::new(id)
-                    .checked(checked)
-                    .on_change(cx.listener(move |this, v, _, cx| {
-                        let v = *v;
-                        match id {
-                            "clean_start" => this.clean_start = v,
-                            "auto_resubscribe" => this.auto_resubscribe = v,
-                            "auto_connect" => this.auto_connect = v,
-                            "auto_reconnect" => this.auto_reconnect = v,
-                            "will_enabled" => this.will_enabled = v,
-                            "will_retain" => this.will_retain = v,
-                            "ssl_ignore_ca" => this.ssl_ignore_ca = v,
-                            _ => {}
-                        }
-                        cx.notify();
-                    })),
-            )
+            .child(Switch::new(id).checked(checked).on_change(cx.listener(
+                move |this, v, _, cx| {
+                    let v = *v;
+                    match id {
+                        "clean_start" => this.clean_start = v,
+                        "auto_resubscribe" => this.auto_resubscribe = v,
+                        "auto_connect" => this.auto_connect = v,
+                        "auto_reconnect" => this.auto_reconnect = v,
+                        "will_enabled" => this.will_enabled = v,
+                        "will_retain" => this.will_retain = v,
+                        "ssl_ignore_ca" => this.ssl_ignore_ca = v,
+                        _ => {}
+                    }
+                    cx.notify();
+                },
+            )))
     }
 
     /// 可折叠分组：点击标题行切换展开/收起，收起时不渲染内容。
@@ -846,20 +921,16 @@ impl Render for ConnectionForm {
         let card_bg = cx.theme().secondary;
         // 协议/传输决定高级分组的按需显示
         let is_v5 = self.protocol.read(cx).selected_value() != Some(&1);
-        let is_ws = matches!(
-            self.transport.read(cx).selected_value(),
-            Some(2) | Some(3)
-        );
+        let is_ws = matches!(self.transport.read(cx).selected_value(), Some(2) | Some(3));
         // SSL/TLS 区块只对 TLS/WSS 有意义
-        let is_tls = matches!(
-            self.transport.read(cx).selected_value(),
-            Some(1) | Some(3)
-        );
+        let is_tls = matches!(self.transport.read(cx).selected_value(), Some(1) | Some(3));
         // build() 校验失败登记的字段级错误，渲染成红字；红/星号用主题错误色
         let danger = cx.theme().danger;
         let field_errors = self.field_errors.borrow().clone();
         let err = move |key: &'static str| -> Option<SharedString> {
-            field_errors.get(key).map(|s| SharedString::from(s.as_str()))
+            field_errors
+                .get(key)
+                .map(|s| SharedString::from(s.as_str()))
         };
         // 折叠标题的「已配置 N 项」提示，避免编辑旧配置时看不到已填内容
         let ssl_count = [
@@ -879,126 +950,352 @@ impl Render for ConnectionForm {
         .iter()
         .filter(|on| **on)
         .count();
-        let ssl_hint = (ssl_count > 0).then(|| SharedString::from(i18n::tf("ssl.n_configured", &[("n", &ssl_count)])));
-        let mqtt5_hint =
-            (mqtt5_count > 0).then(|| SharedString::from(i18n::tf("ssl.n_configured", &[("n", &mqtt5_count)])));
+        let ssl_hint = (ssl_count > 0)
+            .then(|| SharedString::from(i18n::tf("ssl.n_configured", &[("n", &ssl_count)])));
+        let mqtt5_hint = (mqtt5_count > 0)
+            .then(|| SharedString::from(i18n::tf("ssl.n_configured", &[("n", &mqtt5_count)])));
         v_flex()
             .gap_3()
             .max_h(px(560.))
             .overflow_y_scrollbar()
             .pr_1()
             // ── 基本信息（始终展开） ──
-            .child(section(i18n::t("form.basics"), border, card_bg,
-                v_flex().gap_2().child(
-                    // 主机与端口是一对，放同一行；名称与协议/传输同行
-                    h_flex().gap_2().w_full()
-                        .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.host"), Input::new(&self.host), true, err("host"), danger)))
-                        .child(div().w(px(120.)).child(field_ex(i18n::t(i18n::t("form.port")), Input::new(&self.port), true, err("port"), danger)))
-                )
-                .child(h_flex().gap_2().w_full()
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.name"), Input::new(&self.name), true, err("name"), danger)))
-                    .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.protocol"), Select::new(&self.protocol))))
-                    .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.transport"), Select::new(&self.transport))))
-                )
-                .child(h_flex().gap_2().w_full()
-                    .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.group"), Select::new(&self.group_select))))
-                    .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.new_group"), Input::new(&self.group_new))))
-                )
-                .child(h_flex().gap_2().w_full().items_end()
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.client_id"), Input::new(&self.client_id), true, err("client_id"), danger)))
-                    // 一键换一个随机 Client ID，与 ConnectionConfig::new 的生成逻辑一致
+            .child(section(
+                i18n::t("form.basics"),
+                border,
+                card_bg,
+                v_flex()
+                    .gap_2()
                     .child(
-                        Button::new("cid-regen")
-                            .icon(IconName::RefreshCw)
-                            .ghost()
-                            .tooltip(i18n::t("form.regen_client_id"))
-                            .accessibility_label(i18n::t("form.regen_client_id"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                let cid = crate::model::generate_client_id();
-                                this.client_id
-                                    .update(cx, |s, cx| s.set_value(cid, window, cx));
-                                cx.notify();
-                            })),
+                        // 主机与端口是一对，放同一行；名称与协议/传输同行
+                        h_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.host"),
+                                Input::new(&self.host),
+                                true,
+                                err("host"),
+                                danger,
+                            )))
+                            .child(div().w(px(120.)).child(field_ex(
+                                i18n::t(i18n::t("form.port")),
+                                Input::new(&self.port),
+                                true,
+                                err("port"),
+                                danger,
+                            ))),
                     )
-                    // WS 路径仅对 WebSocket/WSS 有意义，按需显示；该传输下必填
-                    .when(is_ws, |w| w.child(
-                        div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.ws_path"), Input::new(&self.path), true, err("path"), danger))
-                    ))
-                )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.name"),
+                                Input::new(&self.name),
+                                true,
+                                err("name"),
+                                danger,
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("form.protocol"),
+                                Select::new(&self.protocol),
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("form.transport"),
+                                Select::new(&self.transport),
+                            ))),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("form.group"),
+                                Select::new(&self.group_select),
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field(
+                                i18n::t("form.new_group"),
+                                Input::new(&self.group_new),
+                            ))),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .w_full()
+                            .items_end()
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.client_id"),
+                                Input::new(&self.client_id),
+                                true,
+                                err("client_id"),
+                                danger,
+                            )))
+                            // 一键换一个随机 Client ID，与 ConnectionConfig::new 的生成逻辑一致
+                            .child(
+                                Button::new("cid-regen")
+                                    .icon(IconName::RefreshCw)
+                                    .ghost()
+                                    .tooltip(i18n::t("form.regen_client_id"))
+                                    .accessibility_label(i18n::t("form.regen_client_id"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let cid = crate::model::generate_client_id();
+                                        this.client_id
+                                            .update(cx, |s, cx| s.set_value(cid, window, cx));
+                                        cx.notify();
+                                    })),
+                            )
+                            // WS 路径仅对 WebSocket/WSS 有意义，按需显示；该传输下必填
+                            .when(is_ws, |w| {
+                                w.child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                    i18n::t("form.ws_path"),
+                                    Input::new(&self.path),
+                                    true,
+                                    err("path"),
+                                    danger,
+                                )))
+                            }),
+                    ),
             ))
             // ── 认证与心跳 ──
-            .child(self.collapsible_section(
-                "sec-auth", i18n::t("form.auth_section"), None, false, self.show_auth,
-                |f| f.show_auth = !f.show_auth, border, card_bg,
-                v_flex().gap_2()
-                    .child(h_flex().gap_2().w_full()
-                        .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.username"), Input::new(&self.username))))
-                        .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.password"), Input::new(&self.password).mask_toggle())))
-                        .child(div().w(px(110.)).child(field_ex(i18n::t("form.keep_alive"), Input::new(&self.keep_alive), true, err("keep_alive"), danger)))
-                    )
-                    .child(h_flex().gap_2().w_full()
-                        .child(div().w(px(150.)).child(field_ex(i18n::t("form.conn_timeout"), Input::new(&self.conn_timeout), false, err("conn_timeout"), danger)))
-                        .child(div().w(px(170.)).child(field_ex(i18n::t("form.max_reconnects"), Input::new(&self.max_reconnect), false, err("max_reconnect"), danger)))
-                    )
-                    .child(self.switch_row("clean_start", i18n::t("form.clean_start"), self.clean_start, cx))
-                    .child(self.switch_row("auto_reconnect", i18n::t("form.auto_reconnect"), self.auto_reconnect, cx))
-                    .child(self.switch_row("auto_resubscribe", i18n::t("form.auto_resub"), self.auto_resubscribe, cx))
-                    .child(self.switch_row("auto_connect", i18n::t("form.auto_connect"), self.auto_connect, cx)),
-                cx,
-            ))
+            .child(
+                self.collapsible_section(
+                    "sec-auth",
+                    i18n::t("form.auth_section"),
+                    None,
+                    false,
+                    self.show_auth,
+                    |f| f.show_auth = !f.show_auth,
+                    border,
+                    card_bg,
+                    v_flex()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .w_full()
+                                .child(div().flex_1().min_w(px(0.)).child(field(
+                                    i18n::t("form.username"),
+                                    Input::new(&self.username),
+                                )))
+                                .child(div().flex_1().min_w(px(0.)).child(field(
+                                    i18n::t("form.password"),
+                                    Input::new(&self.password).mask_toggle(),
+                                )))
+                                .child(div().w(px(110.)).child(field_ex(
+                                    i18n::t("form.keep_alive"),
+                                    Input::new(&self.keep_alive),
+                                    true,
+                                    err("keep_alive"),
+                                    danger,
+                                ))),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .w_full()
+                                .child(div().w(px(150.)).child(field_ex(
+                                    i18n::t("form.conn_timeout"),
+                                    Input::new(&self.conn_timeout),
+                                    false,
+                                    err("conn_timeout"),
+                                    danger,
+                                )))
+                                .child(div().w(px(170.)).child(field_ex(
+                                    i18n::t("form.max_reconnects"),
+                                    Input::new(&self.max_reconnect),
+                                    false,
+                                    err("max_reconnect"),
+                                    danger,
+                                ))),
+                        )
+                        .child(self.switch_row(
+                            "clean_start",
+                            i18n::t("form.clean_start"),
+                            self.clean_start,
+                            cx,
+                        ))
+                        .child(self.switch_row(
+                            "auto_reconnect",
+                            i18n::t("form.auto_reconnect"),
+                            self.auto_reconnect,
+                            cx,
+                        ))
+                        .child(self.switch_row(
+                            "auto_resubscribe",
+                            i18n::t("form.auto_resub"),
+                            self.auto_resubscribe,
+                            cx,
+                        ))
+                        .child(self.switch_row(
+                            "auto_connect",
+                            i18n::t("form.auto_connect"),
+                            self.auto_connect,
+                            cx,
+                        )),
+                    cx,
+                ),
+            )
             // ── SSL/TLS（仅 TLS/WSS 显示） ──
-            .when(is_tls, |w| w.child(self.collapsible_section(
-                "sec-ssl", i18n::t("ssl.section"), ssl_hint, true, self.show_ssl,
-                |f| f.show_ssl = !f.show_ssl, border, card_bg,
-                v_flex().gap_2()
-                    .child(self.cert_path_row(
-                        "ssl-ca-browse", i18n::t("ssl.ca"), self.ssl_ca.clone(),
-                        err("ssl_ca"), danger, cx,
-                    ))
-                    .child(self.cert_path_row(
-                        "ssl-cert-browse", i18n::t("ssl.cert"), self.ssl_client_cert.clone(),
-                        err("ssl_client_cert"), danger, cx,
-                    ))
-                    .child(self.cert_path_row(
-                        "ssl-key-browse", i18n::t("ssl.key"), self.ssl_client_key.clone(),
-                        err("ssl_client_key"), danger, cx,
-                    ))
-                    .child(self.switch_row("ssl_ignore_ca", i18n::t("ssl.skip_verify"), self.ssl_ignore_ca, cx)),
-                cx,
-            )))
-            // ── MQTT 5 高级属性（仅 v5 协议显示） ──
-            .when(is_v5, |w| w.child(self.collapsible_section(
-                "sec-mqtt5", i18n::t("form.mqtt5_section"), mqtt5_hint, true, self.show_mqtt5,
-                |f| f.show_mqtt5 = !f.show_mqtt5, border, card_bg,
-                h_flex().gap_2().w_full()
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.session_expiry"), Input::new(&self.session_expiry), false, err("session_expiry"), danger)))
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.receive_max"), Input::new(&self.receive_max), false, err("receive_max"), danger)))
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.max_packet"), Input::new(&self.max_packet), false, err("max_packet"), danger)))
-                    .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.topic_alias_max"), Input::new(&self.topic_alias), false, err("topic_alias"), danger))),
-                cx,
-            )))
-            // ── 遗嘱 ──
-            .child(self.collapsible_section(
-                "sec-will", i18n::t("form.will_section"),
-                self.will_enabled.then(|| i18n::t("will.enabled_hint").into()), true, self.show_will,
-                |f| f.show_will = !f.show_will, border, card_bg,
-                v_flex().gap_2()
-                    .child(self.switch_row("will_enabled", i18n::t("form.will_enable"), self.will_enabled, cx))
-                    .when(self.will_enabled, |w| w
-                        .child(h_flex().gap_2()
-                            .child(div().flex_1().min_w(px(0.)).child(field_ex(i18n::t("form.will_topic"), Input::new(&self.will_topic), true, err("will_topic"), danger)))
-                            .child(div().w(px(130.)).child(field("QoS", Select::new(&self.will_qos))))
-                        )
-                        .child(field(i18n::t("form.will_payload"), Input::new(&self.will_payload)))
-                        // v5 遗嘱属性；3.1.1 连接会忽略这两项
-                        .child(h_flex().gap_2().w_full()
-                            .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.will_content_type"), Input::new(&self.will_content_type))))
-                            .child(div().flex_1().min_w(px(0.)).child(field(i18n::t("form.will_response_topic"), Input::new(&self.will_response_topic))))
-                        )
-                        .child(self.switch_row("will_retain", "Retain", self.will_retain, cx))
+            .when(is_tls, |w| {
+                w.child(
+                    self.collapsible_section(
+                        "sec-ssl",
+                        i18n::t("ssl.section"),
+                        ssl_hint,
+                        true,
+                        self.show_ssl,
+                        |f| f.show_ssl = !f.show_ssl,
+                        border,
+                        card_bg,
+                        v_flex()
+                            .gap_2()
+                            .child(self.cert_path_row(
+                                "ssl-ca-browse",
+                                i18n::t("ssl.ca"),
+                                self.ssl_ca.clone(),
+                                err("ssl_ca"),
+                                danger,
+                                cx,
+                            ))
+                            .child(self.cert_path_row(
+                                "ssl-cert-browse",
+                                i18n::t("ssl.cert"),
+                                self.ssl_client_cert.clone(),
+                                err("ssl_client_cert"),
+                                danger,
+                                cx,
+                            ))
+                            .child(self.cert_path_row(
+                                "ssl-key-browse",
+                                i18n::t("ssl.key"),
+                                self.ssl_client_key.clone(),
+                                err("ssl_client_key"),
+                                danger,
+                                cx,
+                            ))
+                            .child(self.switch_row(
+                                "ssl_ignore_ca",
+                                i18n::t("ssl.skip_verify"),
+                                self.ssl_ignore_ca,
+                                cx,
+                            )),
+                        cx,
                     ),
-                cx,
-            ))
+                )
+            })
+            // ── MQTT 5 高级属性（仅 v5 协议显示） ──
+            .when(is_v5, |w| {
+                w.child(
+                    self.collapsible_section(
+                        "sec-mqtt5",
+                        i18n::t("form.mqtt5_section"),
+                        mqtt5_hint,
+                        true,
+                        self.show_mqtt5,
+                        |f| f.show_mqtt5 = !f.show_mqtt5,
+                        border,
+                        card_bg,
+                        h_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.session_expiry"),
+                                Input::new(&self.session_expiry),
+                                false,
+                                err("session_expiry"),
+                                danger,
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.receive_max"),
+                                Input::new(&self.receive_max),
+                                false,
+                                err("receive_max"),
+                                danger,
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.max_packet"),
+                                Input::new(&self.max_packet),
+                                false,
+                                err("max_packet"),
+                                danger,
+                            )))
+                            .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                i18n::t("form.topic_alias_max"),
+                                Input::new(&self.topic_alias),
+                                false,
+                                err("topic_alias"),
+                                danger,
+                            ))),
+                        cx,
+                    ),
+                )
+            })
+            // ── 遗嘱 ──
+            .child(
+                self.collapsible_section(
+                    "sec-will",
+                    i18n::t("form.will_section"),
+                    self.will_enabled
+                        .then(|| i18n::t("will.enabled_hint").into()),
+                    true,
+                    self.show_will,
+                    |f| f.show_will = !f.show_will,
+                    border,
+                    card_bg,
+                    v_flex()
+                        .gap_2()
+                        .child(self.switch_row(
+                            "will_enabled",
+                            i18n::t("form.will_enable"),
+                            self.will_enabled,
+                            cx,
+                        ))
+                        .when(self.will_enabled, |w| {
+                            w.child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(div().flex_1().min_w(px(0.)).child(field_ex(
+                                        i18n::t("form.will_topic"),
+                                        Input::new(&self.will_topic),
+                                        true,
+                                        err("will_topic"),
+                                        danger,
+                                    )))
+                                    .child(
+                                        div()
+                                            .w(px(130.))
+                                            .child(field("QoS", Select::new(&self.will_qos))),
+                                    ),
+                            )
+                            .child(field(
+                                i18n::t("form.will_payload"),
+                                Input::new(&self.will_payload),
+                            ))
+                            // v5 遗嘱属性；3.1.1 连接会忽略这两项
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .w_full()
+                                    .child(div().flex_1().min_w(px(0.)).child(field(
+                                        i18n::t("form.will_content_type"),
+                                        Input::new(&self.will_content_type),
+                                    )))
+                                    .child(div().flex_1().min_w(px(0.)).child(field(
+                                        i18n::t("form.will_response_topic"),
+                                        Input::new(&self.will_response_topic),
+                                    ))),
+                            )
+                            .child(self.switch_row(
+                                "will_retain",
+                                "Retain",
+                                self.will_retain,
+                                cx,
+                            ))
+                        }),
+                    cx,
+                ),
+            )
     }
 }
 

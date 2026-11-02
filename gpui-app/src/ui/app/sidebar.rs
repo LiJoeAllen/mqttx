@@ -1,14 +1,13 @@
 //! 侧边栏：搜索、分组过滤 chips、连接列表与右键菜单。
 
-
-use gpui_kit::component::button::{ Button, ButtonVariant };
+use gpui_kit::component::button::{Button, ButtonVariant};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::Input;
-use gpui_kit::component::menu::{ PopupMenuItem };
-use gpui_kit::component::{ h_flex, v_flex,  };
-use gpui_kit::{ div, px, Context, IntoElement, SharedString, Window,  };
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::{Context, IntoElement, SharedString, Window, div, px};
 
-use crate::model::{ ConnectionConfig, ConnectionStatus,  };
+use crate::model::{ConnectionConfig, ConnectionStatus};
 use crate::ui::IconName;
 use crate::ui::widgets::status_color;
 
@@ -50,7 +49,12 @@ impl MqttXApp {
                     })),
             )
     }
-pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {        let query = self.search.read(cx).value().to_lowercase();
+    pub(super) fn render_sidebar(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let query = self.search.read(cx).value().to_lowercase();
         let search = self.search.clone();
         // 分组过滤器复位发生在删除/保存连接的 action 路径（normalize_group_filter），
         // render 只读——规范禁止渲染期突变状态
@@ -102,9 +106,7 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                     .py_2()
                     .rounded_md()
                     .when(active, |this| this.bg(cx.theme().secondary))
-                    .when(!active, |this| {
-                        this.hover(move |this| this.bg(hover_bg))
-                    })
+                    .when(!active, |this| this.hover(move |this| this.bg(hover_bg)))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_tab(&row_id, window, cx);
@@ -204,7 +206,12 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                         h_flex()
                             .gap_1p5()
                             .items_center()
-                            .child(div().text_sm().font_semibold().child(i18n::t("sidebar.connections")))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .child(i18n::t("sidebar.connections")),
+                            )
                             .child(
                                 div()
                                     .text_xs()
@@ -222,15 +229,15 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                                     .xsmall()
                                     .tooltip(i18n::t("sidebar.collapse"))
                                     .accessibility_label(i18n::t("sidebar.collapse"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.toggle_sidebar(cx)
-                                    })),
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)),
+                                    ),
                             )
                             .child(
                                 Button::new("sidebar-add")
                                     .icon(IconName::Plus)
                                     .tooltip(i18n::t("titlebar.new_connection"))
-                            .accessibility_label(i18n::t("titlebar.new_connection"))
+                                    .accessibility_label(i18n::t("titlebar.new_connection"))
                                     .ghost()
                                     .xsmall()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -239,9 +246,13 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
                             ),
                     ),
             )
-            .child(v_flex().px_2().pb_2().child(Input::new(&search).small().prefix(
-                gpui_kit::component::Icon::new(IconName::Search).small(),
-            )))
+            .child(
+                v_flex().px_2().pb_2().child(
+                    Input::new(&search)
+                        .small()
+                        .prefix(gpui_kit::component::Icon::new(IconName::Search).small()),
+                ),
+            )
             .child(self.render_group_chips(cx))
             .child(body)
     }
@@ -343,11 +354,23 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
         let cfg = cfg.clone();
         let connected = matches!(status, ConnectionStatus::Connected);
         Button::new(SharedString::from(format!("conn-power-{}", cfg.id)))
-            .icon(if connected { IconName::Square } else { IconName::PlugZap })
+            .icon(if connected {
+                IconName::Square
+            } else {
+                IconName::PlugZap
+            })
             .ghost()
             .xsmall()
-            .tooltip(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connect") })
-            .accessibility_label(if connected { i18n::t("sidebar.disconnect") } else { i18n::t("sidebar.connect") })
+            .tooltip(if connected {
+                i18n::t("sidebar.disconnect")
+            } else {
+                i18n::t("sidebar.connect")
+            })
+            .accessibility_label(if connected {
+                i18n::t("sidebar.disconnect")
+            } else {
+                i18n::t("sidebar.connect")
+            })
             .on_click(cx.listener(move |this, _, _, _| {
                 this.toggle_connection(&cfg);
             }))
@@ -363,62 +386,74 @@ pub(super) fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<S
             .dropdown_menu(move |menu, _, _| {
                 let (e1, e2, e3) = (eid.clone(), eid.clone(), eid.clone());
                 let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
-                menu.item(PopupMenuItem::new(i18n::t("common.edit")).on_click(move |_, window, cx| {
-                    w1.update(cx, |app, cx| {
-                        let cfg = app.connections.iter().find(|c| c.id == e1).cloned();
-                        if let Some(cfg) = cfg {
-                            app.open_connection_form(Some(cfg), window, cx);
-                        }
-                    })
-                    .ok();
-                }))
-                .item(PopupMenuItem::new(i18n::t("sidebar.duplicate")).on_click(move |_, _, cx| {
-                    w2.update(cx, |app, cx| {
-                        app.duplicate_connection(&e2);
-                        cx.notify();
-                    })
-                    .ok();
-                }))
+                menu.item(PopupMenuItem::new(i18n::t("common.edit")).on_click(
+                    move |_, window, cx| {
+                        w1.update(cx, |app, cx| {
+                            let cfg = app.connections.iter().find(|c| c.id == e1).cloned();
+                            if let Some(cfg) = cfg {
+                                app.open_connection_form(Some(cfg), window, cx);
+                            }
+                        })
+                        .ok();
+                    },
+                ))
+                .item(
+                    PopupMenuItem::new(i18n::t("sidebar.duplicate")).on_click(move |_, _, cx| {
+                        w2.update(cx, |app, cx| {
+                            app.duplicate_connection(&e2);
+                            cx.notify();
+                        })
+                        .ok();
+                    }),
+                )
                 .separator()
-                .item(PopupMenuItem::new(i18n::t("common.delete")).on_click(move |_, window, cx| {
-                    let Some(app) = w3.upgrade() else {
-                        return;
-                    };
-                    // 二次确认：删除会级联清理订阅并断开连接，不可撤销
-                    let (name, sub_count) = {
-                        let a = app.read(cx);
-                        let name = a
-                            .connections
-                            .iter()
-                            .find(|c| c.id == e3)
-                            .map(|c| c.name.clone())
-                            .unwrap_or_else(|| e3.clone());
-                        let n = a.subscriptions.iter().filter(|s| s.connection_id == e3).count();
-                        (name, n)
-                    };
-                    let confirm_id = e3.clone();
-                    window.open_alert_dialog(cx, move |alert, _, _| {
-                        // 构建闭包是 Fn（可重复调用），克隆后再移入按钮回调
-                        let app = app.clone();
-                        let confirm_id = confirm_id.clone();
-                        alert
-                            .title(i18n::t("sidebar.delete"))
-                            .description(SharedString::from(i18n::tf(
-                                "sidebar.delete_confirm",
-                                &[("name", &name), ("sub_count", &sub_count)],
-                            )))
-                            .button_props(
-                                DialogButtonProps::default()
-                                    .ok_text(i18n::t("common.delete"))
-                                    .ok_variant(ButtonVariant::Danger)
-                                    .show_cancel(true),
-                            )
-                            .on_ok(move |_, _, cx| {
-                                app.update(cx, |app, cx| app.delete_connection(&confirm_id, cx));
-                                true
-                            })
-                    });
-                }))
+                .item(PopupMenuItem::new(i18n::t("common.delete")).on_click(
+                    move |_, window, cx| {
+                        let Some(app) = w3.upgrade() else {
+                            return;
+                        };
+                        // 二次确认：删除会级联清理订阅并断开连接，不可撤销
+                        let (name, sub_count) = {
+                            let a = app.read(cx);
+                            let name = a
+                                .connections
+                                .iter()
+                                .find(|c| c.id == e3)
+                                .map(|c| c.name.clone())
+                                .unwrap_or_else(|| e3.clone());
+                            let n = a
+                                .subscriptions
+                                .iter()
+                                .filter(|s| s.connection_id == e3)
+                                .count();
+                            (name, n)
+                        };
+                        let confirm_id = e3.clone();
+                        window.open_alert_dialog(cx, move |alert, _, _| {
+                            // 构建闭包是 Fn（可重复调用），克隆后再移入按钮回调
+                            let app = app.clone();
+                            let confirm_id = confirm_id.clone();
+                            alert
+                                .title(i18n::t("sidebar.delete"))
+                                .description(SharedString::from(i18n::tf(
+                                    "sidebar.delete_confirm",
+                                    &[("name", &name), ("sub_count", &sub_count)],
+                                )))
+                                .button_props(
+                                    DialogButtonProps::default()
+                                        .ok_text(i18n::t("common.delete"))
+                                        .ok_variant(ButtonVariant::Danger)
+                                        .show_cancel(true),
+                                )
+                                .on_ok(move |_, _, cx| {
+                                    app.update(cx, |app, cx| {
+                                        app.delete_connection(&confirm_id, cx)
+                                    });
+                                    true
+                                })
+                        });
+                    },
+                ))
             })
     }
 }

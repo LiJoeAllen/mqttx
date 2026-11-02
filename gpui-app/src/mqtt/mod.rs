@@ -11,18 +11,17 @@ use std::time::Duration;
 
 use rumqttc::mqttbytes::v5::PublishProperties as V5PublishProperties;
 use rumqttc::{
-    AsyncClient as V5AsyncClient, EventLoop as V5EventLoop,
-    PublishOptions as V5PublishOptions, RetainForwardRule, SubscribeFilterInput,
-    SubscribeProperties as V5SubscribeProperties,
+    AsyncClient as V5AsyncClient, EventLoop as V5EventLoop, PublishOptions as V5PublishOptions,
+    RetainForwardRule, SubscribeFilterInput, SubscribeProperties as V5SubscribeProperties,
 };
 use rumqttc_v4 as rv4;
 use tokio::sync::watch;
 
 use crate::model::{
-    ConnectionConfig, ConnectionStatus, LogEntry, LogLevel, MqttRecord, PublishParams, SubscribeOptions, Subscription,
+    ConnectionConfig, ConnectionStatus, LogEntry, LogLevel, MqttRecord, PublishParams,
+    SubscribeOptions, Subscription,
 };
-use crate::ui::i18n;// ─── 引擎事件 ────────────────────────────────────────────────────────────────
-
+use crate::ui::i18n; // ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 mod tls;
 mod v4;
@@ -167,7 +166,14 @@ impl MqttEngine {
         }
     }
 
-    fn log(&self, conn_id: &str, level: LogLevel, event: &str, message: String, details: Option<String>) {
+    fn log(
+        &self,
+        conn_id: &str,
+        level: LogLevel,
+        event: &str,
+        message: String,
+        details: Option<String>,
+    ) {
         self.emit(EngineEvent::Log(LogEntry {
             timestamp: now_ms(),
             connection_id: conn_id.to_string(),
@@ -490,7 +496,10 @@ impl MqttEngine {
                 &connection_id,
                 LogLevel::Info,
                 "subscribe",
-                i18n::tf("engine.subscribe_topic", &[("topic", &sub.topic), ("qos", &sub.qos)]),
+                i18n::tf(
+                    "engine.subscribe_topic",
+                    &[("topic", &sub.topic), ("qos", &sub.qos)],
+                ),
                 None,
             );
             let result = match &client {
@@ -514,9 +523,10 @@ impl MqttEngine {
                         .subscribe_many_with_properties_tracked(std::iter::once(filter), properties)
                         .await
                     {
-                        Ok(notice) => notice.wait_completion_async().await.map_err(|e| {
-                            i18n::tf("engine.subscribe_rejected", &[("e", &e)])
-                        }),
+                        Ok(notice) => notice
+                            .wait_completion_async()
+                            .await
+                            .map_err(|e| i18n::tf("engine.subscribe_rejected", &[("e", &e)])),
                         Err(e) => Err(i18n::tf("engine.subscribe_request_failed", &[("e", &e)])),
                     }
                 }
@@ -525,9 +535,10 @@ impl MqttEngine {
                         .subscribe_tracked(sub.topic.clone(), v4_qos(sub.qos))
                         .await
                     {
-                        Ok(notice) => notice.wait_completion_async().await.map_err(|e| {
-                            i18n::tf("engine.subscribe_rejected", &[("e", &e)])
-                        }),
+                        Ok(notice) => notice
+                            .wait_completion_async()
+                            .await
+                            .map_err(|e| i18n::tf("engine.subscribe_rejected", &[("e", &e)])),
                         Err(e) => Err(i18n::tf("engine.subscribe_request_failed", &[("e", &e)])),
                     }
                 }
@@ -706,4 +717,3 @@ fn reconnect_delay(attempt: u32) -> Duration {
     let jitter_ms = (uuid::Uuid::new_v4().as_u128() % 500) as u64;
     Duration::from_millis(secs * 1000 + jitter_ms)
 }
-

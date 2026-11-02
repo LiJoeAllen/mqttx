@@ -29,7 +29,10 @@ fn v5_tcp_pubsub_roundtrip() {
 
     assert!(wait_connected(&rx), "未能在 15 秒内连接 broker.emqx.io");
 
-    engine.subscribe(cid.clone(), Subscription::new(cid.clone(), topic.clone(), 0));
+    engine.subscribe(
+        cid.clone(),
+        Subscription::new(cid.clone(), topic.clone(), 0),
+    );
     assert!(wait_subscribe(&rx, &topic), "订阅未确认");
 
     // 等 broker 传播订阅状态
@@ -45,7 +48,10 @@ fn v5_tcp_pubsub_roundtrip() {
         },
     );
 
-    assert!(wait_message(&rx, &topic), "未收到自己发布的消息（回环失败）");
+    assert!(
+        wait_message(&rx, &topic),
+        "未收到自己发布的消息（回环失败）"
+    );
 }
 
 #[test]

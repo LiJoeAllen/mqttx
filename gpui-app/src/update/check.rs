@@ -26,7 +26,6 @@ pub(super) fn http_get_json(url: &str) -> Result<serde_json::Value, String> {
         .map_err(|e| crate::ui::i18n::tf("update.err_parse_response", &[("e", &e)]))
 }
 
-
 pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Option<String>)> {
     let assets = rel.get("assets")?.as_array()?;
     let triple = platform_triple();
@@ -55,9 +54,7 @@ pub fn pick_assets(rel: &serde_json::Value) -> Option<(String, String, u64, Opti
             // 侧车命名：<asset>.sha256
             let sha = assets
                 .iter()
-                .find(|b| {
-                    b.get("name").and_then(|n| n.as_str()) == Some(&format!("{name}.sha256"))
-                })
+                .find(|b| b.get("name").and_then(|n| n.as_str()) == Some(&format!("{name}.sha256")))
                 .and_then(|b| b.get("browser_download_url"))
                 .and_then(|u| u.as_str())
                 .map(|s| s.to_string());
@@ -90,10 +87,12 @@ fn check_latest_via_api() -> Result<Option<UpdateInfo>, String> {
             let list = http_get_json(&format!("{base}?per_page=5"))?;
             let first = list
                 .as_array()
-                .and_then(|l| l.iter().find(|r| {
-                    r.get("draft").and_then(|d| d.as_bool()) == Some(false)
-                        && r.get("prerelease").and_then(|d| d.as_bool()) == Some(false)
-                }))
+                .and_then(|l| {
+                    l.iter().find(|r| {
+                        r.get("draft").and_then(|d| d.as_bool()) == Some(false)
+                            && r.get("prerelease").and_then(|d| d.as_bool()) == Some(false)
+                    })
+                })
                 .ok_or_else(|| crate::ui::i18n::t("update.err_no_release").to_string())?;
             first.clone()
         }
@@ -173,12 +172,18 @@ fn tag_from_releases_url(uri: &str) -> Option<&str> {
 const AUTO_CHECK_INTERVAL_SECS: i64 = 24 * 60 * 60;
 
 fn stamp_path() -> std::path::PathBuf {
-    crate::store::Storage::new().dir().join(".last-update-check")
+    crate::store::Storage::new()
+        .dir()
+        .join(".last-update-check")
 }
 
 fn last_check_recent() -> bool {
-    let Ok(meta) = std::fs::metadata(stamp_path()) else { return false };
-    let Ok(modified) = meta.modified() else { return false };
+    let Ok(meta) = std::fs::metadata(stamp_path()) else {
+        return false;
+    };
+    let Ok(modified) = meta.modified() else {
+        return false;
+    };
     modified
         .elapsed()
         .map(|d| d.as_secs() < AUTO_CHECK_INTERVAL_SECS as u64)

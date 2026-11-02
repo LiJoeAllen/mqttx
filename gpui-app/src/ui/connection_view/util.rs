@@ -1,9 +1,8 @@
 //! 纯函数工具：topic 匹配、占位符提取、载荷预览/复制文本、订阅配色。
 
+use gpui_kit::{Hsla, hsla};
 
-use gpui_kit::{ hsla, Hsla,  };
-
-use crate::model::{ MqttRecord, Subscription,  };
+use crate::model::{MqttRecord, Subscription};
 use crate::ui::widgets::format_time;
 
 use super::*;
@@ -47,7 +46,10 @@ pub(super) fn extract_placeholder_keys(topic: &str, payload: &str) -> Vec<String
         let bytes = text.as_bytes();
         let mut i = 0;
         while i + 1 < bytes.len() {
-            if bytes[i] == b'{' && bytes[i + 1] == b'{' && let Some(rel_end) = text[i + 2..].find("}}") {
+            if bytes[i] == b'{'
+                && bytes[i + 1] == b'{'
+                && let Some(rel_end) = text[i + 2..].find("}}")
+            {
                 let key = text[i + 2..i + 2 + rel_end].trim();
                 if !key.is_empty() && !key.starts_with('$') && !out.iter().any(|k| k == key) {
                     out.push(key.to_string());
@@ -101,7 +103,11 @@ pub(super) fn pick_subscription_color(subs: &[Subscription], topic: &str) -> Opt
 /// 展开详情里的 payload 渲染：自动 = 合法 JSON 美化，否则原文。
 /// Hex/Base64 优先使用入库保留的原始字节——非文本负载的 lossy 文本
 /// 已把非法字节替换为 U+FFFD，按文本字节展示会与线上报文不符。
-pub(super) fn format_payload_detail(payload: &str, raw: Option<&[u8]>, format: DetailFormat) -> String {
+pub(super) fn format_payload_detail(
+    payload: &str,
+    raw: Option<&[u8]>,
+    format: DetailFormat,
+) -> String {
     match format {
         DetailFormat::Auto => serde_json::from_str::<serde_json::Value>(payload)
             .ok()
@@ -125,7 +131,10 @@ pub(super) fn format_payload_detail(payload: &str, raw: Option<&[u8]>, format: D
 pub(super) fn details_copy_text(record: &MqttRecord, show_millis: bool) -> String {
     let mut out = String::new();
     out.push_str(&format!("Topic: {}\n", record.topic));
-    out.push_str(&format!("Direction: {}\n", crate::ui::i18n::t(record.direction.label())));
+    out.push_str(&format!(
+        "Direction: {}\n",
+        crate::ui::i18n::t(record.direction.label())
+    ));
     out.push_str(&format!("QoS: {}\n", record.qos));
     out.push_str(&format!("Retain: {}\n", record.retain));
     out.push_str(&format!(
@@ -170,17 +179,13 @@ pub(super) fn contains_ignore_case(hay: &str, needle: &str) -> bool {
     // 纯 ASCII 快速路径：双方均为 ASCII 且原文无 ASCII 大写时，
     // 小写化恒等，可直接判否。不能用 is_uppercase 判断——个别
     // 小写字符（如 U+1E9B）的小写映射并不等于自身。
-    if needle.is_ascii()
-        && hay.is_ascii()
-        && !hay.bytes().any(|b| b.is_ascii_uppercase())
-    {
+    if needle.is_ascii() && hay.is_ascii() && !hay.bytes().any(|b| b.is_ascii_uppercase()) {
         return false;
     }
     hay.to_lowercase().contains(needle)
 }
 
 // ─── 单元测试 ────────────────────────────────────────────────────────────────
-
 
 #[cfg(test)]
 mod tests {

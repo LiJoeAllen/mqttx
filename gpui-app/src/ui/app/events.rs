@@ -2,17 +2,25 @@
 
 use std::sync::Arc;
 
-use gpui_kit::component::{ notification::Notification,  };
-use gpui_kit::{ Context, Window,  };
+use gpui_kit::component::notification::Notification;
+use gpui_kit::{Context, Window};
 
-use crate::model::{ ConnectionStatus, Direction, LogEntry, LogLevel, MqttRecord, MessageRing, SubscribeOptions, Subscription, retained_payload,  };
+use crate::model::{
+    ConnectionStatus, Direction, LogEntry, LogLevel, MessageRing, MqttRecord, SubscribeOptions,
+    Subscription, retained_payload,
+};
 use crate::mqtt::EngineEvent;
 
 use super::*;
 use crate::ui::i18n;
 
 impl MqttXApp {
-pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn on_engine_event(
+        &mut self,
+        event: EngineEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
             EngineEvent::Status {
                 connection_id,
@@ -103,18 +111,17 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
                 if ok {
                     // 乐观更新已在发送前入库；这里只在订阅仍存在时同步 QoS，
                     // 避免 SUBACK 前被删除的订阅被此事件用默认字段复活。
-                    if let Some(existing) = self.subscriptions.iter_mut().find(|s| {
-                        s.connection_id == connection_id && s.topic == topic
-                    }) {
+                    if let Some(existing) = self
+                        .subscriptions
+                        .iter_mut()
+                        .find(|s| s.connection_id == connection_id && s.topic == topic)
+                    {
                         existing.qos = qos;
                     }
                 } else {
                     if let Some(e) = error {
                         window.push_notification(
-                            Notification::error(i18n::tf(
-                                "sub.failed",
-                                &[("e", &e)],
-                            )),
+                            Notification::error(i18n::tf("sub.failed", &[("e", &e)])),
                             cx,
                         );
                     }
@@ -151,7 +158,12 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
 
     fn on_connected(&mut self, connection_id: &str) {
         // 连接成功后自动恢复已保存订阅（auto resubscribe），禁用的订阅跳过。
-        let Some(config) = self.connections.iter().find(|c| c.id == connection_id).cloned() else {
+        let Some(config) = self
+            .connections
+            .iter()
+            .find(|c| c.id == connection_id)
+            .cloned()
+        else {
             return;
         };
         if !config.auto_resubscribe {
@@ -217,7 +229,7 @@ pub(super) fn on_engine_event(&mut self, event: EngineEvent, window: &mut Window
     /// 失败只在首次 eprintln 一次后保持静默（成功一次即复位，便于恢复后再次提示），
     /// 且绝不回调 log/push_log（防止递归触发日志）。
     fn write_log_file(&mut self, entry: &LogEntry) {
-use std::sync::atomic::{ AtomicBool, Ordering };
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         static WRITE_FAILED: AtomicBool = AtomicBool::new(false);
 
@@ -237,8 +249,8 @@ use std::sync::atomic::{ AtomicBool, Ordering };
     /// 文件套 BufWriter：高频消息流下每条日志不再触发多次落盘 syscall；
     /// 跨日重开/出错关句柄时随 drop 自动 flush。
     fn append_log_line(&mut self, entry: &LogEntry) -> std::io::Result<()> {
-        use std::io::Write as _;
         use chrono::TimeZone as _;
+        use std::io::Write as _;
 
         let ts = chrono::Local
             .timestamp_millis_opt(entry.timestamp)
@@ -266,11 +278,7 @@ use std::sync::atomic::{ AtomicBool, Ordering };
             .find(|c| c.id == entry.connection_id)
             .map(|c| c.name.as_str())
             .unwrap_or(entry.connection_id.as_str());
-        let file = &mut self
-            .log_file
-            .as_mut()
-            .expect("上方已确保日志句柄存在")
-            .1;
+        let file = &mut self.log_file.as_mut().expect("上方已确保日志句柄存在").1;
         writeln!(
             file,
             "{} [{}] {}/{}: {}",

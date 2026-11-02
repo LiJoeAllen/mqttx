@@ -66,10 +66,33 @@ jobs:
       - name: Unit tests
         run: cargo test -p mqttx-desktop --lib --tests
 
+  # ─── 静态质量闸门 ───────────────────────────────────────────
+  # 格式与 lint 独立成 job：打 tag 前任何手写脚本/补丁造成的漂移在 CI 直接拦截，
+  # 而不是等发布产物带着不一致的格式化 diff 出去。
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - name: Install Linux system deps (GPUI)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libasound2-dev libfontconfig-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      - name: rustfmt check
+        run: cargo fmt --all --check
+      - name: clippy (warnings are errors)
+        run: cargo clippy --all-targets -- -D warnings
+
   # ─── 构建矩阵 ─────────────────────────────────────────────────
   build:
     name: Build (${{ matrix.os }})
-    needs: [meta, test]
+    needs: [meta, test, lint]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

@@ -27,7 +27,7 @@ pub use variable::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use std::sync::Arc;
 
     // 修复回归：Hex 奇数长度必须报错，不能静默截断
@@ -49,7 +49,10 @@ mod tests {
         use base64::Engine as _;
         let text = "hello 世界";
         let encoded = base64::engine::general_purpose::STANDARD.encode(text);
-        assert_eq!(PayloadFormat::Base64.encode(&encoded).unwrap(), text.as_bytes());
+        assert_eq!(
+            PayloadFormat::Base64.encode(&encoded).unwrap(),
+            text.as_bytes()
+        );
         assert!(PayloadFormat::Base64.encode("not base64!!!").is_err());
     }
 
@@ -75,7 +78,10 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&p).unwrap();
-        assert!(!json.contains("raw_bytes"), "raw_bytes 不应被序列化: {json}");
+        assert!(
+            !json.contains("raw_bytes"),
+            "raw_bytes 不应被序列化: {json}"
+        );
         let back: PublishParams = serde_json::from_str(&json).unwrap();
         assert!(back.raw_bytes.is_none());
         // 反序列化时输入中的 raw_bytes 字段应被忽略（skip 双向生效）
@@ -91,11 +97,7 @@ mod tests {
     fn template_timestamps_share_one_timebase() {
         let out = render_template("s={{$ts}} ms={{$ts_ms}}", &[]);
         let (s_part, ms_part) = out.split_once(" ms=").expect("格式 s=.. ms=..");
-        let s: i64 = s_part
-            .strip_prefix("s=")
-            .expect("秒字段")
-            .parse()
-            .unwrap();
+        let s: i64 = s_part.strip_prefix("s=").expect("秒字段").parse().unwrap();
         let ms: i64 = ms_part.parse().expect("毫秒字段");
         assert_eq!(s, ms / 1000, "秒与毫秒应来自同一时间基准: {out}");
     }
@@ -176,7 +178,10 @@ mod tests {
         assert_eq!(back.params.payload_format, PayloadFormat::Hex);
         assert_eq!(back.params.qos, 1);
         assert!(back.params.retain);
-        assert_eq!(back.params.content_type.as_deref(), Some("application/json"));
+        assert_eq!(
+            back.params.content_type.as_deref(),
+            Some("application/json")
+        );
         assert_eq!(back.params.user_properties.len(), 1);
         assert!(back.params.raw_bytes.is_none());
     }
@@ -245,10 +250,7 @@ mod tests {
         assert!(trunc, "超过上限必须截断");
         assert!(p.len() <= MAX_PAYLOAD_RETAIN);
         assert_eq!(p.chars().last(), Some('中'), "不能切坏 UTF-8 字符");
-        assert!(
-            big.starts_with(p.as_bytes()),
-            "截断内容必须是原数据前缀"
-        );
+        assert!(big.starts_with(p.as_bytes()), "截断内容必须是原数据前缀");
 
         // 恰好上限不截断
         let exact = vec![b'a'; MAX_PAYLOAD_RETAIN];
@@ -288,7 +290,10 @@ mod tests {
         assert!(!a.session_params_changed(&b));
 
         b.keep_alive = a.keep_alive + 1;
-        assert!(a.session_params_changed(&b), "keep_alive 改动应触发重连提示");
+        assert!(
+            a.session_params_changed(&b),
+            "keep_alive 改动应触发重连提示"
+        );
         b = a.clone();
 
         b.last_will = Some(LastWill {
@@ -305,16 +310,25 @@ mod tests {
         // "配置已保存，重连后生效"的提示静默失效）
         b = a.clone();
         b.session_expiry_interval = a.session_expiry_interval + 1;
-        assert!(a.session_params_changed(&b), "会话过期间隔改动应触发重连提示");
+        assert!(
+            a.session_params_changed(&b),
+            "会话过期间隔改动应触发重连提示"
+        );
         b = a.clone();
         b.receive_maximum = Some(10);
         assert!(a.session_params_changed(&b), "接收上限改动应触发重连提示");
         b = a.clone();
         b.maximum_packet_size = Some(1024);
-        assert!(a.session_params_changed(&b), "最大报文长度改动应触发重连提示");
+        assert!(
+            a.session_params_changed(&b),
+            "最大报文长度改动应触发重连提示"
+        );
         b = a.clone();
         b.topic_alias_maximum = Some(5);
-        assert!(a.session_params_changed(&b), "主题别名上限改动应触发重连提示");
+        assert!(
+            a.session_params_changed(&b),
+            "主题别名上限改动应触发重连提示"
+        );
     }
 
     fn ring_record(seq: u64, payload_len: usize, raw_len: usize) -> MqttRecord {
@@ -379,7 +393,10 @@ mod tests {
             "大报文流不应保留满额条数（实际 {} 条）",
             ring.len()
         );
-        assert_eq!(ring.iter().next().map(|r| r.seq), Some((2000 - ring.len()) as u64));
+        assert_eq!(
+            ring.iter().next().map(|r| r.seq),
+            Some((2000 - ring.len()) as u64)
+        );
     }
 
     // 单条超预算的记录也至少保留最新一条（列表不能被清空）

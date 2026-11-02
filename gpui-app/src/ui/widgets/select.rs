@@ -1,9 +1,10 @@
 //! 可搜索的枚举下拉：选项模型、委托与统一外观的 Select 包装。
 
-use gpui_kit::component::searchable_list::{ SearchableListDelegate, SearchableListItem };
-use gpui_kit::component::select::{ Select, SelectState };
 use gpui_kit::component::IndexPath;
-use gpui_kit::{ Entity, SharedString, Window };
+use gpui_kit::component::input::{InputState, TextareaState};
+use gpui_kit::component::searchable_list::{SearchableListDelegate, SearchableListItem};
+use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::{Entity, SharedString, Window};
 
 #[derive(Clone)]
 pub struct OptionItem {
@@ -81,13 +82,50 @@ pub fn make_select<C: gpui_kit::AppContext>(
     })
 }
 
+/// 语言切换后重建下拉文案，并把选中项还原到原索引。
+///
+/// 必须整体做一遍：set_items 只替换数据源，而触发器显示文本取自构造时
+/// 缓存的选中项克隆，不重新 set_selected_index 界面就滞留旧语言。
+/// C 泛型以兼容 App 与 Context 两种上下文（Entity::update 只要求 AppContext）。
+pub fn refresh_select<C: gpui_kit::AppContext>(
+    state: &Entity<SelectState<OptionDelegate>>,
+    labels: &[&str],
+    window: &mut Window,
+    cx: &mut C,
+) {
+    let keep = state
+        .read_with(cx, |s, _| s.selected_value().copied().unwrap_or(0))
+        .min(labels.len().saturating_sub(1));
+    state.update(cx, |s, cx| {
+        s.set_items(OptionDelegate::new(labels), window, cx);
+        s.set_selected_index(Some(IndexPath::new(keep)), window, cx);
+    });
+}
+
+/// 语言切换后刷新单行输入框占位文案（占位在构造时固化，需显式重设）。
+pub fn refresh_placeholder<C: gpui_kit::AppContext>(
+    state: &Entity<InputState>,
+    text: impl Into<SharedString>,
+    window: &mut Window,
+    cx: &mut C,
+) {
+    state.update(cx, |s, cx| s.set_placeholder(text, window, cx));
+}
+
+/// refresh_placeholder 的多行文本域变体。
+pub fn refresh_textarea_placeholder<C: gpui_kit::AppContext>(
+    state: &Entity<TextareaState>,
+    text: impl Into<SharedString>,
+    window: &mut Window,
+    cx: &mut C,
+) {
+    state.update(cx, |s, cx| s.set_placeholder(text, window, cx));
+}
+
 // ─── 字段行 ──────────────────────────────────────────────────────────────────
 
-
 /// Select::new 的包装，统一外观。
-pub fn select_element<D: SearchableListDelegate>(
-    state: &Entity<SelectState<D>>,
-) -> Select<D>
+pub fn select_element<D: SearchableListDelegate>(state: &Entity<SelectState<D>>) -> Select<D>
 where
     <D::Item as SearchableListItem>::Value: PartialEq + Clone,
 {

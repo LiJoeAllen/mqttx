@@ -110,7 +110,10 @@ pub fn is_newer(a: &str, b: &str) -> bool {
     let (a, b) = (parse_version(a), parse_version(b));
     let len = a.len().max(b.len());
     for i in 0..len {
-        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        let (x, y) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
         if x != y {
             return x > y;
         }
@@ -133,7 +136,6 @@ pub struct StagedUpdate {
     /// 也会用它复核，防止"下载校验通过"到"下次启动安装"之间文件被替换。
     pub sha256: String,
 }
-
 
 /// 预发布后缀原样保留。
 pub fn parse_staged_name(name: &str) -> Option<String> {
@@ -192,11 +194,17 @@ mod tests {
         // 附件为 7z 压缩包；解压出的二进制保留原命名
         assert_eq!(
             asset_name_for("1.0.1"),
-            format!("mqttx-v1.0.1-{triple}-mqttx{ext}.7z", triple = platform_triple())
+            format!(
+                "mqttx-v1.0.1-{triple}-mqttx{ext}.7z",
+                triple = platform_triple()
+            )
         );
         assert_eq!(
             binary_name_for("1.0.1"),
-            format!("mqttx-v1.0.1-{triple}-mqttx{ext}", triple = platform_triple())
+            format!(
+                "mqttx-v1.0.1-{triple}-mqttx{ext}",
+                triple = platform_triple()
+            )
         );
     }
 

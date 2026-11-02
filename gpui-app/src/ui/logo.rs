@@ -6,8 +6,8 @@
 //! - 末端节点用环形描边，与中心实心 broker 区分。
 
 use gpui_kit::{
-    canvas, div, px, App, Bounds, Corners, Edges, Hsla, IntoElement, ParentElement,
-    PathBuilder, Pixels, Point, Size, Styled as _, Window,
+    App, Bounds, Corners, Edges, Hsla, IntoElement, ParentElement, PathBuilder, Pixels, Point,
+    Size, Styled as _, Window, canvas, div, px,
 };
 
 /// 绘制一个指定边长的 Logo（容器被设置为该尺寸）。
@@ -56,11 +56,7 @@ pub fn logo(side: Pixels, bg: Hsla, fg: Hsla) -> impl IntoElement {
     .absolute()
     .size_full();
 
-    div()
-        .relative()
-        .w(side)
-        .h(side)
-        .child(inner)
+    div().relative().w(side).h(side).child(inner)
 }
 
 fn paint_dot(window: &mut Window, center: Point<Pixels>, d: Pixels, color: Hsla) {
@@ -108,11 +104,7 @@ fn paint_ring(
     ));
 }
 
-fn line_path(
-    a: Point<Pixels>,
-    b: Point<Pixels>,
-    width: Pixels,
-) -> Option<gpui_kit::Path<Pixels>> {
+fn line_path(a: Point<Pixels>, b: Point<Pixels>, width: Pixels) -> Option<gpui_kit::Path<Pixels>> {
     let mut pb = PathBuilder::stroke(width);
     pb.move_to(a);
     pb.line_to(b);

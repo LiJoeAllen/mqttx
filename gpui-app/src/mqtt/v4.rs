@@ -1,19 +1,16 @@
 //! MQTT 3.1.1：MqttOptions/last-will 组装与事件循环泵。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use rumqttc::mqttbytes::v5::{
-    ConnectReturnCode as V5ReturnCode, Packet as V5Packet,
-};
 use rumqttc::Event as V5Event;
+use rumqttc::mqttbytes::v5::{ConnectReturnCode as V5ReturnCode, Packet as V5Packet};
 use rumqttc_v4 as rv4;
 use tokio::sync::watch;
 
 use crate::model::{
     ConnectionConfig, ConnectionStatus, Direction, LogLevel, MqttRecord, TransportKind,
-};// ─── 引擎事件 ────────────────────────────────────────────────────────────────
-
+}; // ─── 引擎事件 ────────────────────────────────────────────────────────────────
 
 use super::*;
 use crate::ui::i18n;
@@ -29,18 +26,29 @@ pub(super) fn build_v4(
             V4Options::new(cfg.client_id.clone(), V4Broker::tcp(&cfg.host, cfg.port))
         }
         TransportKind::Ws => {
-            let url = format!("ws://{}:{}{}", cfg.host, cfg.port, normalize_path(&cfg.path));
-            V4Options::new(cfg.client_id.clone(), V4Broker::websocket(url).map_err(|e| format!("{e:?}"))?)
+            let url = format!(
+                "ws://{}:{}{}",
+                cfg.host,
+                cfg.port,
+                normalize_path(&cfg.path)
+            );
+            V4Options::new(
+                cfg.client_id.clone(),
+                V4Broker::websocket(url).map_err(|e| format!("{e:?}"))?,
+            )
         }
         TransportKind::Wss => {
-            let url = format!("wss://{}:{}{}", cfg.host, cfg.port, normalize_path(&cfg.path));
+            let url = format!(
+                "wss://{}:{}{}",
+                cfg.host,
+                cfg.port,
+                normalize_path(&cfg.path)
+            );
             match &custom_tls {
-                Some(tls) => V4Options::websocket_with_tls_config(
-                    cfg.client_id.clone(),
-                    url,
-                    tls.clone(),
-                )
-                .map_err(|e| format!("{e:?}"))?,
+                Some(tls) => {
+                    V4Options::websocket_with_tls_config(cfg.client_id.clone(), url, tls.clone())
+                        .map_err(|e| format!("{e:?}"))?
+                }
                 None => V4Options::try_websocket_with_default_tls(cfg.client_id.clone(), url)
                     .map_err(|e| format!("{e:?}"))?,
             }
@@ -67,16 +75,17 @@ pub(super) fn build_v4(
         opts.set_credentials(cfg.username.clone(), cfg.password.clone());
     }
     if let Some(will) = &cfg.last_will
-        && !will.topic.is_empty() {
-            // 3.1.1 的遗嘱没有 content_type / response_topic 属性，忽略
-            let lw = rv4::mqttbytes::v4::LastWill::new(
-                will.topic.clone(),
-                will.payload.as_bytes().to_vec(),
-                v4_qos(will.qos),
-                will.retain,
-            );
-            opts.set_last_will(lw);
-        }
+        && !will.topic.is_empty()
+    {
+        // 3.1.1 的遗嘱没有 content_type / response_topic 属性，忽略
+        let lw = rv4::mqttbytes::v4::LastWill::new(
+            will.topic.clone(),
+            will.payload.as_bytes().to_vec(),
+            v4_qos(will.qos),
+            will.retain,
+        );
+        opts.set_last_will(lw);
+    }
 
     let (client, mut eventloop) = rv4::AsyncClient::builder(opts).build();
     // v4 的连接超时（含 CONNACK 等待）由 EventLoop 的 NetworkOptions 控制
@@ -100,7 +109,10 @@ pub(super) async fn test_handshake(cfg_in: &ConnectionConfig) -> Result<(), Stri
     // 握手测试必须使用独立 client_id，否则会把使用相同 client_id 的现有连接
     // 从 broker 顶下线（MQTT 同 client_id 单会话规则）。
     let mut cfg = cfg_in.clone();
-    cfg.client_id = format!("mqttx_test_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    cfg.client_id = format!(
+        "mqttx_test_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     let cfg = &cfg;
     if cfg.protocol.is_v5() {
         // 建 client 会读 CA/证书文件（阻塞 IO）：与 connect 保持一致放 spawn_blocking，

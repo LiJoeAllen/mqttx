@@ -1,26 +1,26 @@
 //! 发布预设管理对话框：列出全部 `PublishPreset`，支持新建 / 选中编辑 / 删除（二次确认）。
 //! 保存按 **id** 更新，name 与其他预设冲突时报错不落盘；模板存原文，发送时才渲染。
 
+use crate::ui::IconName;
+use crate::ui::i18n;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    h_flex, notification::Notification, v_flex, ActiveTheme as _, Disableable as _,
-    Sizable as _, StyledExt as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
+    notification::Notification, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use crate::ui::IconName;
-use crate::ui::i18n;
 use gpui_kit::{
-    div, px, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::model::{PayloadFormat, PublishParams, PublishPreset};
 use crate::ui::app::MqttXApp;
-use crate::ui::widgets::{field, make_select, KvEditor, OptionDelegate};
+use crate::ui::widgets::{KvEditor, OptionDelegate, field, make_select};
 
 const QOS: [&str; 3] = ["QoS 0", "QoS 1", "QoS 2"];
 const PAYLOAD_FORMATS: [&str; 4] = ["Plaintext", "JSON", "Base64", "Hex"];
@@ -75,10 +75,7 @@ impl PresetsDialog {
         // 有预设时默认选中第一项并回填表单，避免打开即空白
         let first = presets.first().cloned();
         let selected = if presets.is_empty() { None } else { Some(0) };
-        let params = first
-            .as_ref()
-            .map(|p| p.params.clone())
-            .unwrap_or_default();
+        let params = first.as_ref().map(|p| p.params.clone()).unwrap_or_default();
 
         let name_value = first.as_ref().map(|p| p.name.clone()).unwrap_or_default();
         let name = cx.new(|cx| {
@@ -108,12 +105,14 @@ impl PresetsDialog {
                 .default_value(params.content_type.clone().unwrap_or_default())
         });
         let msg_expiry = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(i18n::t("pub.seconds_hint")).default_value(
-                params
-                    .message_expiry_interval
-                    .map(|v| v.to_string())
-                    .unwrap_or_default(),
-            )
+            InputState::new(window, cx)
+                .placeholder(i18n::t("pub.seconds_hint"))
+                .default_value(
+                    params
+                        .message_expiry_interval
+                        .map(|v| v.to_string())
+                        .unwrap_or_default(),
+                )
         });
         let response_topic = cx.new(|cx| {
             InputState::new(window, cx)
@@ -157,14 +156,13 @@ impl PresetsDialog {
 
     /// 读取表单当前值为发布参数（不渲染模板，存原文）。
     fn collect(&self, cx: &App) -> PublishParams {
-        let qos = self
-            .qos
+        let qos = self.qos.read(cx).selected_value().copied().unwrap_or(0) as u8;
+        let format = PayloadFormat::ALL[self
+            .payload_format
             .read(cx)
             .selected_value()
             .copied()
-            .unwrap_or(0) as u8;
-        let format = PayloadFormat::ALL
-            [self.payload_format.read(cx).selected_value().copied().unwrap_or(0)];
+            .unwrap_or(0)];
         let opt = |s: String| {
             let t = s.trim();
             (!t.is_empty()).then(|| t.to_string())
@@ -207,7 +205,11 @@ impl PresetsDialog {
             .update(cx, |s, cx| s.set_value(params.payload.clone(), window, cx));
         let qos_idx = params.qos.min(2) as usize;
         self.qos.update(cx, |s, cx| {
-            s.set_selected_index(Some(gpui_kit::component::IndexPath::new(qos_idx)), window, cx)
+            s.set_selected_index(
+                Some(gpui_kit::component::IndexPath::new(qos_idx)),
+                window,
+                cx,
+            )
         });
         let fmt_idx = PayloadFormat::ALL
             .iter()
@@ -247,8 +249,7 @@ impl PresetsDialog {
         self.selected = None;
         self.name.update(cx, |s, cx| s.set_value("", window, cx));
         self.topic.update(cx, |s, cx| s.set_value("", window, cx));
-        self.payload
-            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.payload.update(cx, |s, cx| s.set_value("", window, cx));
         self.qos.update(cx, |s, cx| {
             s.set_selected_index(Some(gpui_kit::component::IndexPath::new(0)), window, cx)
         });
@@ -276,7 +277,8 @@ impl PresetsDialog {
             name = i18n::tf("preset.default_name_n", &[("n", &n)]);
             n += 1;
         }
-        self.presets.push(PublishPreset::new(name, PublishParams::default()));
+        self.presets
+            .push(PublishPreset::new(name, PublishParams::default()));
         let idx = self.presets.len() - 1;
         self.persist(cx);
         self.load(idx, window, cx);
@@ -290,7 +292,10 @@ impl PresetsDialog {
         };
         let name = self.name.read(cx).value().trim().to_string();
         if name.is_empty() {
-            window.push_notification(Notification::warning(i18n::t("pub.preset_name_required")), cx);
+            window.push_notification(
+                Notification::warning(i18n::t("pub.preset_name_required")),
+                cx,
+            );
             return;
         }
         // 与其他预设（不含自身）重名 → 报错且不落盘
@@ -301,10 +306,7 @@ impl PresetsDialog {
             .any(|p| p.id != own_id && p.name == name)
         {
             window.push_notification(
-                Notification::error(i18n::tf(
-                    "preset.name_exists",
-                    &[("name", &name)],
-                )),
+                Notification::error(i18n::tf("preset.name_exists", &[("name", &name)])),
                 cx,
             );
             return;
@@ -313,10 +315,7 @@ impl PresetsDialog {
         let expiry_raw = self.msg_expiry.read(cx).value().to_string();
         let params = self.collect(cx);
         if !expiry_raw.trim().is_empty() && params.message_expiry_interval.is_none() {
-            window.push_notification(
-                Notification::warning(i18n::t("pub.expiry_invalid")),
-                cx,
-            );
+            window.push_notification(Notification::warning(i18n::t("pub.expiry_invalid")), cx);
             return;
         }
         // 按 id 更新：id 不随改名变化，避免并发列表错位
@@ -325,16 +324,19 @@ impl PresetsDialog {
             p.params = params;
         }
         self.persist(cx);
-        window.push_notification(Notification::success(i18n::tf(
-                "preset.saved",
-                &[("name", &name)],
-            )), cx);
+        window.push_notification(
+            Notification::success(i18n::tf("preset.saved", &[("name", &name)])),
+            cx,
+        );
     }
 
     /// 「删除」：`open_alert_dialog` 二次确认后从列表移除并落盘。
     fn ask_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(idx) = self.selected else {
-            window.push_notification(Notification::warning(i18n::t("preset.pick_delete_first")), cx);
+            window.push_notification(
+                Notification::warning(i18n::t("preset.pick_delete_first")),
+                cx,
+            );
             return;
         };
         let pid = self.presets[idx].id.clone();
@@ -346,10 +348,7 @@ impl PresetsDialog {
             let pid = pid.clone();
             alert
                 .title(i18n::t("pub.delete_title"))
-                .description(i18n::tf(
-                    "pub.delete_confirm",
-                    &[("name", &pname)],
-                ))
+                .description(i18n::tf("pub.delete_confirm", &[("name", &pname)]))
                 .button_props(
                     DialogButtonProps::default()
                         .show_cancel(true)
@@ -463,7 +462,10 @@ impl Render for PresetsDialog {
             .min_w(px(0.))
             .gap_2()
             .child(field(i18n::t("aliyun.preset_name"), Input::new(&self.name)))
-            .child(field(i18n::t("pub.topic_placeholder"), Input::new(&self.topic)))
+            .child(field(
+                i18n::t("pub.topic_placeholder"),
+                Input::new(&self.topic),
+            ))
             .child(field(
                 i18n::t("preset.payload_field"),
                 Textarea::new(&self.payload).h(px(96.)),
@@ -481,59 +483,49 @@ impl Render for PresetsDialog {
                             .gap_1()
                             .items_center()
                             .pt_4()
-                            .child(
-                                Switch::new("preset-retain")
-                                    .checked(retain)
-                                    .on_change(cx.listener(|this, v, _, cx| {
-                                        this.retain = *v;
-                                        cx.notify();
-                                    })),
-                            )
+                            .child(Switch::new("preset-retain").checked(retain).on_change(
+                                cx.listener(|this, v, _, cx| {
+                                    this.retain = *v;
+                                    cx.notify();
+                                }),
+                            ))
                             .child(div().text_xs().child("Retain")),
                     )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .child(field(
-                                i18n::t("preset.payload_format"),
-                                Select::new(&self.payload_format).small(),
-                            )),
-                    ),
+                    .child(div().flex_1().min_w(px(0.)).child(field(
+                        i18n::t("preset.payload_format"),
+                        Select::new(&self.payload_format).small(),
+                    ))),
             )
             .child(div().h(px(1.)).bg(cx.theme().border).w_full())
-            .child(div().text_xs().font_semibold().child(i18n::t("pub.mqtt5_props")))
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        div().flex_1().min_w(px(0.)).child(field(
-                            "Content-Type",
-                            Input::new(&self.content_type).small(),
-                        )),
-                    )
-                    .child(
-                        div().w(px(120.)).child(field(
-                            i18n::t("pub.expiry_field"),
-                            Input::new(&self.msg_expiry).small(),
-                        )),
-                    ),
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(i18n::t("pub.mqtt5_props")),
             )
             .child(
                 h_flex()
                     .gap_2()
-                    .child(
-                        div().flex_1().min_w(px(0.)).child(field(
-                            "Response Topic",
-                            Input::new(&self.response_topic).small(),
-                        )),
-                    )
-                    .child(
-                        div().flex_1().min_w(px(0.)).child(field(
-                            "Correlation Data",
-                            Input::new(&self.correlation_data).small(),
-                        )),
-                    ),
+                    .child(div().flex_1().min_w(px(0.)).child(field(
+                        "Content-Type",
+                        Input::new(&self.content_type).small(),
+                    )))
+                    .child(div().w(px(120.)).child(field(
+                        i18n::t("pub.expiry_field"),
+                        Input::new(&self.msg_expiry).small(),
+                    ))),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().flex_1().min_w(px(0.)).child(field(
+                        "Response Topic",
+                        Input::new(&self.response_topic).small(),
+                    )))
+                    .child(div().flex_1().min_w(px(0.)).child(field(
+                        "Correlation Data",
+                        Input::new(&self.correlation_data).small(),
+                    ))),
             )
             .child(field(i18n::t("preset.user_props"), self.user_props.clone()));
 
@@ -550,7 +542,12 @@ impl Render for PresetsDialog {
                         h_flex()
                             .justify_between()
                             .items_center()
-                            .child(div().text_sm().font_semibold().child(i18n::t("preset.section")))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .child(i18n::t("preset.section")),
+                            )
                             .child(
                                 Button::new("preset-new")
                                     .icon(IconName::Plus)

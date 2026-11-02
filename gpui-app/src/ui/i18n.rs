@@ -21,10 +21,11 @@
 //! 4. 同一 key 的 zh-CN 与 en 占位符 `{name}` 集合必须一致
 //!    （`tf` 按名替换，两侧不一致即静默漏参）。
 //!
-//! # 已知限制
-//! 语言切换对**已打开页签里的下拉框**（QoS / Retain Handling 等）不即时生效——
-//! 这些 SelectState 在构造时固化了标签列表；重开页签即刷新。其余界面即时生效
-//! （save_settings 内 `window.refresh()` 兜底整窗重绘）。
+//! # 语言切换的刷新范围
+//! `MqttXApp::save_settings` 做两件事：`set_lang` 切全局 locale，再重建构造时
+//! 固化了文案的控件（各页签的 Retain Handling 下拉、输入框占位符，见
+//! `ConnectionView::refresh_labels`），最后 `window.refresh()` 整窗重绘——
+//! 切换后无需重开页签。新增此类「构造时固化文案」的控件时，须同步登记进去。
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -145,7 +146,9 @@ fn load_locale_yml(locale: &str) -> std::collections::BTreeMap<String, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let rest = line.strip_prefix('"').unwrap_or_else(|| panic!("行缺开引号: {line:?}"));
+        let rest = line
+            .strip_prefix('"')
+            .unwrap_or_else(|| panic!("行缺开引号: {line:?}"));
         let (key, value) = rest
             .split_once("\": ")
             .unwrap_or_else(|| panic!("行缺 `\": ` 分隔: {line:?}"));
@@ -232,6 +235,9 @@ mod tests {
             crate::model::ThemeModePref::System.label(),
             crate::model::ThemeModePref::Light.label(),
             crate::model::ThemeModePref::Dark.label(),
+            crate::model::LanguagePref::System.label(),
+            crate::model::LanguagePref::Zh.label(),
+            crate::model::LanguagePref::En.label(),
         ];
         let missing: Vec<&str> = labels
             .iter()
@@ -241,8 +247,36 @@ mod tests {
         assert!(missing.is_empty(), "模型 label 缺 en 词条: {missing:?}");
     }
 
+    /// 中文侧同样必须有真实词条。语言选项是反例高发区：
+    /// "lang.zh" 的值在两种语言里都是「中文」，只查 en 会漏掉 zh 缺词条。
+    #[test]
+    fn model_labels_translated_in_zh_too() {
+        let labels = [
+            crate::model::ConnectionStatus::Disconnected.label(),
+            crate::model::ConnectionStatus::Connecting.label(),
+            crate::model::ConnectionStatus::Connected.label(),
+            crate::model::ConnectionStatus::Error.label(),
+            crate::model::Direction::Received.label(),
+            crate::model::Direction::Published.label(),
+            crate::model::ThemeModePref::System.label(),
+            crate::model::ThemeModePref::Light.label(),
+            crate::model::ThemeModePref::Dark.label(),
+            crate::model::LanguagePref::System.label(),
+            crate::model::LanguagePref::Zh.label(),
+            crate::model::LanguagePref::En.label(),
+        ];
+        let missing: Vec<&str> = labels
+            .iter()
+            .filter(|l| translate(LOCALE_ZH, l) == Cow::Borrowed(**l))
+            .copied()
+            .collect();
+        assert!(missing.is_empty(), "模型 label 缺 zh-CN 词条: {missing:?}");
+    }
+
     fn collect_rs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
         for e in rd.flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -266,7 +300,8 @@ mod tests {
                 while start < b.len() && b[start].is_ascii_whitespace() {
                     start += 1;
                 }
-                if start < b.len() && b[start] == b'"'
+                if start < b.len()
+                    && b[start] == b'"'
                     && let Some(lit) = read_string(b, start).0
                 {
                     out.push(lit);

@@ -1,8 +1,6 @@
 //! 全局变量：模板占位符渲染（含 {{timestamp}} 时间基一致性）。
 
-
 use serde::{Deserialize, Serialize};
-
 
 use super::*;
 
@@ -24,25 +22,25 @@ pub fn render_template(input: &str, vars: &[GlobalVariable]) -> String {
     let now_s = now_ms / 1000;
     let mut i = 0;
     while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{'
-            && let Some(rel_end) = input[i + 2..].find("}}") {
-                let key = &input[i + 2..i + 2 + rel_end];
-                let resolved = match key.trim() {
-                    "$ts" => Some(now_s.to_string()),
-                    "$ts_ms" => Some(now_ms.to_string()),
-                    "$uuid" => Some(uuid::Uuid::new_v4().to_string()),
-                    k => vars
-                        .iter()
-                        .find(|v| v.key == k)
-                        .map(|v| v.value.clone()),
-                };
-                match resolved {
-                    Some(v) => out.push_str(&v),
-                    None => out.push_str(&input[i..i + 2 + rel_end + 2]),
-                }
-                i = i + 2 + rel_end + 2;
-                continue;
+        if i + 1 < bytes.len()
+            && bytes[i] == b'{'
+            && bytes[i + 1] == b'{'
+            && let Some(rel_end) = input[i + 2..].find("}}")
+        {
+            let key = &input[i + 2..i + 2 + rel_end];
+            let resolved = match key.trim() {
+                "$ts" => Some(now_s.to_string()),
+                "$ts_ms" => Some(now_ms.to_string()),
+                "$uuid" => Some(uuid::Uuid::new_v4().to_string()),
+                k => vars.iter().find(|v| v.key == k).map(|v| v.value.clone()),
+            };
+            match resolved {
+                Some(v) => out.push_str(&v),
+                None => out.push_str(&input[i..i + 2 + rel_end + 2]),
             }
+            i = i + 2 + rel_end + 2;
+            continue;
+        }
         // 按字符推进，避免把多字节 UTF-8 拆开
         let ch = input[i..].chars().next().unwrap();
         out.push(ch);

@@ -1,33 +1,31 @@
 //! 模板变量面板：扫描 topic/payload 占位符并管理输入行。
 
-
-use gpui_kit::component::button::{ Button };
-use gpui_kit::component::input::{ Input, InputEvent, InputState };
-use gpui_kit::component::{ h_flex, notification::Notification, v_flex,  };
 use crate::ui::IconName;
-use gpui_kit::{ div, px, Context, IntoElement, Window,  };
+use gpui_kit::component::button::Button;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{h_flex, notification::Notification, v_flex};
+use gpui_kit::{Context, IntoElement, Window, div, px};
 
-use crate::model::{ render_template, GlobalVariable,  };
+use crate::model::{GlobalVariable, render_template};
 
 use super::*;
 use crate::ui::i18n;
 
 impl ConnectionView {
     /// 输入框创建需要 Window，因此只能在按钮回调里调用（无法在 render 中同步）。
-pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let topic = self.pub_topic.read(cx).value().to_string();
         let payload = self.payload.read(cx).value().to_string();
         let keys = extract_placeholder_keys(&topic, &payload);
         if keys.is_empty() {
             self.show_vars = false;
-            window.push_notification(
-                Notification::warning(i18n::t("var.no_reference")),
-                cx,
-            );
+            window.push_notification(Notification::warning(i18n::t("var.no_reference")), cx);
             cx.notify();
             return;
         }
-        let vars = self.with_app(cx, |a| a.variables.clone()).unwrap_or_default();
+        let vars = self
+            .with_app(cx, |a| a.variables.clone())
+            .unwrap_or_default();
         // 移除已不存在的 key（保留仍存在的行，避免丢未保存的输入）
         self.var_rows.retain(|(k, _, _)| keys.contains(k));
         for key in keys {
@@ -80,8 +78,10 @@ pub(super) fn sync_var_rows(&mut self, window: &mut Window, cx: &mut Context<Sel
     }
 
     /// 变量绑定面板：逐 key 编辑 + 实时渲染预览。
-pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let vars = self.with_app(cx, |a| a.variables.clone()).unwrap_or_default();
+    pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let vars = self
+            .with_app(cx, |a| a.variables.clone())
+            .unwrap_or_default();
         let topic_raw = self.pub_topic.read(cx).value().to_string();
         let payload_raw = self.payload.read(cx).value().to_string();
         let topic_rendered = render_template(&topic_raw, &vars);
@@ -103,7 +103,12 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                             .text_color(muted)
                             .child(format!("{{{{{key}}}}}")),
                     )
-                    .child(div().flex_1().min_w(px(0.)).child(Input::new(input).small())),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(Input::new(input).small()),
+                    ),
             );
         }
 
@@ -118,10 +123,7 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                         div()
                             .text_xs()
                             .font_semibold()
-                            .child(i18n::tf(
-                                "var.section",
-                                &[("n", &self.var_rows.len())],
-                            )),
+                            .child(i18n::tf("var.section", &[("n", &self.var_rows.len())])),
                     )
                     .child(div().flex_1())
                     .child(
@@ -155,15 +157,9 @@ pub(super) fn render_vars_panel(&self, cx: &mut Context<Self>) -> impl IntoEleme
                     .text_color(muted)
                     .child(i18n::t("var.builtin_inline")),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(i18n::tf(
-                                "var.preview",
-                                &[("tp", &topic_rendered), ("pl", &payload_preview)],
-                            )),
-            )
+            .child(div().text_xs().text_color(muted).child(i18n::tf(
+                "var.preview",
+                &[("tp", &topic_rendered), ("pl", &payload_preview)],
+            )))
     }
-
 }

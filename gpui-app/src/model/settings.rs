@@ -1,8 +1,6 @@
 //! 应用设置：连接状态枚举、主题偏好与全局设置项。
 
-
 use serde::{Deserialize, Serialize};
-
 
 use super::*;
 
@@ -65,11 +63,13 @@ pub enum LanguagePref {
 impl LanguagePref {
     pub const ALL: [Self; 3] = [Self::System, Self::Zh, Self::En];
 
+    /// 返回语言包语义键（与 ConnectionStatus / ThemeModePref 同一约定），
+    /// 显示文案经 i18n::t 解析——语言选项本身也要跟着界面语言走。
     pub fn label(self) -> &'static str {
         match self {
-            Self::System => "跟随系统 / System",
-            Self::Zh => "中文",
-            Self::En => "English",
+            Self::System => "lang.system",
+            Self::Zh => "lang.zh",
+            Self::En => "lang.en",
         }
     }
 }

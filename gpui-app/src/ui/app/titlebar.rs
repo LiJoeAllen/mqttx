@@ -1,20 +1,23 @@
 //! 标题栏：窗口控制、钉子置顶、主题切换与全局动作菜单。
 
-
-use gpui_kit::component::button::{ Button };
-use gpui_kit::component::menu::{ PopupMenuItem };
-use gpui_kit::component::{ h_flex, notification::Notification, ThemeMode, TitleBar,  };
-use gpui_kit::{ div, px, Context, IntoElement, Window,  };
+use gpui_kit::component::button::Button;
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::{ThemeMode, TitleBar, h_flex, notification::Notification};
+use gpui_kit::{Context, IntoElement, Window, div, px};
 
 use crate::model::ThemeModePref;
 use crate::ui::IconName;
 
 use super::*;
-use gpui_kit::Action as _;
 use crate::ui::i18n;
+use gpui_kit::Action as _;
 
 impl MqttXApp {
-pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_titlebar(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let app_weak = cx.entity().downgrade();
         // 非 Windows 平台 `set_topmost` 恒为 false，渲染一个必然报错的按钮只会让人困惑
         let pin_button = if cfg!(target_os = "windows") {
@@ -108,21 +111,28 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                 .dropdown_menu(move |menu, _, _| {
                                     let w1 = app_weak.clone();
                                     let w2 = app_weak.clone();
-                                                                                                                                                                                    menu.item(
-                                        PopupMenuItem::new(i18n::t("titlebar.aliyun"))
-                                            .on_click(move |_, window, cx| {
+                                    menu.item(
+                                        PopupMenuItem::new(i18n::t("titlebar.aliyun")).on_click(
+                                            move |_, window, cx| {
                                                 if let Some(entity) = w1.upgrade() {
-                                                    crate::ui::dialogs::aliyun_dialog::open(entity, window, cx);
+                                                    crate::ui::dialogs::aliyun_dialog::open(
+                                                        entity, window, cx,
+                                                    );
                                                 }
-                                            }),
+                                            },
+                                        ),
                                     )
-                                    .item(PopupMenuItem::new(i18n::t("titlebar.variables")).on_click(
-                                        move |_, window, cx| {
-                                            if let Some(entity) = w2.upgrade() {
-                                                crate::ui::dialogs::variables_dialog::open(entity, window, cx);
-                                            }
-                                        },
-                                    ))
+                                    .item(
+                                        PopupMenuItem::new(i18n::t("titlebar.variables")).on_click(
+                                            move |_, window, cx| {
+                                                if let Some(entity) = w2.upgrade() {
+                                                    crate::ui::dialogs::variables_dialog::open(
+                                                        entity, window, cx,
+                                                    );
+                                                }
+                                            },
+                                        ),
+                                    )
                                     .item(PopupMenuItem::new(i18n::t("titlebar.resmon")).on_click(
                                         move |_, window, cx| {
                                             window.dispatch_action(
@@ -134,20 +144,31 @@ pub(super) fn render_titlebar(&mut self, _window: &mut Window, cx: &mut Context<
                                     .separator()
                                     .item(PopupMenuItem::new(i18n::t("titlebar.export")).on_click(
                                         move |_, window, cx| {
-                                            window.dispatch_action(ExportConnections.boxed_clone(), cx);
+                                            window.dispatch_action(
+                                                ExportConnections.boxed_clone(),
+                                                cx,
+                                            );
                                         },
                                     ))
                                     .item(PopupMenuItem::new(i18n::t("titlebar.import")).on_click(
                                         move |_, window, cx| {
-                                            window.dispatch_action(ImportConnections.boxed_clone(), cx);
+                                            window.dispatch_action(
+                                                ImportConnections.boxed_clone(),
+                                                cx,
+                                            );
                                         },
                                     ))
                                     .separator()
-                                    .item(PopupMenuItem::new(i18n::t("titlebar.settings")).on_click(
-                                        move |_, window, cx| {
-                                            window.dispatch_action(OpenSettings.boxed_clone(), cx);
-                                        },
-                                    ))
+                                    .item(
+                                        PopupMenuItem::new(i18n::t("titlebar.settings")).on_click(
+                                            move |_, window, cx| {
+                                                window.dispatch_action(
+                                                    OpenSettings.boxed_clone(),
+                                                    cx,
+                                                );
+                                            },
+                                        ),
+                                    )
                                 }),
                         ),
                 ),
