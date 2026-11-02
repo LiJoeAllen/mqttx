@@ -1,0 +1,61 @@
+# Gitee Go 流水线：master 推送触发，Linux 上跑 fmt + 单测（镜像仓库的质量可见性）。
+#
+# 与 GitHub Actions 的分工：质量闸门（clippy -D warnings、三平台构建、发布）
+# 以 .github/workflows/release.yml 为准，这里只保证 Gitee 镜像自身可构建、可测试。
+#
+# 平台限制（踩坑记录）：
+#   1. Gitee Go 的分支/Tag/提交注释匹配是"交集"关系——同时配分支和 Tag 则两条都
+#      要满足才触发，因此 master CI 与 tag 构建必须拆成两个文件（见 tag-build.yml）。
+#   2. 没有官方 Rust 镜像，用 build@gcc（Ubuntu 20.04，自带 git/wget/zip/p7zip）
+#      + rustup 装 stable。容器内是 root，apt 不用 sudo。
+#   3. 构建机在国内，rustup.org / crates.io 直连不稳，统一走 rsproxy.cn 镜像。
+#   4. commands 列表的每一项是独立 shell，export 不跨项——所以整个流程必须
+#      写在一个多行块里（rustup 的 PATH 只在本块内有效）。
+#   5. 开通条件：仓库页面手动开通 Gitee Go（需手机号绑定）。免费额度：每仓库
+#      200 分钟 + 每月 500 分钟；GPUI 冷编译较慢，注意额度消耗。
+version: '1.0'
+name: master-ci
+displayName: CI（master 推送）
+triggers:
+  push:
+    branches:
+      precise:
+        - master
+stages:
+  - stage:
+      name: ci
+      displayName: 检查与测试
+      strategy: naturally
+      trigger: auto
+      steps:
+        - step: build@gcc
+          name: rust_ci
+          displayName: 安装 Rust 并执行 fmt 与单测
+          gccVersion: 10.3
+          commands:
+            # 系统依赖与 .github/workflows/release.yml 的 Linux 清单一致；
+            # libfontconfig1-dev 在 20.04/22.04 上都存在（libfontconfig-dev 只在 22.04+）。
+            # --tests：让 tests/engine_live.rs 参与编译（#[ignore] 只跳过执行，不跳过编译）。
+            - |
+              set -eu
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+                libwayland-dev libasound2-dev libfontconfig1-dev \
+                libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+              export RUSTUP_DIST_SERVER=https://rsproxy.cn
+              export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+              curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh \
+                | sh -s -- -y --default-toolchain stable --profile minimal
+              . "$HOME/.cargo/env"
+              mkdir -p "$HOME/.cargo"
+              cat > "$HOME/.cargo/config.toml" <<'EOF'
+              [source.crates-io]
+              replace-with = 'rsproxy-sparse'
+              [source.rsproxy-sparse]
+              registry = "sparse+https://rsproxy.cn/index/"
+              [net]
+              git-fetch-with-cli = true
+              EOF
+              cargo fmt --all --check
+              cargo test -p mqttx-desktop --lib --tests

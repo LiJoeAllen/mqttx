@@ -1,0 +1,90 @@
+# GitCode（AtomGit Action）流水线：推送 v* tag 时构建 Linux 产物并上传为制品。
+#
+# 与 GitHub 的分工：发布/OTA 只走 GitHub Release（客户端 update 模块的源头），
+# 这里只在 GitCode 镜像上留一份 Linux 构建产物供验证，不创建 GitCode Release。
+# 产物命名沿用 OTA 约定：mqttx-v<ver>-<triple>-mqttx[.sha256]。
+name: Tag Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linux:
+    name: Build Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: checkout
+
+      - name: Cache cargo
+        uses: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Install Linux system deps (GPUI)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libasound2-dev libfontconfig1-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - name: Install Rust toolchain (rsproxy mirror)
+        run: |
+          export RUSTUP_DIST_SERVER=https://rsproxy.cn
+          export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+          curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          mkdir -p ~/.cargo
+          cat > ~/.cargo/config.toml <<'EOF'
+          [source.crates-io]
+          replace-with = 'rsproxy-sparse'
+          [source.rsproxy-sparse]
+          registry = "sparse+https://rsproxy.cn/index/"
+          [net]
+          git-fetch-with-cli = true
+          EOF
+
+      # 版本双真源校验：tag 必须与 gpui-app/Cargo.toml 一致（ATOMGIT_REF 形如
+      # refs/tags/v1.2.1）。镜像上提前拦截，避免带病 tag 同步到 GitHub 才在
+      # release.yml 里失败。
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          tag="${ATOMGIT_REF#refs/tags/}"
+          cargo_ver="$(grep -m1 '^version' gpui-app/Cargo.toml | cut -d'"' -f2)"
+          if [ -z "$cargo_ver" ]; then
+            echo "::error::无法从 gpui-app/Cargo.toml 解析版本号"
+            exit 1
+          fi
+          if [ "v${cargo_ver}" != "$tag" ]; then
+            echo "::error::tag(${tag}) 与 gpui-app/Cargo.toml(v${cargo_ver}) 不一致"
+            exit 1
+          fi
+          echo "版本一致：${tag}"
+
+      - name: Build (release)
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --release -p mqttx-desktop
+
+      - name: Stage artifact
+        run: |
+          ver="$(grep -m1 '^version' gpui-app/Cargo.toml | cut -d'"' -f2)"
+          mkdir -p dist
+          dst="dist/mqttx-v${ver}-x86_64-unknown-linux-gnu-mqttx"
+          cp target/release/mqttx "$dst"
+          sha256sum "$dst" > "$dst.sha256"
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: upload-artifact
+        with:
+          name: mqttx-x86_64-unknown-linux-gnu
+          path: dist/
