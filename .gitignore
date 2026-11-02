@@ -17,3 +17,16 @@ logs
 /.video_agent
 /dist-publish
 dsh-usage/
+
+# 构建/验证脚本临时产物
+*.tmp
+.rel*
+.app*
+.e2e*
+.clippy*
+.test*
+.layout*
+.fresh*
+.a11y*
+.smoke*
+.v.txt
