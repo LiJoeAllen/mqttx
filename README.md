@@ -65,7 +65,7 @@ gpui-app/
 │   │   ├── tls.rs           #   rustls 配置与跳过校验
 │   │   ├── v5.rs            #   MQTT 5.0 客户端构建与事件循环
 │   │   └── v4.rs            #   MQTT 3.1.1 客户端构建与事件循环
-│   ├── update/              # OTA 自更新（GitHub Releases 源）
+│   ├── update/              # OTA 自更新（GitHub 主源 + Gitee 镜像兜底）
 │   │   ├── mod.rs           #   门面：版本比较、资产命名约定
 │   │   ├── check.rs         #   检查最新版本与资产挑选
 │   │   └── install.rs       #   7z 下载暂存、sha256 校验、自替换安装
@@ -161,6 +161,19 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 > `xattr -d com.apple.quarantine <binary>`；应用内 OTA 自更新不走浏览器，无此问题。
 >
 > GitHub 侧发布历史自 v1.0.0 起独立开始，不向其他渠道镜像。
+
+## OTA 更新源与镜像兜底
+
+应用内 OTA 的发现与下载都带多级兜底（`gpui-app/src/update/`）：
+
+- **发现链**：GitHub API → GitHub Releases 页面 302 → Gitee 列表 API（免认证）→
+  Gitee Releases 页面 302。GitHub 被限流（60 次/h/IP）或不可达时自动降级。
+- **下载链**：发现源优先，随后按命名约定依次尝试 Gitee、GitCode 的
+  `/releases/download/<tag>/<asset>`；每通道最多 3 次、断点续传（Range），
+  垃圾响应由强制 sha256 校验兜底。
+- Gitee 镜像 Release 由 [.workflow/tag-build.yml](.workflow/tag-build.yml) 在
+  tag 推送时自动发布（需在 Gitee Go 参数设置里配置 `GITEE_TOKEN`）；
+  GitCode API 强制认证，只作为下载的最后兜底，不做发现源。
 
 ## 验证与提交约定
 

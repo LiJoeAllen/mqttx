@@ -77,10 +77,17 @@ jobs:
       - name: Stage artifact
         run: |
           ver="$(grep -m1 '^version' gpui-app/Cargo.toml | cut -d'"' -f2)"
+          name="mqttx-v${ver}-x86_64-unknown-linux-gnu-mqttx"
+          # 四件套与 GitHub publish / Gitee tag-build 同款约定（7z 单条目，
+          # 内部文件名=裸二进制名，客户端解压后按此名校验安装）
           mkdir -p dist
-          dst="dist/mqttx-v${ver}-x86_64-unknown-linux-gnu-mqttx"
-          cp target/release/mqttx "$dst"
-          sha256sum "$dst" > "$dst.sha256"
+          cp target/release/mqttx "dist/$name"
+          (cd dist && sha256sum "$name" > "$name.sha256")
+          stage="$(mktemp -d)"
+          cp "dist/$name" "$stage/$name"
+          (cd "$stage" && 7z a -y -mx=9 "$OLDPWD/dist/$name.7z" "$name")
+          (cd dist && sha256sum "$name.7z" > "$name.7z.sha256")
+          rm -rf "$stage"
           ls -la dist/
 
       - name: Upload artifact

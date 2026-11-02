@@ -1,14 +1,29 @@
-# Gitee Go 流水线：推送 v* tag 时构建 Linux 产物并暂存为流水线制品。
+# Gitee Go 流水线：推送 v* tag 时构建 Linux 产物四件套并发布 Gitee Release。
 #
-# 与 GitHub 的分工：发布/OTA 只走 GitHub Release（客户端 update 模块的源头），
-# 这里只在 Gitee 镜像上留一份 Linux 构建产物供验证，不发布 Gitee Release。
-# 产物命名沿用 OTA 约定：mqttx-v<ver>-<triple>-mqttx[.exe][.sha256]。
+# 这个 Release 是客户端 OTA 兜底源的数据来源（update 模块发现链最后一级，
+# 与 GitHub Releases 资产命名完全一致）。与 GitHub 的分工不变：正式发布/OTA
+# 主渠道仍走 GitHub Release，这里提供国内直连可用的镜像下载。
+#
+# 产物四件套（与 GitHub publish 一致，缺一不可——客户端 sha256 校验 fail-closed）：
+#   mqttx-v<ver>-x86_64-unknown-linux-gnu-mqttx            裸二进制
+#   mqttx-v<ver>-x86_64-unknown-linux-gnu-mqttx.sha256
+#   mqttx-v<ver>-x86_64-unknown-linux-gnu-mqttx.7z         单条目压缩包（OTA 主通道）
+#   mqttx-v<ver>-x86_64-unknown-linux-gnu-mqttx.7z.sha256
+#
+# 前置配置（一次性，UI 操作）：在 Gitee Go「参数设置」里新建流水线参数
+#   GITEE_TOKEN = Gitee 私人令牌（需 releases 权限）。
+# 未配置时发布步骤自动跳过、流水线保持绿（制品仍暂存 7 天）。
 #
 # 平台限制（踩坑记录，详见 master-ci.yml 头注释）：
 #   - Gitee Go 没有暴露"当前 tag 名"的系统变量（GITEE_BRANCH 只给分支），
 #     所以版本号直接从 gpui-app/Cargo.toml 解析（单一真源）；
 #     tag 与 Cargo.toml 的一致性校验由 GitHub Actions 在正式发布时把守。
-#   - 制品仅暂存不上传制品库，7 天后自动清除（官方 artifacts 行为）。
+#   - Gitee v5 API 事实（2026-11 实测）：创建 Release 必须带 target_commitish
+#     （校验强制要求，tag 已存在时值被忽略）；Release 即建即发布（draft 参数
+#     无效）；PATCH 必须带全 tag_name/name/body；附件上传走
+#     POST /releases/{id}/attach_files（multipart）。
+#   - 7z 单条目约定：归档内恰好一个条目且名字=裸二进制名（客户端解压后按此
+#     名校验安装），因此先复制到临时目录以产物名命名再压缩。
 version: '1.0'
 name: tag-build
 displayName: 构建（tag 推送）
@@ -26,7 +41,7 @@ stages:
       steps:
         - step: build@gcc
           name: rust_build
-          displayName: release 构建并打包命名产物
+          displayName: release 构建并打包四件套
           gccVersion: 10.3
           commands:
             - |
@@ -57,12 +72,62 @@ stages:
               fi
               echo "版本：v${ver}"
               cargo build --release -p mqttx-desktop
+              # 四件套打包（与 .github/workflows/release.yml 的 publish 作业同款约定）
               mkdir -p dist
-              dst="dist/mqttx-v${ver}-x86_64-unknown-linux-gnu-mqttx"
-              cp target/release/mqttx "$dst"
-              sha256sum "$dst" > "$dst.sha256"
+              name="mqttx-v${ver}-x86_64-unknown-linux-gnu-mqttx"
+              cp target/release/mqttx "dist/$name"
+              (cd dist && sha256sum "$name" > "$name.sha256")
+              stage="$(mktemp -d)"
+              cp "dist/$name" "$stage/$name"
+              (cd "$stage" && 7z a -y -mx=9 "$OLDPWD/dist/$name.7z" "$name")
+              (cd dist && sha256sum "$name.7z" > "$name.7z.sha256")
+              rm -rf "$stage"
               ls -la dist/
           artifacts:
             - name: BUILD_ARTIFACT
               path:
                 - ./dist
+
+        - step: build@gcc
+          name: publish_release
+          displayName: 发布 Gitee Release
+          gccVersion: 10.3
+          dependsOn: rust_build
+          commands:
+            - |
+              set -eu
+              # 未配置 GITEE_TOKEN 参数时跳过（流水线保持绿，制品已在暂存区）
+              if [ -z "${GITEE_TOKEN:-}" ]; then
+                echo "未配置流水线参数 GITEE_TOKEN，跳过 Gitee Release 发布"
+                exit 0
+              fi
+              ver="$(grep -m1 '^version' gpui-app/Cargo.toml | cut -d'"' -f2)"
+              tag="v${ver}"
+              api="https://gitee.com/api/v5/repos/LiJoeAllen/mqttx/releases"
+              # 幂等：先删同 tag 旧 Release 再重发（tag 本身保留不动）。
+              # 注意 404 不能用 curl -f，否则 set -e 直接退出。
+              old_id="$(curl -sS "$api/tag/$tag?access_token=$GITEE_TOKEN" \
+                | jq -r '.id? // empty' || true)"
+              if [ -n "$old_id" ]; then
+                curl -sS -X DELETE "$api/$old_id?access_token=$GITEE_TOKEN"
+                echo "已删除旧 Release(id=$old_id)"
+              fi
+              # 正文取附注 tag 的 message（GITEE_COMMIT_MESSAGE 对 tag push 即
+              # tag message）；空的回退为 tag 名。
+              payload="$(jq -n --arg tag "$tag" \
+                --arg body "${GITEE_COMMIT_MESSAGE:-$tag}" \
+                '{tag_name:$tag, name:$tag, body:$body,
+                  target_commitish:"master", draft:false, prerelease:false}')"
+              rid="$(curl -sS -X POST "$api?access_token=$GITEE_TOKEN" \
+                -H 'Content-Type: application/json' -d "$payload" \
+                | jq -r '.id? // empty')"
+              if [ -z "$rid" ]; then
+                echo "创建 Gitee Release 失败" >&2
+                exit 1
+              fi
+              for f in dist/*; do
+                curl -sS -X POST "$api/$rid/attach_files?access_token=$GITEE_TOKEN" \
+                  -F "file=@$f" >/dev/null
+                echo "已上传附件: $(basename "$f")"
+              done
+              echo "已发布 Gitee Release $tag（$(ls dist | wc -l) 个附件）"

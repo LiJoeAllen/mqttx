@@ -46,10 +46,41 @@ pub fn download_and_stage(
     ));
     let dst = dir.join(&final_name);
 
-    if let Err(e) = download_to(info, &tmp, on_progress) {
+    if let Err(e) = download_with_retry(&download_candidates(info), &tmp, info.size, on_progress) {
         // 失败路径统一清理临时文件
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
+    }
+
+    // sha256 校验（fail-closed）：跨源候选逐个尝试侧车（API 显式 URL 优先，其余按
+    // `<asset_url>.sha256` 构造）。一次漏传就会让所有客户端在"零完整性校验"状态下
+    // 安装，而 UI 仍宣称"已通过 sha256 校验"，所以缺侧车与校验不过都拒绝安装。
+    // 校验放在下载完成后整体读盘：断点续传会把一个文件拆进多个连接/多个镜像源，
+    // 流式哈希的增量状态管理远比一次性重读复杂，20MB 级文件的重读成本可忽略。
+    let expect = match fetch_expected_sha256(&sidecar_candidates(info)) {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(crate::ui::i18n::t("update.err_no_sha_sidecar").to_string());
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
+    let actual = match file_sha256(&tmp) {
+        Ok(h) => h,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
+    if !actual.eq_ignore_ascii_case(&expect) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(crate::ui::i18n::tf(
+            "update.err_sha_mismatch",
+            &[("expect", &expect), ("actual", &actual)],
+        ));
     }
 
     // 清掉其他版本的残留暂存文件，避免堆积与误装旧版
@@ -243,22 +274,111 @@ impl Drop for InstallLock {
     }
 }
 
-fn download_to(
-    info: &UpdateInfo,
-    tmp: &std::path::Path,
+/// 下载候选通道：发现源优先，其余镜像按命名约定构造（同一资产名在
+/// GitHub/Gitee/GitCode 三处一致）。跨源 URL 没有发现阶段佐证，垃圾响应
+/// 由 sha256 校验兜底，不会误装。
+fn download_candidates(info: &UpdateInfo) -> Vec<String> {
+    let mut urls = vec![info.asset_url.clone()];
+    let tag = format!("v{}", info.version);
+    for base in [GITEE_RELEASES_PAGE, GITCODE_RELEASES_PAGE] {
+        let u = format!("{base}/download/{tag}/{}", info.asset_name);
+        if !urls.contains(&u) {
+            urls.push(u);
+        }
+    }
+    urls
+}
+
+/// sha256 侧车候选：API 显式 URL 优先，其余按 `<asset_url>.sha256` 构造。
+fn sidecar_candidates(info: &UpdateInfo) -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Some(u) = &info.sha256_url {
+        urls.push(u.clone());
+    }
+    for a in download_candidates(info) {
+        let s = format!("{a}.sha256");
+        if !urls.contains(&s) {
+            urls.push(s);
+        }
+    }
+    urls
+}
+
+/// 每个通道的重试次数：断点续传让重试成本只是增量传输，三次足够。
+const DOWNLOAD_ATTEMPTS_PER_URL: usize = 3;
+/// 重试退避（秒）：第 2、3 次尝试前等待。远端瞬断/代理抖动通常秒级恢复。
+const RETRY_BACKOFF_SECS: [u64; 2] = [2, 8];
+
+/// 依序尝试所有下载通道，通道内最多 [`DOWNLOAD_ATTEMPTS_PER_URL`] 次。
+///
+/// 临时文件跨尝试、跨通道保留已下载部分（断点续传）：字节即字节，来源混拼
+/// 没有关系，最终由 sha256 一票裁决。全部通道重试穷尽才报错。
+fn download_with_retry(
+    urls: &[String],
+    tmp: &Path,
+    total: u64,
     on_progress: &dyn Fn(u64, u64),
 ) -> Result<(), String> {
-    let resp = agent()
-        .get(&info.asset_url)
-        .call()
-        .map_err(|e| crate::ui::i18n::tf("update.err_download", &[("e", &e)]))?;
+    let mut last_err = String::new();
+    for url in urls {
+        for attempt in 0..DOWNLOAD_ATTEMPTS_PER_URL {
+            if attempt > 0 {
+                let secs = RETRY_BACKOFF_SECS[(attempt - 1).min(RETRY_BACKOFF_SECS.len() - 1)];
+                std::thread::sleep(std::time::Duration::from_secs(secs));
+            }
+            match download_once(url, tmp, total, on_progress) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last_err = e;
+                    // 保留 tmp：下次尝试从已下载字节处续传
+                }
+            }
+        }
+    }
+    Err(crate::ui::i18n::tf(
+        "update.err_download_all_sources",
+        &[("n", &urls.len()), ("last", &last_err)],
+    ))
+}
+
+/// 单次完整下载尝试（支持从 tmp 现有字节续传）。返回 Ok 表示传输完整：
+/// total 已知时长度对账通过，未知时以 EOF 为准（sha256 兜底）。
+fn download_once(
+    url: &str,
+    tmp: &Path,
+    total: u64,
+    on_progress: &dyn Fn(u64, u64),
+) -> Result<(), String> {
+    let mut offset = std::fs::metadata(tmp).map(|m| m.len()).unwrap_or(0);
+    // 残留超过预期大小：损坏的临时文件，从头来
+    if total > 0 && offset > total {
+        offset = 0;
+    }
+    let resp = if offset > 0 {
+        agent()
+            .get(url)
+            .header("Range", &format!("bytes={offset}-"))
+            .call()
+    } else {
+        agent().get(url).call()
+    };
+    let resp = resp.map_err(|e| crate::ui::i18n::tf("update.err_download", &[("e", &e)]))?;
+    // 服务器无视 Range 回 200 全量（镜像附件节点行为不一）：截断从头重写
+    let resumed = offset > 0 && resp.status().as_u16() == 206;
+    let mut file = if resumed {
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(tmp)
+            .map_err(|e| crate::ui::i18n::tf("update.err_tmp_create", &[("e", &e)]))?
+    } else {
+        offset = 0;
+        std::fs::File::create(tmp)
+            .map_err(|e| crate::ui::i18n::tf("update.err_tmp_create", &[("e", &e)]))?
+    };
     let mut reader = resp.into_body().into_reader();
-    let total = info.size;
-    let mut file = std::fs::File::create(tmp)
-        .map_err(|e| crate::ui::i18n::tf("update.err_tmp_create", &[("e", &e)]))?;
     let mut buf = [0u8; 64 * 1024];
-    let mut downloaded: u64 = 0;
-    let mut hasher = sha2::Sha256::new();
+    let mut downloaded = offset;
+    on_progress(downloaded, total);
     loop {
         let n = reader
             .read(&mut buf)
@@ -268,7 +388,6 @@ fn download_to(
         }
         std::io::Write::write_all(&mut file, &buf[..n])
             .map_err(|e| crate::ui::i18n::tf("update.err_tmp_write", &[("e", &e)]))?;
-        hasher.update(&buf[..n]);
         downloaded += n as u64;
         on_progress(downloaded, total);
     }
@@ -281,23 +400,6 @@ fn download_to(
         return Err(crate::ui::i18n::tf(
             "update.err_size_mismatch",
             &[("total", &total), ("downloaded", &downloaded)],
-        ));
-    }
-
-    // sha256 校验：缺侧车不再静默跳过——一次漏传就会让所有客户端在"零完整性校验"
-    // 状态下安装，而 UI 仍宣称"已通过 sha256 校验"。发布脚本两侧都会生成侧车，
-    // 因此这里 fail-closed 不会误伤正常发布。
-    let expect = fetch_expected_sha256(info)?
-        .ok_or_else(|| crate::ui::i18n::t("update.err_no_sha_sidecar").to_string())?;
-    let actual: String = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    if !actual.eq_ignore_ascii_case(&expect) {
-        return Err(crate::ui::i18n::tf(
-            "update.err_sha_mismatch",
-            &[("expect", &expect), ("actual", &actual)],
         ));
     }
     Ok(())
@@ -325,30 +427,29 @@ fn remove_other_staged(dir: &std::path::Path, keep: &std::path::Path) {
     }
 }
 
-/// 读取 `.sha256` 侧车内容，返回其中的哈希值。没有侧车时返回 None。
-fn fetch_expected_sha256(info: &UpdateInfo) -> Result<Option<String>, String> {
-    let Some(url) = &info.sha256_url else {
-        return Ok(None);
-    };
-    let mut body = agent()
-        .get(url)
-        .call()
-        .map_err(|e| crate::ui::i18n::tf("update.err_fetch_sidecar", &[("e", &e)]))?
-        .into_body();
-    let text = body
-        .read_to_string()
-        .map_err(|e| crate::ui::i18n::tf("update.err_read_sidecar", &[("e", &e)]))?;
-    // 常见格式：<hex>  <filename> 或纯 hex
-    let hex = text
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_lowercase();
-    if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        Ok(Some(hex))
-    } else {
-        Err(crate::ui::i18n::t("update.err_sidecar_format").to_string())
+/// 依次尝试各 `.sha256` 侧车候选，返回第一个内容合法的哈希。
+/// 全部候选都不可用时返回 None，调用方 fail-closed 拒绝安装。
+/// 单个候选的失败（网络/格式）静默跳过——最终由 None 或 sha256 对比兜底。
+fn fetch_expected_sha256(candidates: &[String]) -> Result<Option<String>, String> {
+    for url in candidates {
+        let text = match agent().get(url).call() {
+            Ok(resp) => match resp.into_body().read_to_string() {
+                Ok(t) => t,
+                Err(_) => continue,
+            },
+            Err(_) => continue,
+        };
+        // 常见格式：<hex>  <filename> 或纯 hex
+        let hex = text
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_lowercase();
+        if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Ok(Some(hex));
+        }
     }
+    Ok(None)
 }
 
 /// 多个版本并存时取最新版本（readdir 顺序不保证有序）。
@@ -568,5 +669,61 @@ mod tests {
             hex,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    fn info_with_asset_url(asset_url: &str) -> UpdateInfo {
+        UpdateInfo {
+            version: "1.2.2".to_string(),
+            notes: String::new(),
+            asset_name: asset_name_for("1.2.2"),
+            asset_url: asset_url.to_string(),
+            sha256_url: None,
+            size: 0,
+            source: crate::update::SourceKind::GitHubApi,
+        }
+    }
+
+    /// 下载通道：origin 恒在首位；Gitee/GitCode 按命名约定追加；
+    /// origin 本身就是某镜像时不得重复（发现源与兜底源同一站点）。
+    #[test]
+    fn download_candidates_orders_origin_first_without_dupes() {
+        let from_github = info_with_asset_url(&format!(
+            "{}/download/v1.2.2/{}",
+            RELEASES_PAGE,
+            asset_name_for("1.2.2")
+        ));
+        let urls = download_candidates(&from_github);
+        assert_eq!(urls.len(), 3, "GitHub 起源应追加 Gitee+GitCode: {urls:?}");
+        assert_eq!(urls[0], from_github.asset_url);
+        assert!(urls[1].starts_with(GITEE_RELEASES_PAGE));
+        assert!(urls[2].starts_with(GITCODE_RELEASES_PAGE));
+        assert!(urls[1].ends_with(&format!("/download/v1.2.2/{}", asset_name_for("1.2.2"))));
+
+        let from_gitee = info_with_asset_url(&format!(
+            "{}/download/v1.2.2/{}",
+            GITEE_RELEASES_PAGE,
+            asset_name_for("1.2.2")
+        ));
+        let urls = download_candidates(&from_gitee);
+        assert_eq!(urls.len(), 2, "Gitee 起源不得重复出现: {urls:?}");
+        assert_eq!(urls[0], from_gitee.asset_url);
+        assert!(urls[1].starts_with(GITCODE_RELEASES_PAGE));
+    }
+
+    /// 侧车候选：API 显式 URL 优先；随后按候选下载 URL 逐一构造 .sha256，去重。
+    #[test]
+    fn sidecar_candidates_puts_explicit_url_first() {
+        let mut info = info_with_asset_url(&format!(
+            "{}/download/v1.2.2/{}",
+            RELEASES_PAGE,
+            asset_name_for("1.2.2")
+        ));
+        info.sha256_url = Some(format!("{}.sha256", info.asset_url));
+        let urls = sidecar_candidates(&info);
+        let expect = info.sha256_url.as_deref().expect("上一行刚设置");
+        assert_eq!(urls.first().map(String::as_str), Some(expect));
+        assert_eq!(urls.len(), 3, "显式 + 构造 2 条，无重复: {urls:?}");
+        assert!(urls[1].starts_with(GITEE_RELEASES_PAGE));
+        assert!(urls.iter().all(|u| u.ends_with(".sha256")));
     }
 }

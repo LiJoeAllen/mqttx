@@ -1,13 +1,12 @@
-//! OTA 自更新：以 GitHub Release 为更新源。
+//! OTA 自更新：以 GitHub Release 为主源、Gitee 镜像兜底。
 //!
-//! - [`check`] 检查最新版本与资产挑选
-//! - [`install`] 下载暂存、校验安装、同意标记与清理
+//! - [`check`] 检查最新版本与资产挑选（GitHub API → GitHub 页面 302 →
+//!   Gitee 列表 API → Gitee 页面 302，逐级兜底）
+//! - [`install`] 下载暂存（多通道重试+断点续传）、校验安装、同意标记与清理
 //!
 //! 本模块只暴露版本比较/资产命名等纯工具与二级模块的公开 API。
 
 use std::path::PathBuf;
-
-use sha2::Digest as _;
 
 mod check;
 mod install;
@@ -18,7 +17,7 @@ pub use install::{
     install_consent_matches, install_staged, load_staged, mark_install_consent,
 };
 
-/// 更新源（GitHub Releases；仓库公开，API 与附件下载均无需认证）。
+/// 主更新源（GitHub Releases；仓库公开，API 与附件下载均无需认证）。
 ///
 /// - api.github.com 未认证配额为 60 次/小时/IP：共享出口 IP 打满时检查会失败，
 ///   按「错误仅记录、不打扰用户」静默降级，下次成功检查自动追上；
@@ -28,15 +27,52 @@ pub const RELEASES_API: &str = "https://api.github.com/repos/LiJoeAllen/mqttx/re
 /// 兜底发现最新 tag —— 跟踪 `{RELEASES_PAGE}/latest` 的 302，从最终 URL 取 tag，
 /// 下载与校验按命名约定构造 URL，完整性（sha256）不受影响。
 pub const RELEASES_PAGE: &str = "https://github.com/LiJoeAllen/mqttx/releases";
+/// 镜像兜底源（Gitee）：检查链的最后一级。公开仓库的列表 API 免认证可用
+/// （注意 Gitee v5 没有 /releases/latest API 端点，只能列出来再筛），
+/// `/releases/latest` **页面** 会 302 到 `/releases/tag/<tag>`，与 GitHub 同构。
+/// 附件与 `.sha256` 侧车下载免认证，URL 模式与 GitHub 一致
+/// （`/releases/download/<tag>/<asset>`）。产物四件套由 .workflow/tag-build.yml
+/// 在 tag 时发布（未配置 GITEE_TOKEN 参数时只暂存制品、不发 Release）。
+pub const GITEE_RELEASES_API: &str = "https://gitee.com/api/v5/repos/LiJoeAllen/mqttx/releases";
+/// Gitee Releases 页面（302 重定向发现 + 按命名约定构造下载 URL）。
+pub const GITEE_RELEASES_PAGE: &str = "https://gitee.com/LiJoeAllen/mqttx/releases";
+/// 最后一搏的下载镜像（GitCode）：API 强制 token、`/releases/latest` 页面是 SPA
+/// 无重定向，因此**不能用于发现**；但 Release 附件若已由人工/后续流水线发布，
+/// 其下载 URL 与 GitHub/Gitee 同构。仅在其它通道全部失败时按命名约定尝试，
+/// 垃圾响应由 sha256 校验兜底，不会误装。
+pub const GITCODE_RELEASES_PAGE: &str = "https://gitcode.com/JoeAllen/mqttx/releases";
 /// 更新源展示名（设置对话框「关于」）。
-pub const UPDATE_SOURCE: &str = "GitHub";
+pub const UPDATE_SOURCE: &str = "GitHub + Gitee";
 
 const HTTP_TIMEOUT_SECS: u64 = 30;
+
+/// 更新成功的来源渠道（展示与错误提示用）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    /// GitHub API（信息最全）
+    GitHubApi,
+    /// GitHub Releases 页面 302 重定向发现
+    GitHubRedirect,
+    /// Gitee 列表 API（免认证）
+    GiteeApi,
+    /// Gitee Releases 页面 302 重定向发现
+    GiteeRedirect,
+}
+
+impl SourceKind {
+    /// 展示名（技术词不翻译）。
+    pub fn label(self) -> &'static str {
+        match self {
+            SourceKind::GitHubApi | SourceKind::GitHubRedirect => "GitHub",
+            SourceKind::GiteeApi | SourceKind::GiteeRedirect => "Gitee",
+        }
+    }
+}
 
 /// 发现的可用更新。
 #[derive(Debug, Clone)]
 pub struct UpdateInfo {
-    /// 新版本号（不含 v 前缀），如 "1.0.1"
+    /// 新版本号（不含 v 前缀），记录发现渠道
     pub version: String,
     /// Release 说明（Markdown 原文）
     pub notes: String,
@@ -46,8 +82,10 @@ pub struct UpdateInfo {
     pub asset_url: String,
     /// sha256 校验文件地址（若 Release 提供了 `.sha256` 侧车）
     pub sha256_url: Option<String>,
-    /// 产物字节数（API 提供，用于下载进度）
+    /// 产物字节数（API 提供，用于下载进度）；镜像源可能缺 size 字段 → 0（进度未知、大小对账跳过）
     pub size: u64,
+    /// 发现渠道
+    pub source: SourceKind,
 }
 
 /// 当前版本。测试可用环境变量 `MQTTX_VERSION_OVERRIDE` 伪装旧版本，
