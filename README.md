@@ -162,6 +162,18 @@ MQTTX_LIVE=1 cargo test -p mqttx-desktop --test engine_live -- --ignored
 >
 > GitHub 侧发布历史自 v1.0.0 起独立开始，不向其他渠道镜像。
 
+## 验证与提交约定
+
+- **UI 自动化验证**：gpui 的下拉弹层条目是自定义绘制的，UIA `FindAll(ListItem)`
+  取不到文字，只能先用 `AutomationElement.FromPoint` 逐点探测条目矩形再点击。
+  另需在同一进程树内启动应用与探测脚本——分离的后台进程会随启动器退出被回收。
+- **无障碍**：纯图标按钮一律 `tooltip + accessibility_label` 成对出现；下拉经
+  `widgets::named_select` 包一层，开关补 `accessibility_label`。传**已翻译**文案
+  而非 key，好让 `ui::i18n` 的语言包覆盖率测试能扫到这些调用点。
+- **提交范围**：Windows 上不要用 `git add -A` 兜底——`%SystemDrive%` 一类未展开的
+  环境变量名会被当作字面目录名创建，`add -A` 会连带把系统缓存 `.db` 提交进历史。
+  按路径 `git add`，提交前核对 `git status --porcelain`。
+
 ## 数据目录
 
 | 平台 | 路径 |
