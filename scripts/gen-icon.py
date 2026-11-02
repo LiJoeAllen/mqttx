@@ -1,5 +1,10 @@
 """按 logo.rs 的几何与合成顺序光栅化品牌 logo，打包为多尺寸 .ico。"""
 import math, struct, zlib
+from pathlib import Path
+
+# 输出锚定在仓库根下：不依赖启动时的 CWD
+REPO = Path(__file__).resolve().parent.parent
+ICON = REPO / "gpui-app" / "resources" / "icon.ico"
 
 PRIMARY = (0x5e, 0x6a, 0xd2)   # Linear 主紫
 FG      = (0xff, 0xff, 0xff)   # primary_foreground
@@ -93,5 +98,5 @@ for s in sizes:
         s if s < 256 else 0, s if s < 256 else 0, 0, 0, 1, 32, len(data), offset)
     body += data
     offset += len(data)
-open("gpui-app/resources/icon.ico", "wb").write(out + body)
+ICON.write_bytes(out + body)
 print("icon.ico written:", [f"{s}:{len(frames[s])}B" for s in sizes])

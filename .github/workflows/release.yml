@@ -206,15 +206,34 @@ jobs:
           # 发布正文优先取附注 tag 的 message。actions/checkout 会把 tag 重建为
           # 轻量 tag（%(contents) 退化成 commit message），这里显式拉取 tag 对象
           git fetch -q origin "refs/tags/$VER:refs/tags/$VER" --force --no-tags
-          notes="$(git for-each-ref "refs/tags/$VER" --format='%(contents)' | awk '/^-----BEGIN PGP SIGNATURE----$/{sig=1} !sig' | awk 'NF')"
+          # 发布正文取附注 tag 的 message，写进文件后用 --notes-file 交给 gh。
+          # 两处坑：
+          #  1) actions/checkout 会把附注 tag 重建为轻量 tag（%(contents) 退化成
+          #     commit message），所以先显式拉取 tag 对象；
+          #  2) 旧写法 `| awk 'NF'` 经 shell 变量中转，会吞掉全部空行——正文是
+          #     markdown，空行没了段落就粘连成一坨（v1.2.0 发布说明实测丢 11 个空行）。
+          # 现在只剥 PGP 签名块 + 裁首尾空行，中间空行原样保留。
+          notes_file="$(mktemp)"
+          git for-each-ref "refs/tags/$VER" --format='%(contents)' \
+            | awk '/^-----BEGIN PGP SIGNATURE----$/{sig=1} !sig' \
+            | awk '
+                { lines[NR] = $0 }
+                END {
+                  first = 1; last = NR
+                  while (first <= last && lines[first] ~ /^[[:space:]]*$/) first++
+                  while (last >= first && lines[last] ~ /^[[:space:]]*$/) last--
+                  for (i = first; i <= last; i++) print lines[i]
+                }' > "$notes_file"
+          if [ ! -s "$notes_file" ]; then rm -f "$notes_file"; notes_file=""; fi
           if gh release view "$VER" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release ${VER} 已存在，覆盖上传资产"
-            if [ -n "$notes" ]; then
-              gh release edit "$VER" -R "$GITHUB_REPOSITORY" --notes "$notes"
+            if [ -n "$notes_file" ]; then
+              gh release edit "$VER" -R "$GITHUB_REPOSITORY" --notes-file "$notes_file"
             fi
-          elif [ -n "$notes" ]; then
-            gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --notes "$notes"
+          elif [ -n "$notes_file" ]; then
+            gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --notes-file "$notes_file"
           else
             gh release create "$VER" -R "$GITHUB_REPOSITORY" --title "$VER" --generate-notes
           fi
+          [ -n "$notes_file" ] && rm -f "$notes_file"
           gh release upload "$VER" -R "$GITHUB_REPOSITORY" artifacts/* --clobber

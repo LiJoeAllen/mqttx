@@ -2,9 +2,13 @@
 """从 gpui-component 默认主题生成 Linear 风格主题 linear-theme.json。
 映射规则见各表；未列出的键（chart/base 等）保留默认值。"""
 import json, sys, collections
+from pathlib import Path
 
 SRC = sys.argv[1]
 DST = sys.argv[2]
+
+# 输出锚定在仓库根下：argv 来源必须落在仓库内，且脚本不再依赖启动时的 CWD
+REPO = Path(__file__).resolve().parent.parent
 
 with open(SRC, "r", encoding="utf-8") as f:
     base = json.load(f)
@@ -197,6 +201,9 @@ themes = [
     build(by_mode["dark"], DARK, "Linear Dark"),
 ]
 doc = {"themes": themes}
-with open(DST, "w", encoding="utf-8") as f:
+dst = Path(DST).resolve()
+if REPO not in dst.parents:
+    sys.exit(f"DST 必须位于仓库根 {REPO} 之内: {dst}")
+with dst.open("w", encoding="utf-8") as f:
     json.dump(doc, f, ensure_ascii=False, indent=2)
 print(f"OK -> {DST} ({len(themes)} themes)")
