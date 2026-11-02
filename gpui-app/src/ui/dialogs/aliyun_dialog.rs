@@ -3,7 +3,7 @@
 use crate::ui::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
     notification::Notification, v_flex,
@@ -18,7 +18,7 @@ use crate::aliyun::{AliyunAuthMode, AliyunPreset};
 use crate::model::{ConnectionConfig, render_will_templates};
 use crate::ui::app::MqttXApp;
 use crate::ui::i18n;
-use crate::ui::widgets::{OptionDelegate, field, make_select};
+use crate::ui::widgets::{OptionDelegate, field, make_select, named_select};
 
 fn auth_mode_labels() -> [&'static str; 2] {
     [
@@ -318,7 +318,7 @@ impl Render for AliyunDialog {
                     )
                     .child(field(
                         i18n::t("aliyun.auth_mode"),
-                        Select::new(&self.auth_mode),
+                        named_select(&self.auth_mode, i18n::t("aliyun.auth_mode")),
                     ))
                     .child(
                         h_flex()

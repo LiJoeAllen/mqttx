@@ -330,6 +330,7 @@ impl Render for ResourceMonitorDialog {
                             .child(
                                 Switch::new("resmon-auto")
                                     .checked(self.auto_refresh)
+                                    .accessibility_label(i18n::t("resmon.auto_refresh"))
                                     .on_change(cx.listener(|this, v: &bool, _, cx| {
                                         this.auto_refresh = *v;
                                         cx.notify();

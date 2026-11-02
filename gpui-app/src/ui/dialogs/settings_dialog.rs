@@ -6,7 +6,7 @@ use std::sync::Arc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
@@ -23,7 +23,7 @@ use crate::mqtt::MqttEngine;
 use crate::ui::IconName;
 use crate::ui::app::MqttXApp;
 use crate::ui::i18n;
-use crate::ui::widgets::{OptionDelegate, field, make_select};
+use crate::ui::widgets::{OptionDelegate, field, make_select, named_select};
 use crate::update::{self, UpdateInfo};
 
 fn theme_labels() -> [&'static str; 3] {
@@ -464,12 +464,15 @@ impl Render for SettingsDialog {
             .w(px(500.))
             .child(field(
                 i18n::t("settings.theme_preset"),
-                Select::new(&self.theme_preset),
+                named_select(&self.theme_preset, i18n::t("settings.theme_preset")),
             ))
-            .child(field(i18n::t("settings.theme"), Select::new(&self.theme)))
+            .child(field(
+                i18n::t("settings.theme"),
+                named_select(&self.theme, i18n::t("settings.theme")),
+            ))
             .child(field(
                 i18n::t("settings.language"),
-                Select::new(&self.language),
+                named_select(&self.language, i18n::t("settings.language")),
             ))
             .child(field(
                 i18n::t("settings.max_messages"),
@@ -494,6 +497,7 @@ impl Render for SettingsDialog {
                     .child(
                         Switch::new("show-millis")
                             .checked(self.show_millis)
+                            .accessibility_label(i18n::t("settings.show_millis"))
                             .on_change(cx.listener(|this, v, _, cx| {
                                 this.show_millis = *v;
                                 cx.notify();
@@ -507,6 +511,7 @@ impl Render for SettingsDialog {
                     .child(
                         Switch::new("auto-check-update")
                             .checked(self.auto_check_update)
+                            .accessibility_label(i18n::t("settings.auto_update"))
                             .on_change(cx.listener(|this, v, _, cx| {
                                 this.auto_check_update = *v;
                                 cx.notify();

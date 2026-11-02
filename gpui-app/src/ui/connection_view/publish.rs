@@ -6,13 +6,12 @@ use gpui_kit::component::button::{Button, ButtonVariant};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState, Textarea};
 use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, notification::Notification, v_flex};
 use gpui_kit::{App, Context, Entity, IntoElement, SharedString, Window, div, px};
 
 use crate::model::{PayloadFormat, PublishParams, render_template};
-use crate::ui::widgets::{KvEditor, field};
+use crate::ui::widgets::{KvEditor, field, named_select};
 
 use super::*;
 use crate::ui::i18n;
@@ -278,11 +277,15 @@ impl ConnectionView {
                         ))
                         .child(Input::new(&pub_topic).small()),
                 )
-                .child(div().w(px(92.)).child(Select::new(&pub_qos).small()))
                 .child(
                     div()
-                        .w(px(124.))
-                        .child(Select::new(&payload_format).small()),
+                        .w(px(92.))
+                        .child(named_select(&pub_qos, i18n::t("pub.qos")).small()),
+                )
+                .child(
+                    div().w(px(124.)).child(
+                        named_select(&payload_format, i18n::t("pub.payload_format")).small(),
+                    ),
                 )
                 .child(self.render_preset_menu(presets, cx))
                 .child({
@@ -312,12 +315,15 @@ impl ConnectionView {
                     h_flex()
                         .gap_1()
                         .items_center()
-                        .child(Switch::new("retain").checked(retain).on_change(cx.listener(
-                            |this, v, _, cx| {
-                                this.retain = *v;
-                                cx.notify();
-                            },
-                        )))
+                        .child(
+                            Switch::new("retain")
+                                .checked(retain)
+                                .accessibility_label("Retain")
+                                .on_change(cx.listener(|this, v, _, cx| {
+                                    this.retain = *v;
+                                    cx.notify();
+                                })),
+                        )
                         .child(div().text_xs().child("Retain")),
                 )
                 .when(is_v5, |h| {

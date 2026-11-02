@@ -5,13 +5,12 @@ use gpui_kit::component::IndexPath;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, notification::Notification, v_flex};
 use gpui_kit::{Context, IntoElement, SharedString, Window, div, px};
 
 use crate::model::{SubscribeOptions, Subscription};
-use crate::ui::widgets::field;
+use crate::ui::widgets::{field, named_select};
 
 use super::*;
 use crate::ui::i18n;
@@ -396,7 +395,11 @@ impl ConnectionView {
                         ))
                         .child(Input::new(&sub_topic).small()),
                 )
-                .child(div().w(px(96.)).child(Select::new(&sub_qos).small()))
+                .child(
+                    div()
+                        .w(px(96.))
+                        .child(named_select(&sub_qos, i18n::t("sub.qos")).small()),
+                )
                 .child(div().w(px(112.)).child(Input::new(&sub_alias).small()))
                 .when(is_v5, |h| {
                     h.child(
@@ -458,48 +461,53 @@ impl ConnectionView {
             let sub_no_local = self.sub_no_local;
             let sub_rap = self.sub_rap;
             let sub_retain_handling = self.sub_retain_handling.clone();
-            bar =
-                bar.child(
-                    h_flex()
-                        .gap_4()
-                        .px_3()
-                        .pb_2()
-                        .items_start()
-                        .child(div().w(px(150.)).child(field(
-                            i18n::t("sub.identifier_field"),
-                            Input::new(&sub_identifier).small(),
-                        )))
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .pt_4()
-                                .child(Switch::new("sub-no-local").checked(sub_no_local).on_change(
-                                    cx.listener(|this, v, _, cx| {
+            bar = bar.child(
+                h_flex()
+                    .gap_4()
+                    .px_3()
+                    .pb_2()
+                    .items_start()
+                    .child(div().w(px(150.)).child(field(
+                        i18n::t("sub.identifier_field"),
+                        Input::new(&sub_identifier).small(),
+                    )))
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .pt_4()
+                            .child(
+                                Switch::new("sub-no-local")
+                                    .checked(sub_no_local)
+                                    .accessibility_label(i18n::t("sub.no_local"))
+                                    .on_change(cx.listener(|this, v, _, cx| {
                                         this.sub_no_local = *v;
                                         cx.notify();
-                                    }),
-                                ))
-                                .child(div().text_xs().child(i18n::t("sub.no_local"))),
-                        )
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .pt_4()
-                                .child(Switch::new("sub-rap").checked(sub_rap).on_change(
-                                    cx.listener(|this, v, _, cx| {
+                                    })),
+                            )
+                            .child(div().text_xs().child(i18n::t("sub.no_local"))),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .pt_4()
+                            .child(
+                                Switch::new("sub-rap")
+                                    .checked(sub_rap)
+                                    .accessibility_label(i18n::t("sub.rap"))
+                                    .on_change(cx.listener(|this, v, _, cx| {
                                         this.sub_rap = *v;
                                         cx.notify();
-                                    }),
-                                ))
-                                .child(div().text_xs().child(i18n::t("sub.rap"))),
-                        )
-                        .child(div().w(px(150.)).child(field(
-                            i18n::t("sub.retain_handling"),
-                            Select::new(&sub_retain_handling).small(),
-                        ))),
-                );
+                                    })),
+                            )
+                            .child(div().text_xs().child(i18n::t("sub.rap"))),
+                    )
+                    .child(div().w(px(150.)).child(field(
+                        i18n::t("sub.retain_handling"),
+                        named_select(&sub_retain_handling, i18n::t("sub.retain_handling")).small(),
+                    ))),
+            );
         }
         bar
     }

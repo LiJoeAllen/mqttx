@@ -122,6 +122,21 @@ pub fn refresh_textarea_placeholder<C: gpui_kit::AppContext>(
     state.update(cx, |s, cx| s.set_placeholder(text, window, cx));
 }
 
+/// 带可访问名称的下拉包装。
+///
+/// Select 自身不显示文字标签，直接 `Select::new` 渲染出的 UIA 名称是空的，
+/// 屏幕阅读器只报「组合框」而不报它是干什么的。label 由调用方传**已翻译**
+/// 文案（`i18n::t("pub.qos")`），这样语言包覆盖率测试能扫到这些 key。
+pub fn named_select<D: SearchableListDelegate>(
+    state: &Entity<SelectState<D>>,
+    label: impl Into<SharedString>,
+) -> Select<D>
+where
+    <D::Item as SearchableListItem>::Value: PartialEq + Clone,
+{
+    Select::new(state).accessibility_label(label)
+}
+
 // ─── 字段行 ──────────────────────────────────────────────────────────────────
 
 /// Select::new 的包装，统一外观。

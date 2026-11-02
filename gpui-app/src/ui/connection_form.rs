@@ -9,7 +9,7 @@ use crate::ui::i18n;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
@@ -24,7 +24,7 @@ use gpui_kit::{
 
 use crate::model::{ConnectionConfig, LastWill, ProtocolVersion, SslConfig, TransportKind};
 use crate::mqtt::MqttEngine;
-use crate::ui::widgets::{OptionDelegate, field, field_ex, make_select};
+use crate::ui::widgets::{OptionDelegate, field, field_ex, make_select, named_select};
 
 fn protocol_labels() -> [&'static str; 2] {
     ["MQTT 5.0", "MQTT 3.1.1"]
@@ -830,22 +830,26 @@ impl ConnectionForm {
         h_flex()
             .justify_between()
             .child(div().text_sm().child(label))
-            .child(Switch::new(id).checked(checked).on_change(cx.listener(
-                move |this, v, _, cx| {
-                    let v = *v;
-                    match id {
-                        "clean_start" => this.clean_start = v,
-                        "auto_resubscribe" => this.auto_resubscribe = v,
-                        "auto_connect" => this.auto_connect = v,
-                        "auto_reconnect" => this.auto_reconnect = v,
-                        "will_enabled" => this.will_enabled = v,
-                        "will_retain" => this.will_retain = v,
-                        "ssl_ignore_ca" => this.ssl_ignore_ca = v,
-                        _ => {}
-                    }
-                    cx.notify();
-                },
-            )))
+            // 开关本体在 UIA 里是个无名按钮，复用行标签作为可访问名称
+            .child(
+                Switch::new(id)
+                    .checked(checked)
+                    .accessibility_label(label)
+                    .on_change(cx.listener(move |this, v, _, cx| {
+                        let v = *v;
+                        match id {
+                            "clean_start" => this.clean_start = v,
+                            "auto_resubscribe" => this.auto_resubscribe = v,
+                            "auto_connect" => this.auto_connect = v,
+                            "auto_reconnect" => this.auto_reconnect = v,
+                            "will_enabled" => this.will_enabled = v,
+                            "will_retain" => this.will_retain = v,
+                            "ssl_ignore_ca" => this.ssl_ignore_ca = v,
+                            _ => {}
+                        }
+                        cx.notify();
+                    })),
+            )
     }
 
     /// 可折叠分组：点击标题行切换展开/收起，收起时不渲染内容。
@@ -999,11 +1003,11 @@ impl Render for ConnectionForm {
                             )))
                             .child(div().flex_1().min_w(px(0.)).child(field(
                                 i18n::t("form.protocol"),
-                                Select::new(&self.protocol),
+                                named_select(&self.protocol, i18n::t("form.protocol")),
                             )))
                             .child(div().flex_1().min_w(px(0.)).child(field(
                                 i18n::t("form.transport"),
-                                Select::new(&self.transport),
+                                named_select(&self.transport, i18n::t("form.transport")),
                             ))),
                     )
                     .child(
@@ -1012,7 +1016,7 @@ impl Render for ConnectionForm {
                             .w_full()
                             .child(div().flex_1().min_w(px(0.)).child(field(
                                 i18n::t("form.group"),
-                                Select::new(&self.group_select),
+                                named_select(&self.group_select, i18n::t("form.group")),
                             )))
                             .child(div().flex_1().min_w(px(0.)).child(field(
                                 i18n::t("form.new_group"),
@@ -1262,11 +1266,10 @@ impl Render for ConnectionForm {
                                         err("will_topic"),
                                         danger,
                                     )))
-                                    .child(
-                                        div()
-                                            .w(px(130.))
-                                            .child(field("QoS", Select::new(&self.will_qos))),
-                                    ),
+                                    .child(div().w(px(130.)).child(field(
+                                        "QoS",
+                                        named_select(&self.will_qos, i18n::t("pub.qos")),
+                                    ))),
                             )
                             .child(field(
                                 i18n::t("form.will_payload"),

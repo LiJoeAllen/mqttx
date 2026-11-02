@@ -6,7 +6,7 @@ use crate::ui::i18n;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex,
@@ -20,7 +20,7 @@ use gpui_kit::{
 
 use crate::model::{PayloadFormat, PublishParams, PublishPreset};
 use crate::ui::app::MqttXApp;
-use crate::ui::widgets::{KvEditor, OptionDelegate, field, make_select};
+use crate::ui::widgets::{KvEditor, OptionDelegate, field, make_select, named_select};
 
 const QOS: [&str; 3] = ["QoS 0", "QoS 1", "QoS 2"];
 const PAYLOAD_FORMATS: [&str; 4] = ["Plaintext", "JSON", "Base64", "Hex"];
@@ -473,28 +473,33 @@ impl Render for PresetsDialog {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(
-                        div()
-                            .w(px(110.))
-                            .child(field("QoS", Select::new(&self.qos).small())),
-                    )
+                    .child(div().w(px(110.)).child(field(
+                        "QoS",
+                        named_select(&self.qos, i18n::t("pub.qos")).small(),
+                    )))
                     .child(
                         h_flex()
                             .gap_1()
                             .items_center()
                             .pt_4()
-                            .child(Switch::new("preset-retain").checked(retain).on_change(
-                                cx.listener(|this, v, _, cx| {
-                                    this.retain = *v;
-                                    cx.notify();
-                                }),
-                            ))
+                            .child(
+                                Switch::new("preset-retain")
+                                    .checked(retain)
+                                    .accessibility_label("Retain")
+                                    .on_change(cx.listener(|this, v, _, cx| {
+                                        this.retain = *v;
+                                        cx.notify();
+                                    })),
+                            )
                             .child(div().text_xs().child("Retain")),
                     )
-                    .child(div().flex_1().min_w(px(0.)).child(field(
-                        i18n::t("preset.payload_format"),
-                        Select::new(&self.payload_format).small(),
-                    ))),
+                    .child(
+                        div().flex_1().min_w(px(0.)).child(field(
+                            i18n::t("preset.payload_format"),
+                            named_select(&self.payload_format, i18n::t("preset.payload_format"))
+                                .small(),
+                        )),
+                    ),
             )
             .child(div().h(px(1.)).bg(cx.theme().border).w_full())
             .child(
