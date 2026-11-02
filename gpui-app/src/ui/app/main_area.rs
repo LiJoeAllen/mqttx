@@ -80,6 +80,9 @@ impl MqttXApp {
                             .icon(IconName::Close)
                             .ghost()
                             .xsmall()
+                            // 图标按钮必须有可访问名称，否则屏幕阅读器只读到空
+                            .tooltip(i18n::t("tab.close"))
+                            .accessibility_label(i18n::t("tab.close"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.close_tab(&close_id, cx);
                             })),

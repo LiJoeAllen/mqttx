@@ -383,6 +383,8 @@ impl MqttXApp {
             .icon(IconName::Ellipsis)
             .ghost()
             .xsmall()
+            .tooltip(i18n::t("sidebar.conn_menu"))
+            .accessibility_label(i18n::t("sidebar.conn_menu"))
             .dropdown_menu(move |menu, _, _| {
                 let (e1, e2, e3) = (eid.clone(), eid.clone(), eid.clone());
                 let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());

@@ -100,6 +100,8 @@ impl Render for KvEditor {
                             .icon(IconName::Close)
                             .ghost()
                             .xsmall()
+                            .tooltip(crate::ui::i18n::t("kv.delete_row"))
+                            .accessibility_label(crate::ui::i18n::t("kv.delete_row"))
                             .disabled(count <= 1)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if this.rows.len() > 1 {

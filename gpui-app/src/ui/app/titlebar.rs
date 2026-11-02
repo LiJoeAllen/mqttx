@@ -108,6 +108,8 @@ impl MqttXApp {
                                 .icon(IconName::Ellipsis)
                                 .ghost()
                                 .small()
+                                .tooltip(i18n::t("titlebar.more_menu"))
+                                .accessibility_label(i18n::t("titlebar.more_menu"))
                                 .dropdown_menu(move |menu, _, _| {
                                     let w1 = app_weak.clone();
                                     let w2 = app_weak.clone();
