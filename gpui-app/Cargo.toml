@@ -1,6 +1,6 @@
 [package]
 name = "mqttx-desktop"
-version = "1.2.1"
+version = "1.2.2"
 edition.workspace = true
 description = "MQTT X —— 基于 GPUI 的跨平台 MQTT 调试客户端"
 license = "Apache-2.0"
@@ -11,7 +11,7 @@ name = "mqttx"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.7"
+gpui-kit = "0.10"
 
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
@@ -43,7 +43,7 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 rustls-native-certs = "0.8"
 
 # 原生文件对话框（连接导入/导出）；Windows 走内建 COM 后端，Linux 用默认 xdg-portal
-rfd = "0.17"
+rfd = "0.18"
 
 # OTA 自更新：GitHub Release 检查/下载（ureq 用 rustls，与 rumqttc 依赖同源；
 # win-system-proxy 使 Windows 系统代理注册表设置自动生效，环境变量代理本就默认支持）

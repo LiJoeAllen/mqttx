@@ -35,7 +35,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| UI | GPUI 0.3 + gpui-kit（gpui-component / gpui-base）0.7 |
+| UI | GPUI 0.3 + gpui-kit（gpui-component / gpui-base）0.10 |
 | MQTT | rumqttc-v5-next 0.34 / rumqttc-v4-next 0.34（TCP/TLS/WS） |
 | 异步 | 引擎跑在独立 tokio runtime，事件经 smol channel 泵回 UI 线程 |
 | 持久化 | serde + serde_json，原子写（临时文件 + rename） |

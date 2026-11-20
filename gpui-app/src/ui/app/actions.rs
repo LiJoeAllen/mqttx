@@ -92,7 +92,7 @@ impl MqttXApp {
     }
 
     pub fn open_tab(&mut self, conn_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.open_tabs.contains(&conn_id.to_string()) {
+        if !self.open_tabs.iter().any(|t| t == conn_id) {
             self.open_tabs.push(conn_id.to_string());
             let weak = cx.entity().downgrade();
             let engine = self.engine.clone();

@@ -412,7 +412,7 @@ mod tests {
             "覆盖前应备份损坏文件，实际文件: {names:?}"
         );
         assert!(
-            names.contains(&"connections.json".to_string()),
+            names.iter().any(|n| n == "connections.json"),
             "新文件应已写入"
         );
         // 备份内容仍是损坏原文，可人工抢救
